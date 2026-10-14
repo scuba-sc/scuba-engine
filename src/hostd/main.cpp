@@ -9,6 +9,8 @@
 #include "hostd/kernel.h"
 #include "hostd/modules.h"
 #include "hostd/server.h"
+#include "hostd/net_sim/broker.h"
+#include "hostd/net_sim/peer.h"
 
 #include <chrono>
 #include <csignal>
@@ -55,6 +57,7 @@ int Usage() {
 
 int main(int argc, char** argv) {
     using namespace scuba::hostd;
+    if (argc == 2 && std::strcmp(argv[1], "--net-peer") == 0) return net_sim::PeerMain();
 
     ServerOptions serverOptions;
     serverOptions.staticDir = SCUBA_DEFAULT_STUDIO_DIR;
@@ -110,6 +113,7 @@ int main(int argc, char** argv) {
     host.pluginRoot = kernelOptions.pluginRoot.string();
     if (testShutdown) host.requestShutdown = [&stopRequested] { stopRequested = true; };
     RegisterAllModules(registry, host);
+    net_sim::RegisterNetSim(registry, broadcaster, argv[0]);
 
     if (!kernel.Start(kernelOptions, KernelLog)) {
         std::fprintf(stderr, "scuba-hostd: the sco-core host kernel did not start\n");

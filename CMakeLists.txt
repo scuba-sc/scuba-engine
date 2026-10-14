@@ -93,18 +93,26 @@ target_link_libraries(scuba_assets PUBLIC scuba_bridge sco_datacore)
 scuba_warnings(scuba_assets)
 
 # ---- scuba-hostd: the bridge plus the sco-core host kernel booted in-process ---------------------
+add_library(scuba_net_sim STATIC
+  src/hostd/net_sim/process.cpp
+  src/hostd/net_sim/broker.cpp)
+target_link_libraries(scuba_net_sim PUBLIC scuba_bridge)
+scuba_warnings(scuba_net_sim)
+
 add_executable(scuba-hostd
   src/hostd/main.cpp
   src/hostd/kernel.cpp
   src/hostd/modules.cpp
   src/hostd/system_handlers.cpp
   src/hostd/widgets_bridge.cpp
-  src/hostd/widgets_handlers.cpp)
+  src/hostd/widgets_handlers.cpp
+  src/hostd/net_sim/peer.cpp
+  src/hostd/net_sim/probe_plugin.cpp)
 # sco_app is the host kit; it links the kernel libraries transitively (sco_host, sco_runtime,
 # sco_plugins, sco_widgets, sco_ui, sco_storage, sco_settings, sco_content, sco_ipc,
 # sco_net_service -> sco_net, sco_datacore_service -> sco_datacore -> sco_vfs). Lua is separate:
 # sco_lua_game links sco_lua.
-target_link_libraries(scuba-hostd PRIVATE scuba_mock_game scuba_assets sco_lua_game)
+target_link_libraries(scuba-hostd PRIVATE scuba_mock_game scuba_assets scuba_net_sim sco_lua_game)
 target_compile_definitions(scuba-hostd PRIVATE
   SCUBA_VERSION="${PROJECT_VERSION}"
   SCUBA_SDK_VERSION="${SCUBA_SDK_VERSION}"

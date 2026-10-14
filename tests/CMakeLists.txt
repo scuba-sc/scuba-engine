@@ -83,3 +83,11 @@ add_test(NAME assets_pack_check COMMAND sco-dcb check
   "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures/tiny.dcb"
   "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures/imported-pack")
 set_tests_properties(assets_pack_lint assets_pack_check PROPERTIES DEPENDS test_assets TIMEOUT 60)
+add_executable(test_net_sim test_net_sim.cpp)
+target_link_libraries(test_net_sim PRIVATE scuba_net_sim)
+scuba_warnings(test_net_sim)
+add_dependencies(test_net_sim scuba-hostd)
+add_test(NAME netsim_two_peer_delivery COMMAND test_net_sim $<TARGET_FILE:scuba-hostd> delivery)
+add_test(NAME netsim_four_peer_join_leave COMMAND test_net_sim $<TARGET_FILE:scuba-hostd> membership)
+add_test(NAME netsim_eight_peer_bounds COMMAND test_net_sim $<TARGET_FILE:scuba-hostd> bounds)
+set_tests_properties(netsim_two_peer_delivery netsim_four_peer_join_leave netsim_eight_peer_bounds PROPERTIES TIMEOUT 120)
