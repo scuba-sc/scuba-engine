@@ -47,6 +47,36 @@ if(WIN32)
 endif()
 scuba_warnings(scuba_bridge)
 
+add_library(scuba_mock_game STATIC
+  src/hostd/mock_game/common.cpp
+  src/hostd/mock_game/mock_game.cpp
+  src/hostd/mock_game/actors.cpp
+  src/hostd/mock_game/creative.cpp
+  src/hostd/mock_game/cvars.cpp
+  src/hostd/mock_game/cvars_write.cpp
+  src/hostd/mock_game/economy.cpp
+  src/hostd/mock_game/entities.cpp
+  src/hostd/mock_game/events.cpp
+  src/hostd/mock_game/game_spatial.cpp
+  src/hostd/mock_game/hangar.cpp
+  src/hostd/mock_game/loadout.cpp
+  src/hostd/mock_game/mining.cpp
+  src/hostd/mock_game/missions.cpp
+  src/hostd/mock_game/owned.cpp
+  src/hostd/mock_game/prefabs.cpp
+  src/hostd/mock_game/private_session.cpp
+  src/hostd/mock_game/quantum.cpp
+  src/hostd/mock_game/relocation.cpp
+  src/hostd/mock_game/reputation.cpp
+  src/hostd/mock_game/vehicles.cpp
+  src/hostd/mock_game/world.cpp
+  src/hostd/mock_game/world_control.cpp
+  src/hostd/mock_game/spawn.cpp
+  src/hostd/mock_game/teleport_spatial.cpp
+  src/hostd/mock_game/handlers.cpp)
+target_link_libraries(scuba_mock_game PUBLIC scuba_bridge sco_app)
+scuba_warnings(scuba_mock_game)
+
 # ---- scuba-hostd: the bridge plus the sco-core host kernel booted in-process ---------------------
 add_executable(scuba-hostd
   src/hostd/main.cpp
@@ -57,7 +87,7 @@ add_executable(scuba-hostd
 # sco_plugins, sco_widgets, sco_ui, sco_storage, sco_settings, sco_content, sco_ipc,
 # sco_net_service -> sco_net, sco_datacore_service -> sco_datacore -> sco_vfs). Lua is separate:
 # sco_lua_game links sco_lua.
-target_link_libraries(scuba-hostd PRIVATE scuba_bridge sco_app sco_lua_game)
+target_link_libraries(scuba-hostd PRIVATE scuba_mock_game sco_lua_game)
 target_compile_definitions(scuba-hostd PRIVATE
   SCUBA_VERSION="${PROJECT_VERSION}"
   SCUBA_SDK_VERSION="${SCUBA_SDK_VERSION}"

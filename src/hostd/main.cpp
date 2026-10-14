@@ -38,7 +38,7 @@ void KernelLog(const char* line) {
 int Usage() {
     std::fprintf(stderr,
                  "usage: scuba-hostd [--port N] [--bind ADDR] [--studio DIR] [--plugins DIR] [--data DIR]\n"
-                 "                   [--allow-origin ORIGIN]... [--no-lua] [--test-shutdown]\n"
+                 "                   [--allow-origin ORIGIN]... [--no-lua] [--no-mock-game] [--test-shutdown]\n"
                  "  --port N             listen port (default 7878; 0 picks a free port)\n"
                  "  --bind ADDR          IPv4 address to bind (default 127.0.0.1)\n"
                  "  --studio DIR         built studio to serve (default: the source tree's studio/dist)\n"
@@ -46,6 +46,7 @@ int Usage() {
                  "  --data DIR           data root (sco.storage databases)\n"
                  "  --allow-origin O     also accept WebSocket connections from origin O (e.g. http://localhost:5173)\n"
                  "  --no-lua             no Lua runtime: lua plugins are refused\n"
+                 "  --no-mock-game       do not publish synthetic game service tables\n"
                  "  --test-shutdown      enable the system.shutdown method (tests only)\n");
     return 2;
 }
@@ -80,6 +81,8 @@ int main(int argc, char** argv) {
             serverOptions.allowedOrigins.emplace_back(argv[++i]);
         } else if (!std::strcmp(a, "--no-lua")) {
             kernelOptions.lua = false;
+        } else if (!std::strcmp(a, "--no-mock-game")) {
+            kernelOptions.mockGame = false;
         } else if (!std::strcmp(a, "--test-shutdown")) {
             testShutdown = true;
         } else {

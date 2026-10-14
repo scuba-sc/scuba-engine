@@ -1,6 +1,6 @@
 #pragma once
 // The sco-core host kernel (sco::app) booted in-process, headless and without a game: no image,
-// no signatures, no game services. Plugins load from pluginRoot when it is set. All calls belong
+// no signatures, synthetic game services. Plugins load from pluginRoot when it is set. All calls belong
 // on the thread that called Start (it becomes the sco-core game thread).
 #include <cstdint>
 #include <filesystem>
@@ -13,6 +13,7 @@ struct KernelOptions {
     std::filesystem::path pluginRoot;   // empty: no plugin folders are discovered
     std::filesystem::path dataRoot;     // empty: no sco.storage
     bool lua = true;                    // false: lua plugins are refused "no script runtime"
+    bool mockGame = true;
 };
 
 struct KernelPluginInfo {
