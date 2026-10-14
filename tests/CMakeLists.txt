@@ -12,3 +12,15 @@ scuba_warnings(test_e2e)
 add_dependencies(test_e2e scuba-hostd)
 add_test(NAME e2e_hostd_ping COMMAND test_e2e $<TARGET_FILE:scuba-hostd>)
 set_tests_properties(e2e_hostd_ping PROPERTIES TIMEOUT 60)
+
+add_executable(test_assets test_assets.cpp)
+target_link_libraries(test_assets PRIVATE scuba_assets)
+scuba_warnings(test_assets)
+add_dependencies(test_assets sco-dcb)
+add_test(NAME test_assets COMMAND test_assets "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures")
+set_tests_properties(test_assets PROPERTIES TIMEOUT 60)
+add_test(NAME assets_pack_lint COMMAND sco-dcb lint "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures/export.toml")
+add_test(NAME assets_pack_check COMMAND sco-dcb check
+  "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures/tiny.dcb"
+  "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures/imported-pack")
+set_tests_properties(assets_pack_lint assets_pack_check PROPERTIES DEPENDS test_assets TIMEOUT 60)

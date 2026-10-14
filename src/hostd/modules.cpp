@@ -4,6 +4,7 @@ namespace scuba::hostd {
 
 void RegisterAllModules(Registry& registry, HostContext& host) {
     RegisterSystemHandlers(registry, host);
+    RegisterAssetsHandlers(registry, host);
 }
 
 }  // namespace scuba::hostd

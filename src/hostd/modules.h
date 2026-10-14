@@ -24,6 +24,7 @@ struct HostContext {
 };
 
 void RegisterSystemHandlers(Registry& registry, HostContext& host);
+void RegisterAssetsHandlers(Registry& registry, HostContext& host);
 
 void RegisterAllModules(Registry& registry, HostContext& host);
 
