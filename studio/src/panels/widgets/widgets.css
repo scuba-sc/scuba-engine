@@ -1,0 +1,161 @@
+.widgets {
+  padding: 1rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.widgets-status:empty {
+  display: none;
+}
+
+.widgets-panels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.w-panel {
+  border: 1px solid #263040;
+  border-radius: 8px;
+  background: #111823;
+  min-width: 18rem;
+  max-width: 32rem;
+}
+
+.w-panel-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #263040;
+}
+
+.w-panel-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.w-panel-meta {
+  font-size: 0.75rem;
+  color: #8b96a8;
+}
+
+.w-panel-body {
+  padding: 0.75rem;
+}
+
+.w-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.w-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.w-toggle,
+.w-slider,
+.w-combo,
+.w-text_input {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.w-value {
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+}
+
+.w-list ul {
+  list-style: none;
+  margin: 0.25rem 0;
+  padding: 0;
+  border: 1px solid #263040;
+  border-radius: 6px;
+}
+
+.w-list li {
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+}
+
+.w-list li.w-selected {
+  background: #16263a;
+  outline: 1px solid #2a9df4;
+}
+
+.w-list ul[aria-disabled='true'] li {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.w-table table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.w-table caption {
+  text-align: left;
+  padding-bottom: 0.25rem;
+}
+
+.w-table td {
+  border: 1px solid #263040;
+  padding: 0.2rem 0.5rem;
+}
+
+.w-pager {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.w-badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 0 0.3rem;
+}
+
+.w-sev-info.w-badge {
+  background: #16304a;
+  color: #8ccaff;
+}
+
+.w-sev-warning.w-badge {
+  background: #3d3214;
+  color: #e5b567;
+}
+
+.w-sev-error.w-badge {
+  background: #451c1c;
+  color: #ff8f8f;
+}
+
+.w-node.w-sev-warning:not(.w-badge) {
+  border-left: 3px solid #e5b567;
+  padding-left: 0.4rem;
+}
+
+.w-node.w-sev-error:not(.w-badge) {
+  border-left: 3px solid #ff8f8f;
+  padding-left: 0.4rem;
+}
+
+.w-node.w-sev-info:not(.w-badge) {
+  border-left: 3px solid #8ccaff;
+  padding-left: 0.4rem;
+}
+
+.w-unsupported {
+  color: #ff8f8f;
+}

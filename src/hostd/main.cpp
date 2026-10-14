@@ -130,7 +130,9 @@ int main(int argc, char** argv) {
     while (!g_stopSignal && !stopRequested) {
         server.Poll(16);
         const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
-        kernel.Tick(static_cast<uint32_t>(static_cast<uint64_t>(elapsed.count())));
+        const auto nowMs = static_cast<uint32_t>(static_cast<uint64_t>(elapsed.count()));
+        kernel.Tick(nowMs);
+        for (const auto& hook : host.tickHooks) hook(nowMs);
     }
     server.Poll(0);
 

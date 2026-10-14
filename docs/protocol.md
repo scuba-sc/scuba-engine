@@ -74,3 +74,75 @@ Binding a non-loopback address (`--bind`) exposes the unauthenticated bridge to 
 - One message (after reassembly of fragments) is at most 16 MiB; larger closes with 1009.
 - Control frames follow RFC 6455 (ping is answered with pong; close is echoed).
 - No extensions (no permessage-deflate) and no subprotocols are negotiated.
+
+## Widgets (`widgets.*`, `src/hostd/widgets_bridge.{h,cpp}`)
+
+`scuba-hostd` renders sco-core's renderer-neutral panels (the `sco.widgets` 1.0/1.1 host
+service, `include/sco/widgets.h`) through `StudioWidgetRenderer`, a `sco::widgets::Renderer`.
+Every 50 ms on the game thread it calls `sco::widgets::RenderPanel` for each live panel and
+publishes a panel again only when its snapshot was rebuilt (`sco::widgets::SnapshotBuilds()`
+advanced). Studio events go back through the same `RenderPanel` call, so sco-core validates them
+and calls the owning plugin exactly as an in-game renderer would.
+
+### Panel snapshot
+
+```json
+{"id": "widgets.main", "title": "Widgets", "owner": "widgets", "revision": 7, "extended": false,
+ "nodes": [{"id": 6, "parent": 1, "kind": "slider", "kind_code": 4, "disabled": false,
+            "password": false, "label": "Amount", "text": "", "value": 0.5, "minimum": 0,
+            "maximum": 1, "index": 0, "items": [], "columns": 0, "extended": false,
+            "severity": "none", "tooltip": "", "first_row": 0, "visible_rows": 0}]}
+```
+
+- `nodes` is sco-core's preorder tree: `parent` 0 is the root, otherwise a preceding `row` or
+  `column` node.
+- `kind` is one of `label`, `button`, `toggle`, `slider`, `combo`, `list`, `text_input`,
+  `table`, `row` or `column`.
+- Every field is always present; fields that don't apply to a node's kind are zero or empty.
+  `items` holds combo/list options, or the row-major cells of a `table` with `columns` columns.
+- The 1.1 node extension: `extended` is true when the plugin submitted a `sco_widget_node_1_1`.
+  `severity` is `none`, `info`, `warning` or `error`, and `tooltip` is plain text.
+- Paging (1.1, `list` and `table` only): when `visible_rows` > 0, show `visible_rows` rows
+  starting at `first_row`.
+- `revision` increases with every snapshot the bridge publishes, across all panels.
+- A `text_input` flagged `password` is sent with `text` empty. The plaintext stays in the host.
+
+### Methods
+
+| Method | Params | Result |
+|---|---|---|
+| `widgets.list` | none | `{"started": bool, "capabilities": {"service": "sco.widgets", "version": "1.1", "features": [...], "limits": {"max_panels", "max_nodes", "max_total_nodes", "max_items", "max_columns", "max_text", "max_events"}, "events": [...]}, "panels": [snapshot...]}` |
+| `widgets.get` | `{"id": string}` | one snapshot |
+| `widgets.event` | `{"panel": string, "node_id": int, "kind": string, ...payload}` | `{"result": "OK", "revision": number}` |
+
+`widgets.event` takes one event `kind`, and each kind requires exactly its own payload:
+
+| `kind` | Payload |
+|---|---|
+| `button` | none |
+| `toggle` | `value`: 0 or 1 |
+| `slider` | `value`, within `[minimum, maximum]` |
+| `combo`, `list` | `index`: -1 or an item index |
+| `text_input` | `text`: at most 255 bytes |
+| `page` | `row`: the new first visible row of a paged list or table |
+
+The plugin's callback runs before the response is sent. The response's `result` is sco-core's
+`ResultName` for the dispatching render (`OK`, `CRASHED`, ...). A non-button event changes the
+host-held value, so a `widgets.snapshot` event follows.
+
+Errors:
+
+- -32602: malformed params, a kind that doesn't match the node, a value out of range, or a
+  disabled node.
+- -32010: no such panel or node.
+- -32001: `sco.widgets` is not running.
+
+sco-core validates the event again and silently drops what it refuses. For example, an event under
+a disabled `row` is dropped, because the bridge does not check ancestors.
+
+### Events
+
+| Event | Data |
+|---|---|
+| `widgets.snapshot` | one panel snapshot (a new panel, or a changed one) |
+| `widgets.removed` | `{"id": string}`: the panel is gone (removed, or its plugin unloaded) |
