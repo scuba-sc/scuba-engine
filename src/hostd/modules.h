@@ -31,6 +31,7 @@ void RegisterSystemHandlers(Registry& registry, HostContext& host);
 void RegisterWidgetsHandlers(Registry& registry, HostContext& host);
 void RegisterMockGameHandlers(Registry& registry, HostContext& host);
 void RegisterAssetsHandlers(Registry& registry, HostContext& host);
+void RegisterPluginHandlers(Registry& registry, HostContext& host);
 
 void RegisterAllModules(Registry& registry, HostContext& host);
 

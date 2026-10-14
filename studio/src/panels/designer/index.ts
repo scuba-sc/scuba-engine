@@ -6,6 +6,10 @@ import * as cpp from '../../codegen/cpp';
 import * as csharp from '../../codegen/csharp';
 import * as lua from '../../codegen/lua';
 import * as c from '../../codegen/c';
+import { toDom } from '../widgets/dom';
+import { renderPanelView } from '../widgets/view';
+import { applyPreviewEvent, designSnapshot } from './preview';
+import '../widgets/widgets.css';
 
 export const generators = { cpp, csharp, lua, c };
 const languages = [
@@ -162,75 +166,24 @@ export const designerPanel: PanelModule = {
       stage.querySelector('.designer-stage')?.remove();
       const body = element('div', '', 'designer-stage');
       body.append(element('p', `${flatten(design.nodes).length} nodes / synthetic preview`, 'designer-badge'));
-      const preview = element('div', '', 'designer-preview');
-      preview.append(element('div', design.title, 'designer-preview-title'));
-      const renderNode = (n: Widget, ancestorDisabled: boolean): HTMLElement => {
-        const item = element('div', '', 'designer-node');
-        item.dataset.key = n.key;
-        item.dataset.kind = n.kind;
-        item.dataset.selected = String(n.key === selected);
-        item.dataset.severity = String(n.severity);
-        if (n.tooltip) item.title = n.tooltip;
+      const preview = toDom(renderPanelView(designSnapshot(design)), document, event => {
+        update(() => applyPreviewEvent(design, event));
+        if (event.kind === 'button') message('Preview button activated');
+      });
+      preview.classList.add('designer-preview');
+      for (const row of flatten(design.nodes)) {
+        const item = preview.querySelector<HTMLElement>(`[data-node-id="${row.id}"]`);
+        if (!item) continue;
+        item.classList.add('designer-node');
+        item.dataset.key = row.node.key;
+        item.dataset.kind = row.node.kind;
+        item.dataset.selected = String(row.node.key === selected);
         item.addEventListener('click', event => {
-          event.stopPropagation(); selected = n.key; renderOutline(); renderInspector();
+          event.stopPropagation(); selected = row.node.key; renderOutline(); renderInspector();
           for (const visible of stage.querySelectorAll<HTMLElement>('.designer-node'))
             visible.dataset.selected = String(visible.dataset.key === selected);
         });
-        const disabled = ancestorDisabled || n.disabled;
-        if (isContainer(n)) {
-          if (!n.children.length) item.append(element('span', `Empty ${n.kind} / insert a widget`, 'designer-muted'));
-          n.children.forEach(child => item.append(renderNode(child, disabled)));
-        } else if (n.kind === 'Label') item.append(element('span', n.label));
-        else if (n.kind === 'Button') {
-          const b = button(n.label, () => message(`Preview click / ${n.label}`)); b.disabled = disabled; item.append(b);
-        } else if (n.kind === 'Toggle') {
-          const label = element('label', '', 'designer-field');
-          const input = element('input'); input.type = 'checkbox'; input.checked = n.value === 1; input.disabled = disabled;
-          input.addEventListener('change', () => update(() => { n.value = input.checked ? 1 : 0; }));
-          label.append(element('span', n.label), input); item.append(label);
-        } else if (n.kind === 'Slider') {
-          const label = element('label', '', 'designer-field');
-          const input = element('input'); input.type = 'range'; input.min = String(n.minimum);
-          input.max = String(n.maximum); input.step = 'any'; input.value = String(n.value); input.disabled = disabled;
-          input.addEventListener('change', () => update(() => { n.value = Number(input.value); }));
-          label.append(element('span', `${n.label} / ${n.value}`), input); item.append(label);
-        } else if (n.kind === 'TextInput') {
-          const input = field(n.label, n.text, value => { remember(); n.text = value; renderSource(); }, n.password ? 'password' : 'text');
-          input.querySelector('input')!.disabled = disabled; item.append(input);
-        } else if (n.kind === 'Combo') {
-          const input = select(n.label, [{ value: '-1', label: '(none)' }, ...n.items.map((label, i) => ({ value: String(i), label }))],
-            String(n.index), value => update(() => { n.index = Number(value); }));
-          input.querySelector('select')!.disabled = disabled; item.append(input);
-        } else {
-          item.append(element('span', n.label, 'designer-muted'));
-          const count = n.kind === 'Table' ? n.items.length / n.columns : n.items.length;
-          const start = n.visibleRows ? n.firstRow : 0;
-          const end = n.visibleRows ? Math.min(count, start + n.visibleRows) : count;
-          if (n.kind === 'Table') {
-            const table = element('table'); table.setAttribute('aria-label', n.label || 'Table');
-            const tbody = element('tbody');
-            for (let i = start; i < end; i++) {
-              const tr = element('tr');
-              for (let j = 0; j < n.columns; j++) tr.append(element('td', n.items[i * n.columns + j]));
-              tbody.append(tr);
-            }
-            table.append(tbody); item.append(table);
-          } else for (let i = start; i < end; i++) {
-            const b = button(n.items[i], () => update(() => { n.index = i; }), 'designer-list-item');
-            b.setAttribute('aria-pressed', String(i === n.index)); b.disabled = disabled; item.append(b);
-          }
-          if (n.visibleRows) {
-            const paging = element('div', '', 'designer-actions');
-            const previous = button('Previous', () => update(() => { n.firstRow = Math.max(0, start - n.visibleRows); }));
-            const next = button('Next', () => update(() => { n.firstRow = start + n.visibleRows; }));
-            previous.disabled = disabled || start === 0; next.disabled = disabled || end >= count;
-            paging.append(previous, next, element('span', `${start + 1}-${end} / ${count}`, 'designer-badge'));
-            item.append(paging);
-          }
-        }
-        return item;
-      };
-      design.nodes.forEach(n => preview.append(renderNode(n, false)));
+      }
       body.append(preview); stage.append(body);
     }
     function renderInspector() {

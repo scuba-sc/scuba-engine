@@ -42,3 +42,20 @@ add_subdirectory(mp_chat)
 add_subdirectory(org_social)
 add_subdirectory(diegetic_asop)
 add_subdirectory(diegetic_shop_inv)
+
+set(SCUBA_PLUGIN_ROOT "${CMAKE_CURRENT_BINARY_DIR}/runtime")
+add_custom_target(scuba_plugins ALL)
+foreach(plugin mp_chat org_social diegetic_asop diegetic_shop_inv)
+  add_custom_command(TARGET scuba_plugins POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${SCUBA_PLUGIN_ROOT}/${plugin}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+      "$<TARGET_FILE:${plugin}>" "${SCUBA_PLUGIN_ROOT}/${plugin}/"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/${plugin}/plugin.ini"
+      "${SCUBA_PLUGIN_ROOT}/${plugin}/plugin.ini")
+  add_dependencies(scuba_plugins ${plugin})
+endforeach()
+if(TARGET scuba-hostd)
+  add_dependencies(scuba-hostd scuba_plugins)
+  target_compile_definitions(scuba-hostd PRIVATE SCUBA_DEFAULT_PLUGIN_DIR="${SCUBA_PLUGIN_ROOT}")
+endif()

@@ -44,7 +44,7 @@ int Usage() {
                  "  --port N             listen port (default 7878; 0 picks a free port)\n"
                  "  --bind ADDR          IPv4 address to bind (default 127.0.0.1)\n"
                  "  --studio DIR         built studio to serve (default: the source tree's studio/dist)\n"
-                 "  --plugins DIR        sco-core plugin root to load plugins from\n"
+                 "  --plugins DIR        plugin root (default: build-tree APP plugins)\n"
                  "  --data DIR           data root (sco.storage databases)\n"
                  "  --allow-origin O     also accept WebSocket connections from origin O (e.g. http://localhost:5173)\n"
                  "  --no-lua             no Lua runtime: lua plugins are refused\n"
@@ -62,6 +62,7 @@ int main(int argc, char** argv) {
     ServerOptions serverOptions;
     serverOptions.staticDir = SCUBA_DEFAULT_STUDIO_DIR;
     KernelOptions kernelOptions;
+    kernelOptions.pluginRoot = SCUBA_DEFAULT_PLUGIN_DIR;
     bool testShutdown = false;
 
     for (int i = 1; i < argc; ++i) {

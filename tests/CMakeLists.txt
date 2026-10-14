@@ -91,3 +91,9 @@ add_test(NAME netsim_two_peer_delivery COMMAND test_net_sim $<TARGET_FILE:scuba-
 add_test(NAME netsim_four_peer_join_leave COMMAND test_net_sim $<TARGET_FILE:scuba-hostd> membership)
 add_test(NAME netsim_eight_peer_bounds COMMAND test_net_sim $<TARGET_FILE:scuba-hostd> bounds)
 set_tests_properties(netsim_two_peer_delivery netsim_four_peer_join_leave netsim_eight_peer_bounds PROPERTIES TIMEOUT 120)
+
+find_program(SCUBA_NODE_EXECUTABLE node REQUIRED)
+add_test(NAME engine_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/integration-smoke.mjs" "$<TARGET_FILE:scuba-hostd>"
+  "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures" "${CMAKE_CURRENT_BINARY_DIR}/")
+set_tests_properties(engine_integration PROPERTIES DEPENDS test_assets TIMEOUT 90)

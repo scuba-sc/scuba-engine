@@ -264,7 +264,8 @@ void Exercise(uint16_t port) {
         const Json& p = plugins->at(i);
         std::printf("plugin %s: %s %s\n", p.find("folder")->as_string().c_str(), p.find("state")->as_string().c_str(),
                     p.find("reason")->as_string().c_str());
-        if (p.find("state")->as_string() == "loaded") ++loaded;
+        const std::string& id = p.find("id")->as_string();
+        if ((id == "widgets" || id == "widgets_lua") && p.find("state")->as_string() == "loaded") ++loaded;
     }
     CHECK(loaded == 2);
 

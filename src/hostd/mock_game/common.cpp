@@ -1,4 +1,5 @@
 #include "hostd/mock_game/common.h"
+#include "catalogue.h"
 
 #include "sco/caps.h"
 #include "sco/host.h"
@@ -72,6 +73,10 @@ void ResetScene() {
     s.items = { "MockHelmet_Basic", "MockArmor_Torso_Light", "MockArmor_Arms_Light", "MockArmor_Legs_Light",
                 "MockUndersuit_Basic", "MockBackpack_Small", "MockVisor_Tinted" };
     s.content = { "ObjectContainers/mock/crate_stack.socpak", "ObjectContainers/mock/outpost_small.socpak" };
+    for (const auto& item : shop::Catalogue()) {
+        if (item.itemClass) s.items.insert(item.itemClass);
+        if (item.prefabPath) s.content.insert(item.prefabPath);
+    }
 
     Entity player = MakeEntity(0x100, "MockPlayer_Avatar", 0x4, { 0, 0, 0 }, 0.6);
     player.actor = true;

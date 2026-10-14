@@ -42,6 +42,8 @@ selection provide keyboard equivalents to reordering. Form edits regenerate
 source immediately; code input parses immediately and commits only valid source.
 Errors use a live status region and never discard the last valid design.
 No decorative animation. Synthetic preview controls update model state.
+Preview uses the shared ENG-2 snapshot/VNode/DOM renderer, not a parallel
+widget implementation. Node selection retains the existing tonal wash.
 
 ## 8. Accepted limits
 This preview renders retained widget semantics, not an in-game renderer.

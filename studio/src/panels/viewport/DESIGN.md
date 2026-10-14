@@ -40,6 +40,13 @@ for billboards. Keyboard activation remains native HTML behavior.
 External surfaces mount into the same transformed element, including a
 DOM renderer for sco.widgets. An action reports local coordinates and count.
 Occlusion inserts a synthetic blocker and hides/disables the whole surface.
+The plugin-surface selector uses the same native select primitive and the
+ENG-2 renderer inside a scrollable 480 x 560 local-pixel surface. Snapshot
+events refresh it; widget input is dispatched through hostd. Follow mock
+camera is opt-in; its checkbox returns to orbit framing when unchecked.
+The SDK's z-up pose maps to the viewport's y-up frame. There is no live link.
+The shared shell wraps all six panel tabs on compact widths rather than
+letting the merged registry widen the document. Selection uses a tonal wash.
 
 ## Motion
 No ambient animation. Render on input and resize only; no reduced-motion

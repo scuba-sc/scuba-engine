@@ -33,6 +33,9 @@
 .vp-overlay { position: absolute; inset: 0; pointer-events: none; }
 .vp-surface { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: auto; }
 .vp-surface[hidden] { display: none; }
+.vp-plugin-surface { width: 100%; height: 100%; overflow: auto; background: var(--vp-raised); }
+.vp-plugin-surface .w-panel { min-width: 0; max-width: none; border: none; }
+.vp-plugin-surface .w-panel-header { flex-wrap: wrap; }
 .vp-stage-label { position: absolute; top: var(--vp-space-4); left: var(--vp-space-4); pointer-events: none; font-family: var(--vp-mono); font-size: var(--vp-caption); color: var(--vp-muted); letter-spacing: var(--vp-title-tracking); }
 .vp-readout { display: flex; flex-wrap: wrap; gap: var(--vp-space-3); border-top: var(--vp-line) solid var(--vp-border); font: var(--vp-small) var(--vp-mono); color: var(--vp-muted); }
 .vp-readout strong { color: var(--vp-success); font-weight: 400; }

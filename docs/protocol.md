@@ -49,7 +49,19 @@ disconnected before the answer, -3 client closed (`studio/src/bridge.ts`, `Clien
 `kernel.plugins[].state` is sco-core's `StateName` (`off`, `disabled`, `refused`, `ready`,
 `loaded`, `crashed`, `unloaded`, `faulted`).
 
-## Events (foundation)
+## Plugin commands (`plugins.invoke`)
+
+`plugins.invoke {name:string,args?:array}` calls a registered SDK command on the game thread.
+Result: `{result:string,reply:string}`, preserving the SDK result name (including refusals).
+Arguments must match the command's declared SDK types: JSON strings, booleans, finite numbers,
+or safe integers within +/-9007199254740991. Omitted `args` means an empty array.
+Malformed arguments return -32602; an unknown command returns -32601; a missing synchronous
+reply returns -32000. No shell, eval or source execution is involved.
+
+Example: `{"id":1,"method":"plugins.invoke","params":{"name":"diegetic_asop.find_lift","args":["272"]}}`.
+Widget panels for the APP plugins remain available through `widgets.list/get/event`.
+
+## Kernel events
 
 | Event | Data |
 |---|---|

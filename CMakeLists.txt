@@ -53,6 +53,7 @@ endif()
 scuba_warnings(scuba_bridge)
 
 add_library(scuba_mock_game STATIC
+  plugins/diegetic_shop_inv/src/catalogue.cpp
   src/hostd/mock_game/common.cpp
   src/hostd/mock_game/mock_game.cpp
   src/hostd/mock_game/actors.cpp
@@ -80,6 +81,8 @@ add_library(scuba_mock_game STATIC
   src/hostd/mock_game/teleport_spatial.cpp
   src/hostd/mock_game/handlers.cpp)
 target_link_libraries(scuba_mock_game PUBLIC scuba_bridge sco_app)
+target_include_directories(scuba_mock_game PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/plugins/diegetic_shop_inv/src")
 scuba_warnings(scuba_mock_game)
 add_library(scuba_assets STATIC
   src/assets/io.cpp
@@ -104,6 +107,7 @@ add_executable(scuba-hostd
   src/hostd/kernel.cpp
   src/hostd/modules.cpp
   src/hostd/system_handlers.cpp
+  src/hostd/plugins_handlers.cpp
   src/hostd/widgets_bridge.cpp
   src/hostd/widgets_handlers.cpp
   src/hostd/net_sim/peer.cpp

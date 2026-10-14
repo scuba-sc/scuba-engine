@@ -9,11 +9,14 @@ import { terminalPresets } from './presets';
 import { createEnvironment, disposeEnvironment } from './scene';
 import { element, terminalSurface } from './surface';
 import type { PanelSurface } from './surface';
+import type { HostdBridge } from '../../bridge';
+import { connectStage, type MockCamera } from './connection';
 import './viewport.css';
 
 export interface StageOptions {
   /** A DOM renderer can mount arbitrary HTML or sco.widgets into this surface. */
   readonly surface?: PanelSurface;
+  readonly bridge?: HostdBridge;
 }
 
 export function mountDiegeticStage(container: HTMLElement, options: StageOptions = {}): () => void {
@@ -73,9 +76,16 @@ export function mountDiegeticStage(container: HTMLElement, options: StageOptions
   let billboard: { center: Vec2; factor: number } | null = null;
   let pointer: Vec2 | null = null;
   let actionCount = 0;
+  let mockCamera: MockCamera | null = null;
+  let surfaceReady = false;
+  const connection = options.bridge ? connectStage(options.bridge, pose => {
+    mockCamera = pose;
+    if (surfaceReady) render();
+  }) : null;
+  if (connection) controls.append(connection.controls);
 
   function installSurface(): void {
-    surface = options.surface ?? terminalSurface(terminalPresets[state.preset], (action) => {
+    surface = options.surface ?? connection?.surface ?? terminalSurface(terminalPresets[state.preset], (action) => {
       actionCount++;
       const coordinates = pointer ? `${pointer[0].toFixed(1)}, ${pointer[1].toFixed(1)} px` : 'keyboard';
       inputReadout.textContent = `Input: ${action} / ${coordinates} / #${actionCount}`;
@@ -96,6 +106,7 @@ export function mountDiegeticStage(container: HTMLElement, options: StageOptions
     installSurface();
   }
   installSurface();
+  surfaceReady = true;
 
   function render(): void {
     const preset = terminalPresets[state.preset];
@@ -109,6 +120,11 @@ export function mountDiegeticStage(container: HTMLElement, options: StageOptions
       Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch),
     ).multiplyScalar(state.distance));
     camera.lookAt(target);
+    if (mockCamera) {
+      camera.position.set(...mockCamera.pos);
+      const basis = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+      camera.quaternion.set(...mockCamera.rot).premultiply(basis).multiply(basis.clone().invert());
+    }
     camera.updateMatrixWorld(true);
     blocker.visible = state.occlusion;
     blocker.position.copy(target).lerp(camera.position, 0.5);
@@ -149,6 +165,8 @@ export function mountDiegeticStage(container: HTMLElement, options: StageOptions
     root.dataset.ready = 'true';
     root.dataset.mode = state.mode;
     root.dataset.visible = String(visible);
+    root.dataset.camera = mockCamera ? 'mock' : 'orbit';
+    root.dataset.cameraPosition = camera.position.toArray().join(',');
     visibility.textContent = occluded ? 'OCCLUDED / ray blocked' : visible ? 'VISIBLE / input enabled' : 'CLIPPED / input disabled';
     projection.textContent = `${state.mode === 'quad' ? 'QUAD_3D' : 'BILLBOARD'} / ${distance.toFixed(1)} m / ${state.fov} deg`;
     stageLabel.textContent = `${preset.category} / ${preset.title.toUpperCase()}`;
@@ -190,6 +208,7 @@ export function mountDiegeticStage(container: HTMLElement, options: StageOptions
   observer.observe(stage);
   resize();
   return () => {
+    connection?.cleanup();
     observer.disconnect();
     disposeEnvironment(environment.group);
     blocker.geometry.dispose();

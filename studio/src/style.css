@@ -12,11 +12,12 @@ body {
 #app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100dvh;
 }
 
 header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 1rem;
   padding: 0.5rem 1rem;
@@ -30,6 +31,8 @@ header {
 
 nav {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 0.25rem;
   flex: 1;
 }
@@ -44,7 +47,6 @@ nav button {
 }
 
 nav button[aria-selected='true'] {
-  border-color: #2a9df4;
   background: #16263a;
 }
 
