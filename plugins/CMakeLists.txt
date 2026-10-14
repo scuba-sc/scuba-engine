@@ -22,3 +22,4 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 
 add_subdirectory(mp_chat)
+add_subdirectory(org_social)
