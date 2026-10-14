@@ -4,12 +4,14 @@ import { describe, expect, it } from 'vitest';
 import { Mesh, MeshStandardMaterial, CompressedTexture, DataTexture } from 'three';
 import { ddsTexture, loadGlb } from './loader';
 
-const fixtures = resolve(import.meta.dirname, '../../../../build/tests/assets-fixtures');
+// Native converter output from the CMake build (tests/assets-fixtures); CI's native Linux job sets this.
+const fixtures = process.env.SCUBA_ASSET_FIXTURES ?? '';
+const nativeDescribe = fixtures ? describe : describe.skip;
 function bytes(name: string): ArrayBuffer {
   return new Uint8Array(readFileSync(resolve(fixtures, name))).buffer;
 }
 
-describe('native asset output in the studio GLTFLoader', () => {
+nativeDescribe('native asset output in the studio GLTFLoader', () => {
   it('loads a converted synthetic Cry triangle with correct vertices and bounds', async () => {
     const gltf = await loadGlb(bytes('triangle.glb'));
     const meshes: Mesh[] = [];

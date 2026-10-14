@@ -34,6 +34,18 @@ jobs:
         run: cmake --build build --config Release --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: studio/package-lock.json
+      - name: Studio loader against native asset output
+        if: runner.os == 'Linux'
+        working-directory: studio
+        run: |
+          npm ci
+          SCUBA_ASSET_FIXTURES="$GITHUB_WORKSPACE/build/tests/assets-fixtures" npx vitest run src/panels/assets/loader.test.ts
 
   studio:
     name: studio
