@@ -18,6 +18,7 @@ option(SCUBA_BUILD_TESTS "Build the scuba-engine tests and register them with CT
 option(SCUBA_WERROR "Treat warnings in scuba-engine's own code as errors" ON)
 
 find_package(Threads REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 include(cmake/ScubaSdk.cmake)
 
@@ -39,7 +40,11 @@ add_library(scuba_bridge STATIC
   src/hostd/http.cpp
   src/hostd/ws.cpp
   src/hostd/handlers.cpp
+  src/hostd/designer_export.cpp
   src/hostd/server.cpp)
+target_compile_definitions(scuba_bridge PRIVATE
+  SCUBA_DESIGNER_SDK_ROOT="${SCUBA_SDK_SOURCE_DIR}"
+  SCUBA_DESIGNER_PYTHON="${Python3_EXECUTABLE}")
 target_include_directories(scuba_bridge PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(scuba_bridge PUBLIC Threads::Threads)
 if(WIN32)
