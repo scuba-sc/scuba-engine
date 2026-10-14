@@ -6,8 +6,10 @@
 #include "hostd/kernel.h"
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace scuba::hostd {
 
@@ -21,9 +23,12 @@ struct HostContext {
     std::string pluginRoot;
     // Set: the method system.shutdown exists and calls this (tests only: --test-shutdown).
     std::function<void()> requestShutdown;
+    // Run by the main loop on the game thread after every kernel Tick, with the same nowMs.
+    std::vector<std::function<void(uint32_t nowMs)>> tickHooks;
 };
 
 void RegisterSystemHandlers(Registry& registry, HostContext& host);
+void RegisterWidgetsHandlers(Registry& registry, HostContext& host);
 
 void RegisterAllModules(Registry& registry, HostContext& host);
 

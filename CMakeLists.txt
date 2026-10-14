@@ -52,7 +52,9 @@ add_executable(scuba-hostd
   src/hostd/main.cpp
   src/hostd/kernel.cpp
   src/hostd/modules.cpp
-  src/hostd/system_handlers.cpp)
+  src/hostd/system_handlers.cpp
+  src/hostd/widgets_bridge.cpp
+  src/hostd/widgets_handlers.cpp)
 # sco_app is the host kit; it links the kernel libraries transitively (sco_host, sco_runtime,
 # sco_plugins, sco_widgets, sco_ui, sco_storage, sco_settings, sco_content, sco_ipc,
 # sco_net_service -> sco_net, sco_datacore_service -> sco_datacore -> sco_vfs). Lua is separate:
