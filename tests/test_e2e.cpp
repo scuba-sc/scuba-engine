@@ -249,6 +249,19 @@ int main(int argc, char** argv) {
         CHECK(result && result->find("kernel") && result->find("kernel")->find("started")->as_bool());
         CHECK(result && result->find("clients") && result->find("clients")->as_number() == 1);
 
+        const Json scene = Rpc(ws, reader, R"({"id":10,"method":"mock_game.state"})");
+        CHECK(scene.find("result") && scene.find("result")->find("player")->find("spawned")->as_bool());
+        const Json caps = Rpc(ws, reader, R"({"id":11,"method":"mock_game.caps.set","params":{"name":"game.actors.state","ready":false}})");
+        CHECK(caps.find("result") && caps.find("result")->size() == 48);
+        const Json moved = Rpc(ws, reader, R"({"id":12,"method":"mock_game.player.move","params":{"zone":4,"pos":[7,8,9],"camera":true}})");
+        CHECK(moved.find("result"));
+        const Json changed = Rpc(ws, reader, R"({"id":13,"method":"mock_game.state"})");
+        CHECK(changed.find("result") && changed.find("result")->find("player")->find("pos")->at(0).as_number() == 7);
+        const Json died = Rpc(ws, reader, R"({"id":14,"method":"mock_game.event.player_died"})");
+        CHECK(died.find("result") && died.find("result")->find("fired")->as_bool());
+        const Json spawned = Rpc(ws, reader, R"({"id":15,"method":"mock_game.event.player_spawned"})");
+        CHECK(spawned.find("result") && spawned.find("result")->find("fired")->as_bool());
+
         const Json missing = Rpc(ws, reader, R"({"id":2,"method":"nope.nothing"})");
         CHECK(missing.find("error") && missing.find("error")->find("code")->as_number() == -32601);
 

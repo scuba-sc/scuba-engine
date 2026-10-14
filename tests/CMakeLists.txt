@@ -37,3 +37,20 @@ add_dependencies(test_widgets_e2e scuba-hostd)
 add_test(NAME e2e_hostd_widgets
          COMMAND test_widgets_e2e $<TARGET_FILE:scuba-hostd> "${widget_plugins_out}/install/data/plugins")
 set_tests_properties(e2e_hostd_widgets PROPERTIES TIMEOUT 120 FIXTURES_REQUIRED widget_plugins)
+set(mock_plugin_root "${CMAKE_CURRENT_BINARY_DIR}/mock_plugins")
+file(MAKE_DIRECTORY "${mock_plugin_root}/mock_game_probe")
+configure_file(plugins/mock_game_probe/plugin.ini "${mock_plugin_root}/mock_game_probe/plugin.ini" COPYONLY)
+add_library(mock_game_probe MODULE plugins/mock_game_probe/probe.cpp)
+target_include_directories(mock_game_probe PRIVATE "${SCUBA_SDK_SOURCE_DIR}/include")
+target_link_libraries(mock_game_probe PRIVATE Threads::Threads)
+set_target_properties(mock_game_probe PROPERTIES PREFIX "" SUFFIX ".dll"
+  CXX_VISIBILITY_PRESET hidden
+  LIBRARY_OUTPUT_DIRECTORY "$<1:${mock_plugin_root}/mock_game_probe>")
+scuba_warnings(mock_game_probe)
+
+add_executable(test_mock_game test_mock_game.cpp)
+target_link_libraries(test_mock_game PRIVATE scuba_mock_game)
+add_dependencies(test_mock_game mock_game_probe)
+scuba_warnings(test_mock_game)
+add_test(NAME mock_game_plugins COMMAND test_mock_game "${mock_plugin_root}")
+set_tests_properties(mock_game_plugins PROPERTIES TIMEOUT 60)

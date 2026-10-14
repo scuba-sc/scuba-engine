@@ -1,4 +1,5 @@
 #include "hostd/kernel.h"
+#include "hostd/mock_game/mock_game.h"
 
 #include "sco/app.h"
 #include "sco/log.h"
@@ -30,6 +31,7 @@ bool Kernel::Start(const KernelOptions& options, LogFn log) {
     pf.pluginsEnabled = !options.pluginRoot.empty();
     pf.dataRoot = options.dataRoot;
     pf.scripts = options.lua ? &kLuaRuntime : nullptr;
+    if (options.mockGame) mock_game::Configure(pf);
     started_ = sco::app::Start(pf);
     return started_;
 }
@@ -41,6 +43,7 @@ void Kernel::Tick(uint32_t nowMs) {
 void Kernel::Stop() {
     if (!started_) return;
     sco::app::Stop();
+    mock_game::Unpublish();
     started_ = false;
 }
 
