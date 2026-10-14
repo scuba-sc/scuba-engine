@@ -8,6 +8,7 @@ void RegisterAllModules(Registry& registry, HostContext& host) {
     RegisterWidgetsHandlers(registry, host);
     RegisterMockGameHandlers(registry, host);
     RegisterDesignerHandlers(registry);
+    RegisterAssetsHandlers(registry, host);
 }
 
 }  // namespace scuba::hostd

@@ -81,6 +81,16 @@ add_library(scuba_mock_game STATIC
   src/hostd/mock_game/handlers.cpp)
 target_link_libraries(scuba_mock_game PUBLIC scuba_bridge sco_app)
 scuba_warnings(scuba_mock_game)
+add_library(scuba_assets STATIC
+  src/assets/io.cpp
+  src/assets/datacore.cpp
+  src/assets/cry.cpp
+  src/assets/dds.cpp
+  src/assets/obj.cpp
+  src/assets/gltf.cpp
+  src/hostd/assets_handlers.cpp)
+target_link_libraries(scuba_assets PUBLIC scuba_bridge sco_datacore)
+scuba_warnings(scuba_assets)
 
 # ---- scuba-hostd: the bridge plus the sco-core host kernel booted in-process ---------------------
 add_executable(scuba-hostd
@@ -94,7 +104,7 @@ add_executable(scuba-hostd
 # sco_plugins, sco_widgets, sco_ui, sco_storage, sco_settings, sco_content, sco_ipc,
 # sco_net_service -> sco_net, sco_datacore_service -> sco_datacore -> sco_vfs). Lua is separate:
 # sco_lua_game links sco_lua.
-target_link_libraries(scuba-hostd PRIVATE scuba_mock_game sco_lua_game)
+target_link_libraries(scuba-hostd PRIVATE scuba_mock_game scuba_assets sco_lua_game)
 target_compile_definitions(scuba-hostd PRIVATE
   SCUBA_VERSION="${PROJECT_VERSION}"
   SCUBA_SDK_VERSION="${SCUBA_SDK_VERSION}"
