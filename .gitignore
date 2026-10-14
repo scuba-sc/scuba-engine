@@ -1,0 +1,7 @@
+build/
+build-*/
+.cache/
+node_modules/
+studio/dist/
+*.log
+.DS_Store
