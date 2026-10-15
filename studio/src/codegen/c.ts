@@ -1,7 +1,13 @@
 import { flatten, validate, widget, kinds, type Design, type Kind, type Widget } from '../panels/designer/model';
 import { finish, header, kindConstant, nativePlugin, number, parseString, quote, readHeader, splitArgs, strings } from './shared';
 
-const KIND_BY_CONSTANT: Record<string, Kind> = Object.fromEntries(kinds.map(k => [kindConstant(k), k]));
+let kindByConstantMap: Map<string, Kind> | undefined;
+function getKindByConstantMap(): Map<string, Kind> {
+  if (!kindByConstantMap) {
+    kindByConstantMap = new Map<string, Kind>(kinds.map((k): [string, Kind] => [kindConstant(k), k]));
+  }
+  return kindByConstantMap;
+}
 
 function initializer(n: Widget, id: number, parent: number): string {
   const fields = [
@@ -38,7 +44,7 @@ export function parse(source: string): Design {
       if (!field) throw new Error('Invalid C field');
       return [field[1], field[2]];
     }));
-    const kind = KIND_BY_CONSTANT[fields.kind];
+    const kind = getKindByConstantMap().get(fields.kind);
     if (!kind) throw new Error('Unknown C widget kind');
     const num = (key: string, fallback = 0) => fields[key] === undefined ? fallback : Number(fields[key].replace(/u$/, ''));
     const id = num('id');
