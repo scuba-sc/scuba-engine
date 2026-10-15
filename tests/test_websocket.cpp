@@ -26,6 +26,16 @@ void TestSha1AndBase64() {
     CHECK(Hex(Sha1("abc")) == "a9993e364706816aba3e25717850c26c9cd0d89d");
     CHECK(Hex(Sha1("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")) == "84983e441c3bd26ebaae4aa1f95129e5e54670f1");
     CHECK(Hex(Sha1(std::string(1000, 'a'))) == "291e9a6c66994949b57ba5e650361e98fc36b1ba");
+    CHECK(Hex(Sha1(std::string(1, 'a'))) == "86f7e437faa5a7fce15d1ddcb9eaeaea377667b8");
+    CHECK(Hex(Sha1(std::string(55, 'a'))) == "c1c8bbdc22796e28c0e15163d20899b65621d65a");
+    CHECK(Hex(Sha1(std::string(56, 'a'))) == "c2db330f6083854c99d4b5bfb6e8f29f201be699");
+    CHECK(Hex(Sha1(std::string(57, 'a'))) == "f08f24908d682555111be7ff6f004e78283d989a");
+    CHECK(Hex(Sha1(std::string(63, 'a'))) == "03f09f5b158a7a8cdad920bddc29b81c18a551f5");
+    CHECK(Hex(Sha1(std::string(64, 'a'))) == "0098ba824b5c16427bd7a1122a5a442a25ec644d");
+    CHECK(Hex(Sha1(std::string(65, 'a'))) == "11655326c708d70319be2610e8a57d9a5b959d3b");
+    CHECK(Hex(Sha1(std::string(119, 'a'))) == "ee971065aaa017e0632a8ca6c77bb3bf8b1dfc56");
+    CHECK(Hex(Sha1(std::string(120, 'a'))) == "f34c1488385346a55709ba056ddd08280dd4c6d6");
+    CHECK(Hex(Sha1(std::string(128, 'a'))) == "ad5b3fdbcb526778c2839d2f151ea753995e26a0");
     CHECK(B64("") == "");
     CHECK(B64("f") == "Zg==");
     CHECK(B64("fo") == "Zm8=");

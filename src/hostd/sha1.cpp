@@ -16,7 +16,9 @@ inline uint32_t Rotl(uint32_t v, int n) {
 inline uint32_t ReadBe32(const uint8_t* p) {
     uint32_t v;
     std::memcpy(&v, p, sizeof(v));
-#if defined(__GNUG__) || defined(__clang__)
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    return v;
+#elif defined(__GNUG__) || defined(__clang__)
     return __builtin_bswap32(v);
 #else
     return (static_cast<uint32_t>(p[0]) << 24) |
