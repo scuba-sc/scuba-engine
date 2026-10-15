@@ -35,7 +35,11 @@ void TestSha1AndBase64() {
     // Null pointer and zero length edge case
     CHECK(Base64Encode(nullptr, 0) == "");
 
-    // Binary / non-ASCII data edge cases
+    // Binary / non-ASCII data edge cases (modulo 0, 1, 2 lengths exercising tail branches)
+    const uint8_t one_byte[1] = { 0xab };
+    CHECK(Base64Encode(one_byte, 1) == "qw==");
+    const uint8_t two_bytes[2] = { 0xab, 0xcd };
+    CHECK(Base64Encode(two_bytes, 2) == "q80=");
     const uint8_t zeros[3] = { 0x00, 0x00, 0x00 };
     CHECK(Base64Encode(zeros, 3) == "AAAA");
     const uint8_t max_bytes[3] = { 0xff, 0xff, 0xff };
