@@ -165,6 +165,47 @@ void Quotas(sco_plugin* self) {
     CHECK(entities->spawn(self, "MockProp_Crate", 4, pos, rot, &id) == SCO_TOO_MANY && id == 0);
 }
 
+void RaycastInvalidationTests(sco_plugin* self) {
+    const auto* entities = Query<sc_entities_v1>(SC_ENTITIES_NAME);
+    constexpr double pos[3]{ 0, 0, 10 }, rot[4]{ 0, 0, 0, 1 };
+    uint64_t id = 0;
+    CHECK(entities->spawn(self, "MOCK_Ship_Starter", 4, pos, rot, &id) == SCO_OK);
+
+    sc_world_hit hit{};
+    hit.size = sizeof(hit);
+    double rayFrom[3] = { 0, 0, 20 };
+    double rayDir[3] = { 0, 0, -1 };
+    std::string why;
+
+    // 1. Raycast in zone 4 hits the new entity
+    CHECK(mg::CastRay(4, rayFrom, rayDir, 100.0, {}, &hit, why) == SCO_OK);
+
+    // 2. Move entity from zone 4 to zone 5
+    mg::Entity* e = mg::FindEntity(id);
+    CHECK(e != nullptr);
+    e->zone = 5;
+    mg::NoteEntityChanged();
+
+    // 3. Raycast in zone 4 no longer hits entity
+    sc_world_hit hit2{};
+    hit2.size = sizeof(hit2);
+    CHECK(mg::CastRay(4, rayFrom, rayDir, 100.0, {}, &hit2, why) == SCO_NOT_FOUND);
+
+    // 4. Raycast in zone 5 hits the entity
+    sc_world_hit hit3{};
+    hit3.size = sizeof(hit3);
+    CHECK(mg::CastRay(5, rayFrom, rayDir, 100.0, {}, &hit3, why) == SCO_OK);
+
+    // 5. Despawn entity
+    CHECK(entities->despawn(self, id) == SCO_OK);
+    sco::app::Tick(90);
+
+    // 6. Raycast in zone 5 no longer hits despawned entity
+    sc_world_hit hit4{};
+    hit4.size = sizeof(hit4);
+    CHECK(mg::CastRay(5, rayFrom, rayDir, 100.0, {}, &hit4, why) == SCO_NOT_FOUND);
+}
+
 void BoundaryTests(sco_plugin* self) {
     const auto* spatial = Query<sc_game_spatial_v1>(SC_GAME_SPATIAL_NAME);
     sc_game_zone record{};
