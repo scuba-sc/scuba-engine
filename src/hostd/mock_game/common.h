@@ -92,9 +92,11 @@ struct Scene {
     uint32_t nowMs = 0;
     uint64_t tick = 0;
     uint64_t session = 0x5c0ba0001;  // opaque session generation
+    uint64_t entityVersion = 0;
 };
 
 Scene& GetScene();
+void NoteEntityChanged();
 // Replaces the scene with the default synthetic one (docs/mock-game.md, "Default scene").
 void ResetScene();
 

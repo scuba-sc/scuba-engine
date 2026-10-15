@@ -43,7 +43,10 @@ bool SpawnPlayer(uint64_t zone, const Vec3* pos) {
     Scene& s = GetScene();
     Entity* player = FindEntity(s.player);
     if (!player) return false;
-    if (zone != 0 && ZoneStreamed(zone)) player->zone = zone;
+    if (zone != 0 && ZoneStreamed(zone)) {
+        player->zone = zone;
+        NoteEntityChanged();
+    }
     if (pos) player->pos = *pos;
     player->health = 100.0f;
     player->actorState = 0;
@@ -87,6 +90,7 @@ bool MovePlayer(uint64_t zone, const Vec3& pos, const Quat* rot) {
     if (!player || !ZoneStreamed(zone)) return false;
     const uint64_t old = player->zone;
     player->zone = zone;
+    NoteEntityChanged();
     player->pos = pos;
     if (rot) player->rot = *rot;
     if (old == zone || !s.spawned) return false;

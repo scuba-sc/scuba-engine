@@ -347,6 +347,7 @@ void RegisterMockGameHandlers(Registry& registry, HostContext& host) {
         Array(params, "pos", pos, true);
         e->zone = zone;
         e->pos = pos;
+        mg::NoteEntityChanged();
         Changed(host, "entities");
         return EntityJson(*e);
     });

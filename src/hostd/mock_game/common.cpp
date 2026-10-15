@@ -57,10 +57,13 @@ bool Ancestry(uint64_t zone, std::vector<std::pair<uint64_t, Vec3>>& out) {
 
 Scene& GetScene() { return g_scene; }
 
+void NoteEntityChanged() { ++g_scene.entityVersion; }
+
 void ResetScene() {
     static uint64_t nextSession = 0x5c0ba0001;
     g_scene = Scene{};
     g_scene.session = nextSession++;
+    NoteEntityChanged();
     Scene& s = g_scene;
     s.zones[0x1] = Zone{ 0x1, 0, "MockSystem", { 0, 0, 0 } };
     s.zones[0x2] = Zone{ 0x2, 0x1, "MockSystem_Planet", { 2.0e10, 0, 0 } };
@@ -238,6 +241,7 @@ uint64_t AddEntity(Entity e) {
     const std::string cls = e.cls;
     const bool streamed = e.streamed;
     g_scene.entities[id] = std::move(e);
+    NoteEntityChanged();
     if (streamed) NotifyStream(1u, id, cls);
     return id;
 }
@@ -297,6 +301,7 @@ void TickScene(uint32_t nowMs) {
             gone.push_back(id);
         }
     }
+    if (!gone.empty()) NoteEntityChanged();
     for (uint64_t id : gone) {
         const std::string cls = g_scene.entities[id].cls;
         Unseat(id);

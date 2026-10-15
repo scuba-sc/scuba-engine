@@ -7,10 +7,32 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 
 namespace scuba::hostd::mock_game {
 
 namespace {
+
+struct ZoneEntityIndex {
+    uint64_t version = 0;
+    size_t size = 0;
+    std::unordered_map<uint64_t, std::vector<const Entity*>> byZone;
+
+    void UpdateUnlocked(const Scene& s) {
+        if (version == s.entityVersion && size == s.entities.size()) return;
+        byZone.clear();
+        for (const auto& [id, e] : s.entities) {
+            byZone[e.zone].push_back(&e);
+        }
+        version = s.entityVersion;
+        size = s.entities.size();
+    }
+};
+
+ZoneEntityIndex g_zoneIndex;
+std::mutex g_zoneIndexMutex;
 
 constexpr const char* kRay = "game.world.raycast";
 constexpr const char* kCamera = "game.world.camera";
@@ -106,10 +128,34 @@ sco_result CastRay(uint64_t zone, const double from[3], const double dir[3], dou
         ancestor = current->second.parent;
     }
     if (d[2] < 0.0 && o[2] >= 0.0) best = std::min(best, -o[2] / d[2]);
-    for (const auto& [id, e] : GetScene().entities) {
-        if (!e.streamed || e.removing || e.radius <= 0.0 || skip.count(id) || !castZones.count(e.zone)) continue;
-        Vec3 c;
-        if (!ZoneToZone(e.zone, zone, e.pos, c)) continue;
+
+    std::vector<const Entity*> candidates;
+    {
+        std::lock_guard<std::mutex> lock(g_zoneIndexMutex);
+        g_zoneIndex.UpdateUnlocked(GetScene());
+        for (uint64_t z : castZones) {
+            const auto it = g_zoneIndex.byZone.find(z);
+            if (it != g_zoneIndex.byZone.end()) {
+                candidates.insert(candidates.end(), it->second.begin(), it->second.end());
+            }
+        }
+    }
+
+    std::unordered_map<uint64_t, Vec3> zoneOffsets;
+    for (uint64_t z : castZones) {
+        Vec3 offset;
+        if (ZoneToZone(z, zone, Vec3{ 0, 0, 0 }, offset)) {
+            zoneOffsets[z] = offset;
+        }
+    }
+
+    for (const Entity* pe : candidates) {
+        const Entity& e = *pe;
+        if (!e.streamed || e.removing || e.radius <= 0.0 || skip.count(e.id)) continue;
+        const auto it = zoneOffsets.find(e.zone);
+        if (it == zoneOffsets.end()) continue;
+        const Vec3& zoneOffset = it->second;
+        const Vec3 c{ e.pos[0] + zoneOffset[0], e.pos[1] + zoneOffset[1], e.pos[2] + zoneOffset[2] };
         const Vec3 oc{ o[0] - c[0], o[1] - c[1], o[2] - c[2] };
         const double b = oc[0] * d[0] + oc[1] * d[1] + oc[2] * d[2];
         const double cc = oc[0] * oc[0] + oc[1] * oc[1] + oc[2] * oc[2] - e.radius * e.radius;
@@ -119,7 +165,7 @@ sco_result CastRay(uint64_t zone, const double from[3], const double dir[3], dou
         if (t < 0.0) t = -b + std::sqrt(disc);
         if (t >= 0.0 && t < best) {
             best = t;
-            bestEntity = id;
+            bestEntity = e.id;
         }
     }
     if (best > dist) {
