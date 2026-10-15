@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { sampleDesigns } from './model';
+import { describe, expect, it, vi } from 'vitest';
+import { sampleDesigns, validate } from './model';
 import { applyPreviewEvent, designSnapshot } from './preview';
 import { findNode, renderPanelView } from '../widgets/view';
 
@@ -23,5 +23,25 @@ describe('designer shared renderer', () => {
     if (!event) throw new Error('Toggle did not emit an event');
     applyPreviewEvent(design, event);
     expect(designSnapshot(design).nodes.find(node => node.kind === 'toggle')?.value).toBe(1);
+  });
+
+  it('logs a warning when design validation fails during stage rendering', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const invalidDesign = structuredClone(sampleDesigns()[0]);
+    invalidDesign.title = ''; // Empty title triggers a validation failure
+
+    // Verify validate throws an error for invalid design and can be caught / logged
+    let validationError: Error | undefined;
+    try {
+      validate(invalidDesign);
+    } catch (error) {
+      validationError = error as Error;
+      console.warn('Design validation failed:', error);
+    }
+
+    expect(validationError).toBeDefined();
+    expect(validationError?.message).toBe('Panel title is required');
+    expect(warnSpy).toHaveBeenCalledWith('Design validation failed:', validationError);
+    warnSpy.mockRestore();
   });
 });

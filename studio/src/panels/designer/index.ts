@@ -162,7 +162,12 @@ export const designerPanel: PanelModule = {
       outline.append(body);
     }
     function renderStage() {
-      try { validate(design); } catch { return; }
+      try {
+        validate(design);
+      } catch (error) {
+        console.warn('Design validation failed:', error);
+        return;
+      }
       stage.querySelector('.designer-stage')?.remove();
       const body = element('div', '', 'designer-stage');
       body.append(element('p', `${flatten(design.nodes).length} nodes / synthetic preview`, 'designer-badge'));
