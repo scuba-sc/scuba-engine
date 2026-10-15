@@ -58,9 +58,9 @@ export class DesignIndex {
     this.byId = new Map();
 
     for (const row of this.rows) {
-      this.byKey.set(row.node.key, row);
-      this.byNode.set(row.node, row);
-      this.byId.set(row.id, row);
+      if (!this.byKey.has(row.node.key)) this.byKey.set(row.node.key, row);
+      if (!this.byNode.has(row.node)) this.byNode.set(row.node, row);
+      if (!this.byId.has(row.id)) this.byId.set(row.id, row);
     }
   }
 

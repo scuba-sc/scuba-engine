@@ -16,6 +16,16 @@ describe('DesignIndex', () => {
     }
   });
 
+  it('preserves first match behavior on duplicate keys', () => {
+    const node1 = widget('Button', 'dup');
+    node1.label = 'First';
+    const node2 = widget('Button', 'dup');
+    node2.label = 'Second';
+    const index = new DesignIndex([node1, node2]);
+
+    expect(index.byKey.get('dup')?.node.label).toBe('First');
+  });
+
   it('returns correct siblings for root and nested nodes', () => {
     const root1 = widget('Column', '1');
     const child1 = widget('Button', '2');
