@@ -8,7 +8,7 @@
 
 using namespace scuba::hostd;
 
-int main() {
+int main() try {
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() / ("scuba-export-" + std::to_string(nonce));
     const DesignerExportOptions options{TEST_DESIGNER_SDK_ROOT, root, TEST_DESIGNER_PYTHON};
@@ -46,4 +46,7 @@ int main() {
     CHECK(!std::filesystem::exists(root / "failed_panel"));
     std::filesystem::remove_all(root);
     return CheckExit("test_designer_export");
+} catch (const std::exception& error) {
+    std::fprintf(stderr, "test_designer_export: unexpected exception: %s\n", error.what());
+    return 1;
 }

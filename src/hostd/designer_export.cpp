@@ -49,8 +49,9 @@ std::wstring QuoteArgument(const std::wstring& text) {
 }
 #endif
 
-bool RunScaffold(const DesignerExportOptions& options, const std::filesystem::path& folder,
-                 const std::string& id, const std::string& language) {
+// Returns an empty string on success, otherwise why the scaffold tool did not succeed.
+std::string RunScaffold(const DesignerExportOptions& options, const std::filesystem::path& folder,
+                        const std::string& id, const std::string& language) {
     const std::vector<std::filesystem::path> args = {
         options.python, options.sdkRoot / "sdk/tools/sco-new-plugin.py",
         "--id", id, "--lang", language, "--author", "the maintainer", "--out", folder,
@@ -63,15 +64,21 @@ bool RunScaffold(const DesignerExportOptions& options, const std::filesystem::pa
     }
     STARTUPINFOW startup{};
     startup.cb = static_cast<DWORD>(sizeof(startup));
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     PROCESS_INFORMATION process{};
-    if (!CreateProcessW(options.python.c_str(), command.data(), nullptr, nullptr, FALSE,
-                        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process)) return false;
+    if (!CreateProcessW(options.python.c_str(), command.data(), nullptr, nullptr, TRUE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process))
+        return "could not start " + options.python.string() + " (Windows error " + std::to_string(GetLastError()) + ")";
     const DWORD waited = WaitForSingleObject(process.hProcess, INFINITE);
     DWORD code = 1;
     const bool gotCode = GetExitCodeProcess(process.hProcess, &code) != FALSE;
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
-    return waited == WAIT_OBJECT_0 && gotCode && code == 0;
+    if (waited != WAIT_OBJECT_0 || !gotCode) return "could not wait for the scaffold process";
+    return code == 0 ? std::string() : "exit code " + std::to_string(code);
 #else
     std::vector<std::string> storage;
     storage.reserve(args.size());
@@ -81,11 +88,13 @@ bool RunScaffold(const DesignerExportOptions& options, const std::filesystem::pa
     for (auto& arg : storage) argv.push_back(arg.data());
     argv.push_back(nullptr);
     pid_t pid = 0;
-    if (posix_spawnp(&pid, argv[0], nullptr, nullptr, argv.data(), environ) != 0) return false;
+    if (const int rc = posix_spawnp(&pid, argv[0], nullptr, nullptr, argv.data(), environ); rc != 0)
+        return "could not start " + storage[0] + " (errno " + std::to_string(rc) + ")";
     int status = 0;
     pid_t waited = 0;
     do { waited = waitpid(pid, &status, 0); } while (waited < 0 && errno == EINTR);
-    return waited == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    if (waited != pid || !WIFEXITED(status)) return "the scaffold process did not exit normally";
+    return WEXITSTATUS(status) == 0 ? std::string() : "exit code " + std::to_string(WEXITSTATUS(status));
 #endif
 }
 
@@ -105,8 +114,8 @@ Json ExportDesignerPlugin(const Json& params, const DesignerExportOptions& optio
     if (!std::filesystem::create_directory(folder))
         throw HandlerError(-32010, "Export folder already exists; choose a new plugin id");
     try {
-        if (!RunScaffold(options, folder, id, language))
-            throw HandlerError(-32011, "SDK scaffold process failed");
+        if (const std::string failure = RunScaffold(options, folder, id, language); !failure.empty())
+            throw HandlerError(-32011, "SDK scaffold process failed: " + failure);
         const auto filename = id + (language == "cpp" ? ".cpp" : ".c");
         std::ofstream file(folder / filename, std::ios::binary | std::ios::trunc);
         file.exceptions(std::ios::badbit | std::ios::failbit);
