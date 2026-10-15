@@ -74,10 +74,55 @@ void TestJson() {
     CHECK(Json::parse(std::string(60, '[') + std::string(60, ']')).has_value());
 }
 
+void TestHeaderHasToken() {
+    HttpRequest req;
+
+    // Empty request / missing header name
+    CHECK(!req.header_has_token("connection", "keep-alive"));
+    CHECK(!req.header_has_token("connection", ""));
+
+    // Single token, case insensitivity in header value and token parameter
+    req.headers = {{"connection", "Keep-Alive"}};
+    CHECK(req.header_has_token("connection", "keep-alive"));
+    CHECK(req.header_has_token("connection", "KEEP-ALIVE"));
+    CHECK(req.header_has_token("connection", "Keep-Alive"));
+    CHECK(!req.header_has_token("connection", "close"));
+    CHECK(!req.header_has_token("upgrade", "keep-alive"));
+
+    // Comma-separated tokens (first, middle, last) and space/tab padding
+    req.headers = {{"connection", " \t keep-alive \t ,  Upgrade ,  close  "}};
+    CHECK(req.header_has_token("connection", "keep-alive"));
+    CHECK(req.header_has_token("connection", "upgrade"));
+    CHECK(req.header_has_token("connection", "close"));
+    CHECK(!req.header_has_token("connection", "open"));
+
+    // Consecutive commas and leading/trailing commas
+    req.headers = {{"connection", ",, keep-alive, , upgrade,,"}};
+    CHECK(req.header_has_token("connection", "keep-alive"));
+    CHECK(req.header_has_token("connection", "upgrade"));
+    CHECK(!req.header_has_token("connection", ""));
+
+    // Partial / substring match prevention
+    req.headers = {{"connection", "keep-alive"}};
+    CHECK(!req.header_has_token("connection", "keep"));
+    CHECK(!req.header_has_token("connection", "alive"));
+    CHECK(!req.header_has_token("connection", "keep-alive-extra"));
+
+    // Multiple header fields with the same lowerName
+    req.headers = {
+        {"connection", "keep-alive"},
+        {"connection", "upgrade"}
+    };
+    CHECK(req.header_has_token("connection", "keep-alive"));
+    CHECK(req.header_has_token("connection", "upgrade"));
+    CHECK(!req.header_has_token("connection", "close"));
+}
+
 }  // namespace
 
 int main() {
     TestHttpParse();
+    TestHeaderHasToken();
     TestStaticPaths();
     TestJson();
     return CheckExit("test_http_json");

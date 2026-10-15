@@ -60,6 +60,7 @@ const std::string* HttpRequest::header(std::string_view lowerName) const {
 }
 
 bool HttpRequest::header_has_token(std::string_view lowerName, std::string_view token) const {
+    if (token.empty()) return false;
     const std::string want = ToLower(token);
     for (const auto& [name, value] : headers) {
         if (name != lowerName) continue;
@@ -67,7 +68,7 @@ bool HttpRequest::header_has_token(std::string_view lowerName, std::string_view 
         while (!rest.empty()) {
             const size_t comma = rest.find(',');
             const std::string_view item = Trim(rest.substr(0, comma));
-            if (ToLower(item) == want) return true;
+            if (!item.empty() && ToLower(item) == want) return true;
             if (comma == std::string_view::npos) break;
             rest.remove_prefix(comma + 1);
         }
