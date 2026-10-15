@@ -23,6 +23,7 @@ int main() try {
     CHECK(std::filesystem::is_regular_file(folder / "plugin.ini"));
     std::ifstream file(folder / "synthetic_panel.cpp", std::ios::binary);
     const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
     CHECK(text == "// synthetic export fixture\n");
     bool refused = false;
     try { (void)ExportDesignerPlugin(params, options); } catch (const HandlerError& e) { refused = e.code() == -32010; }
