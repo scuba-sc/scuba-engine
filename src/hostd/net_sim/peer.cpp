@@ -182,7 +182,8 @@ Json Command(const Json& request) {
     } else if (method == "send") {
         const auto count = Field(request, "count").as_number();
         if (count < 1 || count > 100 || count != static_cast<uint32_t>(count)) throw std::runtime_error("count must be 1..100");
-        if (Probe()->send(static_cast<uint32_t>(count)) != SCO_OK) throw std::runtime_error("probe send refused");
+        const sco_result sent = Probe()->send(static_cast<uint32_t>(count));
+        if (sent != SCO_OK) throw std::runtime_error("probe send refused: " + std::to_string(static_cast<int>(sent)));
     } else if (method == "input") {
         InputRenderer renderer;
         renderer.input.node_id = static_cast<uint32_t>(Field(request, "node").as_number());

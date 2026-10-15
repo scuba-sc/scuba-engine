@@ -57,9 +57,10 @@ sco_result Seats(uint64_t ship, sc_vehicle_seat* out, uint32_t max, uint32_t* ou
         sc_vehicle_seat& o = out[n];
         std::memset(&o, 0, sizeof(o));
         o.index = n;
-        o.flags = (Ready(kSeat) ? SC_SEAT_USABLE_KNOWN | (seat.usable ? SC_SEAT_USABLE : 0u) : 0u) |
-                  (seat.occupant ? SC_SEAT_OCCUPIED : 0u) |
-                  (seat.priority >= 1000 ? SC_SEAT_PILOT : 0u);
+        const uint32_t usable = seat.usable ? static_cast<uint32_t>(SC_SEAT_USABLE) : 0u;
+        o.flags = (Ready(kSeat) ? static_cast<uint32_t>(SC_SEAT_USABLE_KNOWN) | usable : 0u) |
+                  (seat.occupant ? static_cast<uint32_t>(SC_SEAT_OCCUPIED) : 0u) |
+                  (seat.priority >= 1000 ? static_cast<uint32_t>(SC_SEAT_PILOT) : 0u);
         o.seat_id = seat.seatId;
         o.occupant_id = seat.occupant;
         o.priority = seat.priority;

@@ -130,7 +130,7 @@ Process::Process(const std::filesystem::path& executable, const std::vector<std:
     SetHandleInformation(state.input, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(state.output, HANDLE_FLAG_INHERIT, 0);
     std::wstring command = Quote(executable.wstring());
-    for (const auto& arg : args) command += L" " + Quote(std::filesystem::u8path(arg).wstring());
+    for (const auto& arg : args) command += L" " + Quote(std::filesystem::path(std::u8string(arg.begin(), arg.end())).wstring());
     HANDLE childError = nullptr;
     if (!DuplicateHandle(GetCurrentProcess(), GetStdHandle(STD_ERROR_HANDLE), GetCurrentProcess(),
                          &childError, 0, TRUE, DUPLICATE_SAME_ACCESS)) {
