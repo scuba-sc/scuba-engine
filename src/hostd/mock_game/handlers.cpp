@@ -126,13 +126,24 @@ Json StateJson() {
 }
 
 Json CapsJson() {
+    static const std::vector<Json> static_templates = []() {
+        std::vector<Json> templates;
+        for (const auto& c : mg::Capabilities()) {
+            Json j = Json::MakeObject();
+            j.set("name", c.name);
+            j.set("service", c.service);
+            j.set("ready", false);
+            j.set("game_pack_default", c.gamePackDefault);
+            templates.push_back(std::move(j));
+        }
+        return templates;
+    }();
+
+    const auto caps = mg::Capabilities();
     Json out = Json::MakeArray();
-    for (const auto& c : mg::Capabilities()) {
-        Json j = Json::MakeObject();
-        j.set("name", c.name);
-        j.set("service", c.service);
-        j.set("ready", c.ready);
-        j.set("game_pack_default", c.gamePackDefault);
+    for (size_t i = 0; i < static_templates.size() && i < caps.size(); ++i) {
+        Json j = static_templates[i];
+        j.set("ready", caps[i].ready);
         out.push_back(std::move(j));
     }
     return out;
