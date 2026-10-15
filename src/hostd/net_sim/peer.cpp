@@ -8,6 +8,7 @@
 #include "sco/widgets.h"
 #include "sco_lua.h"
 #include "sco_lua_game.h"
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -25,7 +26,7 @@ namespace scuba::hostd::net_sim {
 namespace {
 std::string ipcPrefix;
 std::set<uint64_t> remotePeers;
-bool sessionActive = false;
+std::atomic<bool> sessionActive{false};
 int eventOwner = 0;
 void SessionEvent(const char* event, const void* data, void*) {
     if (std::string_view(event) == SCO_NET_EVENT_STATE) {
@@ -69,7 +70,7 @@ Json Snapshot() {
     Tick();
     Json result = Json::MakeObject();
     const auto* table = sco::net::Table();
-    result.set("active", sessionActive);
+    result.set("active", sessionActive.load());
     result.set("self", std::to_string(table->self_peer()));
     result.set("port", sco::net::BoundPort());
     result.set("reason", sco::net::LastReason());
