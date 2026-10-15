@@ -13,6 +13,8 @@
 #include "sc_game_spatial.h"
 #include "sc_owned.h"
 #include "sc_relocation.h"
+#include "sc_world.h"
+#include "hostd/mock_game/services.h"
 
 #include <cstdio>
 #include <cstring>
