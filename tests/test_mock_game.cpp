@@ -255,6 +255,7 @@ int main(int argc, char** argv) {
         CHECK(Query<sc_actors_v1>(SC_ACTORS_NAME)->spawn_npc(
             const_cast<sco_plugin*>(oldHandle), "MockNPC_Guard", 4, pos, &id) == SCO_BAD_ARG);
         BoundaryTests(reloaded.self);
+        RaycastInvalidationTests(reloaded.self);
         mg::ResetAll();
         Quotas(reloaded.self);
     } catch (const std::exception& e) {
