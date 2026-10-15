@@ -198,6 +198,14 @@ void TestProtocolErrors() {
 SocketHandle ConnectClient(uint16_t port) {
     SocketHandle s = socket(AF_INET, SOCK_STREAM, 0);
     if (s == kInvalidSocket) return kInvalidSocket;
+#ifdef _WIN32
+    DWORD timeoutMs = 2000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof timeoutMs);
+#else
+    timeval tv{};
+    tv.tv_sec = 2;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+#endif
     sockaddr_in sin{};
     sin.sin_family = AF_INET;
     auto* bytes = reinterpret_cast<uint8_t*>(&sin.sin_port);
@@ -242,23 +250,33 @@ void TestServerClientCount() {
     // Initial state: no connected clients
     CHECK(server.client_count() == 0);
 
+    auto pollForCount = [&](size_t expectedCount) {
+        for (int i = 0; i < 50; ++i) {
+            server.Poll(10);
+            if (server.client_count() == expectedCount) return true;
+        }
+        std::fprintf(stderr, "pollForCount timed out: expected %zu, actual %zu\n", expectedCount, server.client_count());
+        return false;
+    };
+
     // 1. Non-WebSocket HTTP connection: should NOT increment client_count
     SocketHandle httpSock = ConnectClient(port);
     CHECK(httpSock != kInvalidSocket);
     const std::string httpReq = "GET / HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) + "\r\n\r\n";
     CHECK(SendAll(httpSock, httpReq));
-    server.Poll(20);
+    server.Poll(10);
+    server.Poll(10);
+    char httpBuf[1024] = {};
+#ifdef _WIN32
+    const int httpRecv = recv(httpSock, httpBuf, sizeof(httpBuf) - 1, 0);
+#else
+    const ssize_t httpRecv = recv(httpSock, httpBuf, sizeof(httpBuf) - 1, 0);
+#endif
+    CHECK(httpRecv > 0);
+    CHECK(std::string(httpBuf, httpRecv > 0 ? static_cast<size_t>(httpRecv) : 0).rfind("HTTP/1.1 200 OK", 0) == 0);
     CHECK(server.client_count() == 0);
     CloseSocket(httpSock);
-    server.Poll(20);
-
-    auto pollForCount = [&](size_t expectedCount) {
-        for (int i = 0; i < 20; ++i) {
-            server.Poll(5);
-            if (server.client_count() == expectedCount) return true;
-        }
-        return false;
-    };
+    CHECK(pollForCount(0));
 
     // 2. First WebSocket client connection: should increment client_count to 1
     SocketHandle ws1 = ConnectClient(port);
