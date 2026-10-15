@@ -232,11 +232,18 @@ int PeerMain() {
     });
     for (;;) {
         std::unique_lock lock(mutex);
-        changed.wait_for(lock, std::chrono::milliseconds(16), [&] { return ended || !requests.empty(); });
+        if (requests.empty() && !ended) {
+            if (!sessionActive) {
+                changed.wait(lock, [&] { return ended || !requests.empty(); });
+            } else {
+                lock.unlock();
+                sco::net::WaitForDelivery(16);
+                Tick();
+                continue;
+            }
+        }
         if (requests.empty()) {
             if (ended) break;
-            lock.unlock();
-            Tick();
             continue;
         }
         auto line = std::move(requests.front());
