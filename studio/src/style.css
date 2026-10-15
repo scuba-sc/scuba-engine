@@ -1,0 +1,96 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: #0d1117;
+  color: #d8dee9;
+}
+
+body {
+  margin: 0;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #263040;
+  background: #111823;
+}
+
+.brand {
+  font-weight: 600;
+}
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+nav button {
+  background: transparent;
+  color: inherit;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.35rem 0.8rem;
+  cursor: pointer;
+}
+
+nav button[aria-selected='true'] {
+  background: #16263a;
+}
+
+.bridge-state[data-state='open'] {
+  color: #6fd08c;
+}
+
+.bridge-state[data-state='closed'],
+.bridge-state[data-state='connecting'] {
+  color: #e5b567;
+}
+
+main {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.home {
+  padding: 1rem 1.5rem;
+  max-width: 60rem;
+}
+
+.home dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+}
+
+.home dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.home .log {
+  max-height: 16rem;
+  overflow: auto;
+  background: #0a0e14;
+  padding: 0.5rem;
+  border-radius: 6px;
+}
+
+.viewport-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

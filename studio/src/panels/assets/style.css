@@ -1,0 +1,89 @@
+.asset-lab {
+  --asset-bg: #111823;
+  --asset-inset: #0d1117;
+  --asset-line: #354254;
+  --asset-muted: #abb9cb;
+  --asset-ink: #e3eaf3;
+  --asset-space: 16px;
+  color: var(--asset-ink);
+  padding: 24px;
+  font-size: 14px;
+}
+.asset-lab * { box-sizing: border-box; }
+.asset-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 16px; }
+.asset-heading h1 { font-size: 28px; line-height: 1.2; margin: 6px 0 0; letter-spacing: -.03em; }
+.asset-eyebrow { color: var(--asset-muted); letter-spacing: .12em; font-size: 11px; font-weight: 650; }
+.asset-heading p { color: var(--asset-muted); margin: 0; line-height: 1.6; text-align: right; }
+.asset-lab h2 { font-size: 15px; margin: 0; }
+.asset-lab label { display: flex; flex-direction: column; gap: 8px; color: var(--asset-muted); min-width: 0; }
+.asset-lab input, .asset-lab textarea {
+  width: 100%; min-width: 0; color: var(--asset-ink); background: var(--asset-inset);
+  border: 1px solid var(--asset-line); border-radius: 6px; padding: 11px 12px; font: inherit;
+}
+.asset-lab input::placeholder { color: #91a0b3; }
+.asset-lab button {
+  min-height: 40px; border: 1px solid var(--asset-line); border-radius: 6px; padding: 8px 12px;
+  font: inherit; font-weight: 550; color: inherit; background: #1c293b; cursor: pointer;
+}
+.asset-lab button:hover:not(:disabled) { background: #2c3d53; }
+.asset-lab button:disabled { opacity: .45; cursor: default; }
+.asset-lab :focus-visible { outline: 2px solid #8cc8ff; outline-offset: 3px; }
+.asset-lab .asset-primary { background: #b6dafb; color: #101823; border-color: transparent; }
+.asset-lab .asset-primary:hover:not(:disabled) { background: #d0e8ff; }
+.asset-source { display: flex; align-items: end; gap: 12px; }
+.asset-source label { flex: 1; }
+.asset-status { min-height: 21px; margin: 12px 0 20px; line-height: 1.5; color: var(--asset-muted); overflow-wrap: anywhere; }
+.asset-status[data-error="true"] { color: #ffbdb7; }
+.asset-workspace { display: grid; grid-template-columns: minmax(210px, .8fr) minmax(280px, 1.1fr) minmax(340px, 1.3fr); gap: 16px; align-items: start; }
+.asset-workspace > section { border: 1px solid var(--asset-line); border-radius: 10px; background: var(--asset-bg); min-width: 0; overflow: hidden; }
+.asset-section-title { min-height: 59px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--asset-line); }
+.asset-section-title span { font-size: 12px; color: var(--asset-muted); overflow-wrap: anywhere; }
+.asset-section-title button { min-height: 32px; padding: 4px 9px; }
+.asset-search { padding: 16px; display: flex; gap: 8px; align-items: end; }
+.asset-search label { flex: 1; font-size: 12px; }
+.asset-records { min-height: 260px; max-height: 580px; overflow: auto; padding: 0 8px 12px; }
+.asset-records summary { padding: 12px 8px; font-weight: 650; cursor: pointer; }
+.asset-records button { display: block; width: 100%; text-align: left; border-color: transparent; background: transparent; overflow-wrap: anywhere; }
+.asset-records small { display: block; font: 10px ui-monospace, monospace; color: var(--asset-muted); margin-top: 5px; }
+.asset-pagination { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 12px; border-top: 1px solid var(--asset-line); }
+.asset-pagination button { padding: 6px 8px; font-size: 12px; }
+.asset-pagination span { font-size: 11px; color: var(--asset-muted); }
+.asset-empty { padding: 24px 16px; line-height: 1.7; color: var(--asset-muted); font-size: 14px; }
+.asset-fields { min-height: 180px; max-height: 380px; overflow: auto; padding: 8px 16px; }
+.asset-field { padding: 12px 0; border-bottom: 1px solid var(--asset-line); display: flex; gap: 8px; flex-wrap: wrap; overflow-wrap: anywhere; }
+.asset-field > div { display: flex; gap: 8px; align-items: baseline; width: 100%; }
+.asset-field small { color: var(--asset-muted); }
+.asset-field code { display: block; width: 100%; font: 12px/1.7 ui-monospace, monospace; white-space: pre-wrap; }
+.asset-field button { font-size: 12px; padding: 6px 8px; min-height: 30px; }
+.asset-fields > details { padding: 12px 0; }
+.asset-fields p { color: var(--asset-muted); overflow-wrap: anywhere; line-height: 1.6; }
+.asset-pack { padding: 16px; border-top: 1px solid var(--asset-line); }
+.asset-pack textarea { min-height: 240px; resize: vertical; font: 12px/1.7 ui-monospace, monospace; tab-size: 2; }
+.asset-pack p, .asset-import p { color: var(--asset-muted); font-size: 12px; line-height: 1.6; }
+.asset-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.asset-model { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.asset-model label { font-size: 12px; }
+.asset-model button { align-self: flex-start; }
+.asset-canvas { width: 100%; height: 330px; background: #101823; position: relative; }
+.asset-canvas canvas { display: block; width: 100%; height: 100%; }
+.asset-canvas .asset-empty { text-align: center; position: absolute; inset: 25% 0 auto; margin: 0; }
+.asset-model-info { padding: 0 16px; color: var(--asset-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.asset-preview-section > button { margin: 0 16px 16px; }
+.asset-import { border-top: 1px solid var(--asset-line); padding: 16px; }
+.asset-import summary { cursor: pointer; line-height: 1.5; }
+.asset-import form { margin-top: 16px; display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 1100px) {
+  .asset-workspace { grid-template-columns: minmax(210px, .7fr) minmax(280px, 1.3fr); }
+  .asset-preview-section { grid-column: 1 / -1; }
+  .asset-canvas { height: 400px; }
+}
+@media (max-width: 620px) {
+  .asset-lab { padding: 16px; font-size: 16px; }
+  .asset-heading p { font-size: 12px; }
+  .asset-source { flex-direction: column; align-items: stretch; }
+  .asset-workspace { grid-template-columns: minmax(0, 1fr); }
+  .asset-records { max-height: 300px; min-height: 100px; }
+  .asset-lab button { min-height: 44px; }
+  .asset-records small { font-size: 11px; }
+  .asset-canvas { height: 300px; }
+}

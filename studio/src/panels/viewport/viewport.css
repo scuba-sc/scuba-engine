@@ -1,0 +1,59 @@
+@import './tokens.css';
+
+.diegetic {
+  display: grid;
+  grid-template-rows: auto auto minmax(var(--vp-stage-min), 1fr) auto;
+  min-height: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  background: var(--vp-bg);
+  color: var(--vp-ink);
+  font-size: var(--vp-body);
+}
+.vp-title, .vp-controls, .vp-readout { padding: var(--vp-space-3) var(--vp-space-4); }
+.vp-title { display: flex; align-items: center; justify-content: space-between; gap: var(--vp-space-4); }
+.vp-title h2 { margin: 0; font-size: var(--vp-h3); }
+.vp-title p { margin: var(--vp-space-1) 0 0; color: var(--vp-muted); font-size: var(--vp-small); }
+.vp-tag { font-family: var(--vp-mono); font-size: var(--vp-caption); color: var(--vp-success); letter-spacing: var(--vp-title-tracking); }
+.vp-controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--vp-space-3); background: var(--vp-raised); border-block: var(--vp-line) solid var(--vp-border); }
+.vp-control { display: grid; gap: var(--vp-space-1); color: var(--vp-muted); font-size: var(--vp-small); }
+.vp-control input[type='range'] { width: var(--vp-control-width); accent-color: var(--vp-accent); margin: var(--vp-space-1) 0; }
+.vp-control output { font-family: var(--vp-mono); color: var(--vp-ink); }
+.diegetic button, .diegetic select {
+  font: inherit; color: var(--vp-ink); background: var(--vp-bg);
+  border: var(--vp-line) solid var(--vp-border); border-radius: var(--vp-radius);
+  padding: var(--vp-space-2) var(--vp-space-3); cursor: pointer;
+}
+.diegetic button:hover, .diegetic button[aria-pressed='true'] { background: var(--vp-selected); color: var(--vp-accent); }
+.diegetic :focus-visible { outline: var(--vp-space-1) solid var(--vp-accent); outline-offset: var(--vp-space-1); }
+.vp-modes { display: flex; gap: var(--vp-space-1); }
+.vp-occlusion { display: flex; align-items: center; gap: var(--vp-space-2); padding-block: var(--vp-space-2); }
+.vp-stage { position: relative; min-height: var(--vp-stage-min); overflow: hidden; background: var(--vp-floor); }
+.vp-stage canvas { display: block; width: 100%; height: 100%; }
+.vp-overlay { position: absolute; inset: 0; pointer-events: none; }
+.vp-surface { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: auto; }
+.vp-surface[hidden] { display: none; }
+.vp-plugin-surface { width: 100%; height: 100%; overflow: auto; background: var(--vp-raised); }
+.vp-plugin-surface .w-panel { min-width: 0; max-width: none; border: none; }
+.vp-plugin-surface .w-panel-header { flex-wrap: wrap; }
+.vp-stage-label { position: absolute; top: var(--vp-space-4); left: var(--vp-space-4); pointer-events: none; font-family: var(--vp-mono); font-size: var(--vp-caption); color: var(--vp-muted); letter-spacing: var(--vp-title-tracking); }
+.vp-readout { display: flex; flex-wrap: wrap; gap: var(--vp-space-3); border-top: var(--vp-line) solid var(--vp-border); font: var(--vp-small) var(--vp-mono); color: var(--vp-muted); }
+.vp-readout strong { color: var(--vp-success); font-weight: 400; }
+.vp-terminal {
+  width: 100%; height: 100%; box-sizing: border-box; padding: var(--vp-space-6);
+  display: flex; flex-direction: column; gap: var(--vp-space-4);
+  background: var(--vp-glass); border: var(--vp-line) solid var(--vp-accent);
+  box-shadow: 0 0 var(--vp-shadow-blur) var(--vp-shadow); font-family: var(--vp-mono);
+}
+.vp-terminal-top, .vp-meter { display: flex; justify-content: space-between; font-size: var(--vp-caption); color: var(--vp-success); letter-spacing: var(--vp-title-tracking); }
+.vp-terminal h3 { margin: 0; font-size: var(--vp-h2); font-weight: 500; }
+.vp-terminal-summary { color: var(--vp-muted); font-size: var(--vp-small); margin: 0; }
+.vp-meter { padding-block: var(--vp-space-2); border-block: var(--vp-line) solid var(--vp-border); }
+.vp-terminal-actions { flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--vp-space-2); }
+.vp-terminal-actions button { overflow-wrap: anywhere; padding: var(--vp-space-2); min-height: var(--vp-space-8); font-size: var(--vp-small); }
+.vp-terminal-status { margin: 0; font-size: var(--vp-small); color: var(--vp-warning); }
+@media (max-width: 680px) {
+  .diegetic { --vp-stage-min: var(--vp-stage-compact); }
+  .vp-title { align-items: start; flex-direction: column; gap: var(--vp-space-2); }
+  .vp-controls { gap: var(--vp-space-2) var(--vp-space-3); }
+}

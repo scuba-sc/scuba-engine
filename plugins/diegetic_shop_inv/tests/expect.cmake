@@ -1,0 +1,10 @@
+string(REPLACE "@@" ";" arguments "${ARGS}")
+execute_process(COMMAND "${PROGRAM}" ${arguments}
+  RESULT_VARIABLE actual OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 45)
+message("${output}${error}")
+if(NOT "${actual}" STREQUAL "${EXPECT_RC}")
+  message(FATAL_ERROR "Exit ${actual}, expected ${EXPECT_RC}")
+endif()
+if(NOT "${output}${error}" MATCHES "${MATCH}")
+  message(FATAL_ERROR "Output did not match ${MATCH}")
+endif()
