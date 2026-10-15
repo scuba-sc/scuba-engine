@@ -31,6 +31,24 @@ void TestSha1AndBase64() {
     CHECK(B64("fo") == "Zm8=");
     CHECK(B64("foo") == "Zm9v");
     CHECK(B64("foobar") == "Zm9vYmFy");
+
+    // Null pointer and zero length edge case
+    CHECK(Base64Encode(nullptr, 0) == "");
+
+    // Binary / non-ASCII data edge cases
+    const uint8_t zeros[3] = { 0x00, 0x00, 0x00 };
+    CHECK(Base64Encode(zeros, 3) == "AAAA");
+    const uint8_t max_bytes[3] = { 0xff, 0xff, 0xff };
+    CHECK(Base64Encode(max_bytes, 3) == "////");
+    const uint8_t binary_pat[4] = { 0x00, 0x01, 0x02, 0x03 };
+    CHECK(Base64Encode(binary_pat, 4) == "AAECAw==");
+
+    // Large input boundary case (1MB string)
+    const std::string large_input(1000000, 'a');
+    const std::string large_b64 = B64(large_input);
+    CHECK(large_b64.size() == 1333336);
+    CHECK(large_b64.substr(0, 8) == "YWFhYWFh");
+    CHECK(large_b64.substr(large_b64.size() - 4) == "YQ==");
 }
 
 HttpRequest Upgrade(const char* key = "dGhlIHNhbXBsZSBub25jZQ==") {
