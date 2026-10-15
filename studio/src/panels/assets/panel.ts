@@ -27,37 +27,186 @@ function node<K extends keyof HTMLElementTagNameMap>(tag: K, content: string): H
 export function mountAssetLab(container: HTMLElement, bridge: HostdBridge): () => void {
   const root = document.createElement('section');
   root.className = 'asset-lab';
-  root.innerHTML = `
-    <div class="asset-heading"><div><span class="asset-eyebrow">LOCAL AUTHORING</span><h1>Asset Lab</h1></div>
-      <p>Your install. Your files.<br>No game data is included.</p></div>
-    <form class="asset-source"><label>DataCore or override pack
-      <input name="database" placeholder="Path to your Game2.dcb or overrides.toml" spellcheck="false" required></label>
-      <button type="submit" class="asset-primary">Open database</button></form>
-    <p class="asset-status" role="status" aria-live="polite">Open a local database to browse records, structs and GUID references.</p>
-    <div class="asset-workspace">
-      <section class="asset-tree"><div class="asset-section-title"><h2>Record tree</h2><button type="button" data-action="structs">Structs</button></div>
-        <form class="asset-search"><label>Filter name, type or GUID<input name="filter" placeholder="Search records" spellcheck="false"></label><button>Find</button></form>
-        <div class="asset-records"><p class="asset-empty">No database open</p></div>
-        <div class="asset-pagination"><button type="button" data-action="previous">Previous</button><span data-count>0 records</span><button type="button" data-action="next">Next</button></div>
-      </section>
-      <section class="asset-inspector"><div class="asset-section-title"><h2>Field inspector</h2><span data-selection>Nothing selected</span></div>
-        <div class="asset-fields"><p class="asset-empty">Select a record to inspect its typed fields.<br>GUID references link to their target records.</p></div>
-        <div class="asset-pack"><label>Overrides (TOML)<textarea name="pack" spellcheck="false" aria-describedby="asset-pack-help">format = 1\natomic = true\n</textarea></label>
-          <p id="asset-pack-help">Stage a field, edit its value, then check the pack. A loaded DCB also validates field types and record targets.</p>
-          <div class="asset-actions"><button type="button" data-action="check">Check pack</button><button type="button" data-action="export">Download TOML</button></div></div>
-      </section>
-      <section class="asset-preview-section"><div class="asset-section-title"><h2>Mesh preview</h2><span>glTF 2.0</span></div>
-        <form class="asset-model"><label>Mesh or texture path<input name="model" placeholder="Path to .cgf, .cga, .dds, .glb, .gltf or .obj" spellcheck="false" required></label><button>Load preview</button></form>
-        <div class="asset-canvas"><p class="asset-empty">Local geometry and textures<br>Preview without launching the game</p></div>
-        <p class="asset-model-info" role="status">Static geometry | BC1-BC7 DDS | Orbit controls</p>
-        <button type="button" data-action="glb" disabled>Download GLB</button>
-        <details class="asset-import"><summary>Import a custom model as a pack</summary>
-          <form><label>New pack folder<input name="destination" placeholder="A new local folder" required spellcheck="false"></label>
-            <label>VFS path inside files/<input name="virtual" value="objects/custom/model.glb" required spellcheck="false"></label>
-            <p>Imports glTF/OBJ plus the checked TOML into files/ and datacore/. GLB is an authoring asset, not a game-native CGF replacement.</p>
-            <button>Create pack</button></form></details>
-      </section>
-    </div>`;
+
+  const heading = document.createElement('div');
+  heading.className = 'asset-heading';
+  const titleWrap = document.createElement('div');
+  const eyebrow = node('span', 'LOCAL AUTHORING');
+  eyebrow.className = 'asset-eyebrow';
+  titleWrap.append(eyebrow, node('h1', 'Asset Lab'));
+  const headingDesc = document.createElement('p');
+  headingDesc.append('Your install. Your files.', document.createElement('br'), 'No game data is included.');
+  heading.append(titleWrap, headingDesc);
+
+  const sourceForm = document.createElement('form');
+  sourceForm.className = 'asset-source';
+  const sourceLabel = document.createElement('label');
+  sourceLabel.append('DataCore or override pack');
+  const dbInput = document.createElement('input');
+  dbInput.name = 'database';
+  dbInput.placeholder = 'Path to your Game2.dcb or overrides.toml';
+  dbInput.spellcheck = false;
+  dbInput.required = true;
+  sourceLabel.append(dbInput);
+  const openBtn = node('button', 'Open database');
+  openBtn.type = 'submit';
+  openBtn.className = 'asset-primary';
+  sourceForm.append(sourceLabel, openBtn);
+
+  const statusPara = node('p', 'Open a local database to browse records, structs and GUID references.');
+  statusPara.className = 'asset-status';
+  statusPara.setAttribute('role', 'status');
+  statusPara.setAttribute('aria-live', 'polite');
+
+  const workspace = document.createElement('div');
+  workspace.className = 'asset-workspace';
+
+  const treeSection = document.createElement('section');
+  treeSection.className = 'asset-tree';
+  const treeTitle = document.createElement('div');
+  treeTitle.className = 'asset-section-title';
+  const structsBtn = node('button', 'Structs');
+  structsBtn.type = 'button';
+  structsBtn.dataset.action = 'structs';
+  treeTitle.append(node('h2', 'Record tree'), structsBtn);
+
+  const searchForm = document.createElement('form');
+  searchForm.className = 'asset-search';
+  const searchLabel = document.createElement('label');
+  searchLabel.append('Filter name, type or GUID');
+  const filterInput = document.createElement('input');
+  filterInput.name = 'filter';
+  filterInput.placeholder = 'Search records';
+  filterInput.spellcheck = false;
+  searchLabel.append(filterInput);
+  searchForm.append(searchLabel, node('button', 'Find'));
+
+  const recordsDiv = document.createElement('div');
+  recordsDiv.className = 'asset-records';
+  const emptyRecords = node('p', 'No database open');
+  emptyRecords.className = 'asset-empty';
+  recordsDiv.append(emptyRecords);
+
+  const paginationDiv = document.createElement('div');
+  paginationDiv.className = 'asset-pagination';
+  const prevBtn = node('button', 'Previous');
+  prevBtn.type = 'button';
+  prevBtn.dataset.action = 'previous';
+  const countSpan = node('span', '0 records');
+  countSpan.dataset.count = '';
+  const nextBtn = node('button', 'Next');
+  nextBtn.type = 'button';
+  nextBtn.dataset.action = 'next';
+  paginationDiv.append(prevBtn, countSpan, nextBtn);
+  treeSection.append(treeTitle, searchForm, recordsDiv, paginationDiv);
+
+  const inspectorSection = document.createElement('section');
+  inspectorSection.className = 'asset-inspector';
+  const inspectorTitle = document.createElement('div');
+  inspectorTitle.className = 'asset-section-title';
+  const selectionSpan = node('span', 'Nothing selected');
+  selectionSpan.dataset.selection = '';
+  inspectorTitle.append(node('h2', 'Field inspector'), selectionSpan);
+
+  const fieldsDiv = document.createElement('div');
+  fieldsDiv.className = 'asset-fields';
+  const emptyFields = document.createElement('p');
+  emptyFields.className = 'asset-empty';
+  emptyFields.append('Select a record to inspect its typed fields.', document.createElement('br'), 'GUID references link to their target records.');
+  fieldsDiv.append(emptyFields);
+
+  const packDiv = document.createElement('div');
+  packDiv.className = 'asset-pack';
+  const packLabel = document.createElement('label');
+  packLabel.append('Overrides (TOML)');
+  const textarea = document.createElement('textarea');
+  textarea.name = 'pack';
+  textarea.spellcheck = false;
+  textarea.setAttribute('aria-describedby', 'asset-pack-help');
+  textarea.value = 'format = 1\natomic = true\n';
+  packLabel.append(textarea);
+
+  const packHelp = node('p', 'Stage a field, edit its value, then check the pack. A loaded DCB also validates field types and record targets.');
+  packHelp.id = 'asset-pack-help';
+
+  const actionsDiv = document.createElement('div');
+  actionsDiv.className = 'asset-actions';
+  const checkBtn = node('button', 'Check pack');
+  checkBtn.type = 'button';
+  checkBtn.dataset.action = 'check';
+  const exportBtn = node('button', 'Download TOML');
+  exportBtn.type = 'button';
+  exportBtn.dataset.action = 'export';
+  actionsDiv.append(checkBtn, exportBtn);
+  packDiv.append(packLabel, packHelp, actionsDiv);
+  inspectorSection.append(inspectorTitle, fieldsDiv, packDiv);
+
+  const previewSection = document.createElement('section');
+  previewSection.className = 'asset-preview-section';
+  const previewTitle = document.createElement('div');
+  previewTitle.className = 'asset-section-title';
+  previewTitle.append(node('h2', 'Mesh preview'), node('span', 'glTF 2.0'));
+
+  const modelForm = document.createElement('form');
+  modelForm.className = 'asset-model';
+  const modelLabel = document.createElement('label');
+  modelLabel.append('Mesh or texture path');
+  const modelInput = document.createElement('input');
+  modelInput.name = 'model';
+  modelInput.placeholder = 'Path to .cgf, .cga, .dds, .glb, .gltf or .obj';
+  modelInput.spellcheck = false;
+  modelInput.required = true;
+  modelLabel.append(modelInput);
+  modelForm.append(modelLabel, node('button', 'Load preview'));
+
+  const canvasDiv = document.createElement('div');
+  canvasDiv.className = 'asset-canvas';
+  const canvasEmpty = document.createElement('p');
+  canvasEmpty.className = 'asset-empty';
+  canvasEmpty.append('Local geometry and textures', document.createElement('br'), 'Preview without launching the game');
+  canvasDiv.append(canvasEmpty);
+
+  const modelInfoP = node('p', 'Static geometry | BC1-BC7 DDS | Orbit controls');
+  modelInfoP.className = 'asset-model-info';
+  modelInfoP.setAttribute('role', 'status');
+
+  const glbBtn = node('button', 'Download GLB');
+  glbBtn.type = 'button';
+  glbBtn.dataset.action = 'glb';
+  glbBtn.disabled = true;
+
+  const details = document.createElement('details');
+  details.className = 'asset-import';
+  details.append(node('summary', 'Import a custom model as a pack'));
+
+  const importForm = document.createElement('form');
+  const destLabel = document.createElement('label');
+  destLabel.append('New pack folder');
+  const destInput = document.createElement('input');
+  destInput.name = 'destination';
+  destInput.placeholder = 'A new local folder';
+  destInput.required = true;
+  destInput.spellcheck = false;
+  destLabel.append(destInput);
+
+  const virtLabel = document.createElement('label');
+  virtLabel.append('VFS path inside files/');
+  const virtInput = document.createElement('input');
+  virtInput.name = 'virtual';
+  virtInput.value = 'objects/custom/model.glb';
+  virtInput.required = true;
+  virtInput.spellcheck = false;
+  virtLabel.append(virtInput);
+
+  const importDesc = node('p', 'Imports glTF/OBJ plus the checked TOML into files/ and datacore/. GLB is an authoring asset, not a game-native CGF replacement.');
+
+  importForm.append(destLabel, virtLabel, importDesc, node('button', 'Create pack'));
+  details.append(importForm);
+
+  previewSection.append(previewTitle, modelForm, canvasDiv, modelInfoP, glbBtn, details);
+
+  workspace.append(treeSection, inspectorSection, previewSection);
+  root.append(heading, sourceForm, statusPara, workspace);
   container.append(root);
   const required = <T extends HTMLElement>(selector: string): T => {
     const element = root.querySelector<T>(selector);
