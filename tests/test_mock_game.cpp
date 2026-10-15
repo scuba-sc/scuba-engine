@@ -169,14 +169,14 @@ void Quotas(sco_plugin* self) {
 
 void RaycastInvalidationTests(sco_plugin* self) {
     const auto* entities = Query<sc_entities_v1>(SC_ENTITIES_NAME);
-    constexpr double pos[3]{ 0, 0, 10 }, rot[4]{ 0, 0, 0, 1 };
+    constexpr double pos[3]{ 10, 0, 10 }, rot[4]{ 0, 0, 0, 1 };
     uint64_t id = 0;
     CHECK(entities->spawn(self, "MOCK_Ship_Starter", 4, pos, rot, &id) == SCO_OK);
 
     sc_world_hit hit{};
     hit.size = sizeof(hit);
-    double rayFrom[3] = { 0, 0, 20 };
-    double rayDir[3] = { 0, 0, -1 };
+    double rayFrom[3] = { 0, 0, 10 };
+    double rayDir[3] = { 1, 0, 0 };
     std::string why;
 
     // 1. Raycast in zone 4 hits the new entity
