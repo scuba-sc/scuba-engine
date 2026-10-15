@@ -30,8 +30,10 @@ export function widget(kind: Kind, key: string): Widget {
     columns: 2, tooltip: '', severity: 0, firstRow: 0, visibleRows: 0, children: [] };
 }
 const isLayout = (kind: Kind) => kind === 'Column' || kind === 'Row';
-export function flatten(nodes: Widget[], parent = 0): { node: Widget; id: number; parent: number }[] {
-  const out: { node: Widget; id: number; parent: number }[] = [];
+export interface FlatRow { node: Widget; id: number; parent: number }
+
+export function flatten(nodes: Widget[], parent = 0): FlatRow[] {
+  const out: FlatRow[] = [];
   const visit = (entries: Widget[], owner: number) => {
     for (const node of entries) {
       const id = out.length + 1;
@@ -41,6 +43,32 @@ export function flatten(nodes: Widget[], parent = 0): { node: Widget; id: number
   };
   visit(nodes, parent);
   return out;
+}
+
+export class DesignIndex {
+  readonly rows: FlatRow[];
+  readonly byKey: Map<string, FlatRow>;
+  readonly byNode: Map<Widget, FlatRow>;
+  readonly byId: Map<number, FlatRow>;
+
+  constructor(nodes: Widget[]) {
+    this.rows = flatten(nodes);
+    this.byKey = new Map();
+    this.byNode = new Map();
+    this.byId = new Map();
+
+    for (const row of this.rows) {
+      this.byKey.set(row.node.key, row);
+      this.byNode.set(row.node, row);
+      this.byId.set(row.id, row);
+    }
+  }
+
+  getSiblings(row: FlatRow, rootNodes: Widget[]): Widget[] {
+    if (!row.parent) return rootNodes;
+    const parentRow = this.byId.get(row.parent);
+    return parentRow ? parentRow.node.children : rootNodes;
+  }
 }
 export function validate(d: Design): void {
   const fail = (message: string): never => { throw new Error(message); };

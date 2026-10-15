@@ -1,6 +1,6 @@
 import './style.css';
 import type { PanelModule } from '../registry';
-import { flatten, isContainer, kinds, sampleDesigns, validate, widget, type Design, type Kind, type Language, type Widget } from './model';
+import { DesignIndex, isContainer, kinds, sampleDesigns, validate, widget, type Design, type Kind, type Language, type Widget } from './model';
 import { button, element, field, select } from './primitives';
 import * as cpp from '../../codegen/cpp';
 import * as csharp from '../../codegen/csharp';
@@ -80,7 +80,8 @@ export const designerPanel: PanelModule = {
       to.push(JSON.stringify(design)); design = JSON.parse(previous) as Design;
       selected = design.nodes[0].key; render();
     }
-    function current() { return flatten(design.nodes).find(row => row.node.key === selected)?.node; }
+    function currentIndex(index = new DesignIndex(design.nodes)) { return index; }
+    function current(index = currentIndex()) { return index.byKey.get(selected)?.node; }
     function update(change: () => void, redrawInspector = false) {
       remember(); change();
       renderOutline(); renderStage(); renderSource();
@@ -133,18 +134,20 @@ export const designerPanel: PanelModule = {
       let insertKind: Kind = 'Button';
       const palette = select('Add widget', kinds.map(kind => ({ value: kind, label: kind })), insertKind, value => { insertKind = value as Kind; });
       body.append(tree(design.nodes), palette, button('Insert widget', () => {
-        if (flatten(design.nodes).length >= 256) { message('A panel can contain at most 256 nodes', true); return; }
+        const idx = currentIndex();
+        if (idx.rows.length >= 256) { message('A panel can contain at most 256 nodes', true); return; }
         const n = widget(insertKind, String(++serial));
         update(() => {
-          const owner = current();
+          const owner = current(idx);
           (owner && isContainer(owner) ? owner.children : design.nodes).push(n);
           selected = n.key;
         }, true);
       }));
       const move = (offset: number) => {
-        const row = flatten(design.nodes).find(entry => entry.node.key === selected);
+        const idx = currentIndex();
+        const row = idx.byKey.get(selected);
         if (!row) return;
-        const siblings = row.parent ? flatten(design.nodes)[row.parent - 1].node.children : design.nodes;
+        const siblings = idx.getSiblings(row, design.nodes);
         const at = siblings.indexOf(row.node), to = at + offset;
         if (to < 0 || to >= siblings.length) return;
         update(() => { siblings.splice(at, 1); siblings.splice(to, 0, row.node); });
@@ -152,11 +155,12 @@ export const designerPanel: PanelModule = {
       const rowActions = element('div', '', 'designer-actions');
       rowActions.append(button('Move up', () => move(-1)), button('Move down', () => move(1)));
       body.append(rowActions, button('Delete selected', () => {
-        const row = flatten(design.nodes).find(entry => entry.node.key === selected);
+        const idx = currentIndex();
+        const row = idx.byKey.get(selected);
         if (!row || (design.nodes.length === 1 && design.nodes[0] === row.node)) {
           message('Keep at least one root widget', true); return;
         }
-        const siblings = row.parent ? flatten(design.nodes)[row.parent - 1].node.children : design.nodes;
+        const siblings = idx.getSiblings(row, design.nodes);
         update(() => { siblings.splice(siblings.indexOf(row.node), 1); selected = design.nodes[0].key; }, true);
       }));
       outline.append(body);
@@ -165,13 +169,14 @@ export const designerPanel: PanelModule = {
       try { validate(design); } catch { return; }
       stage.querySelector('.designer-stage')?.remove();
       const body = element('div', '', 'designer-stage');
-      body.append(element('p', `${flatten(design.nodes).length} nodes / synthetic preview`, 'designer-badge'));
+      const index = currentIndex();
+      body.append(element('p', `${index.rows.length} nodes / synthetic preview`, 'designer-badge'));
       const preview = toDom(renderPanelView(designSnapshot(design)), document, event => {
         update(() => applyPreviewEvent(design, event));
         if (event.kind === 'button') message('Preview button activated');
       });
       preview.classList.add('designer-preview');
-      for (const row of flatten(design.nodes)) {
+      for (const row of index.rows) {
         const item = preview.querySelector<HTMLElement>(`[data-node-id="${row.id}"]`);
         if (!item) continue;
         item.classList.add('designer-node');
@@ -191,9 +196,11 @@ export const designerPanel: PanelModule = {
       const body = element('div', '', 'designer-body');
       body.append(field('Plugin id', design.id, value => update(() => { design.id = value; })),
         field('Panel title', design.title, value => update(() => { design.title = value; })));
-      const n = current();
+      const index = currentIndex();
+      const n = current(index);
       if (n) {
-        body.append(element('p', `${n.kind} / node ${flatten(design.nodes).find(row => row.node === n)!.id}`, 'designer-badge'));
+        const row = index.byNode.get(n)!;
+        body.append(element('p', `${n.kind} / node ${row.id}`, 'designer-badge'));
         if (!isContainer(n)) body.append(field('Label', n.label, value => update(() => { n.label = value; })));
         const check = (label: string, value: boolean, change: (value: boolean) => void) => {
           const wrapper = element('label', '', 'designer-field');
@@ -221,15 +228,19 @@ export const designerPanel: PanelModule = {
         if (['Combo', 'List'].includes(n.kind)) body.append(numeric('Selection index', 'index'));
         if (n.kind === 'Table') body.append(numeric('Columns', 'columns'));
         if (['List', 'Table'].includes(n.kind)) body.append(numeric('First row', 'firstRow'), numeric('Visible rows (0 = all)', 'visibleRows'));
-        const descendants = new Set(flatten([n]).map(row => row.node.key));
-        const row = flatten(design.nodes).find(entry => entry.node === n)!;
-        const parentKey = row.parent ? flatten(design.nodes)[row.parent - 1].node.key : '';
-        body.append(select('Parent', [{ value: '', label: 'Panel root' }, ...flatten(design.nodes)
+        const descendants = new Set(new DesignIndex([n]).rows.map(r => r.node.key));
+        const parentRow = row.parent ? index.byId.get(row.parent) : undefined;
+        const parentKey = parentRow ? parentRow.node.key : '';
+        body.append(select('Parent', [{ value: '', label: 'Panel root' }, ...index.rows
           .filter(entry => isContainer(entry.node) && !descendants.has(entry.node.key))
           .map(entry => ({ value: entry.node.key, label: `${entry.node.kind} ${entry.id}` }))], parentKey, value => {
           update(() => {
-            const siblings = row.parent ? flatten(design.nodes)[row.parent - 1].node.children : design.nodes;
-            const target = value ? flatten(design.nodes).find(entry => entry.node.key === value)!.node.children : design.nodes;
+            const currentIdx = currentIndex();
+            const currentRow = currentIdx.byNode.get(n);
+            if (!currentRow) return;
+            const siblings = currentIdx.getSiblings(currentRow, design.nodes);
+            const targetRow = value ? currentIdx.byKey.get(value) : undefined;
+            const target = targetRow ? targetRow.node.children : design.nodes;
             siblings.splice(siblings.indexOf(n), 1); target.push(n);
           }, true);
         }));
