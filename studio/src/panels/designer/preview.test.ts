@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { sampleDesigns, validate } from './model';
+import { sampleDesigns } from './model';
 import { applyPreviewEvent, designSnapshot } from './preview';
 import { findNode, renderPanelView } from '../widgets/view';
+import { renderStage } from './index';
 
 describe('designer shared renderer', () => {
   it('preserves nesting, paging and severity in the widget wire model', () => {
@@ -25,23 +26,24 @@ describe('designer shared renderer', () => {
     expect(designSnapshot(design).nodes.find(node => node.kind === 'toggle')?.value).toBe(1);
   });
 
-  it('logs a warning when design validation fails during stage rendering', () => {
+  it('logs a warning and leaves stage DOM unchanged when renderStage encounters an invalid design', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const invalidDesign = structuredClone(sampleDesigns()[0]);
     invalidDesign.title = ''; // Empty title triggers a validation failure
 
-    // Verify validate throws an error for invalid design and can be caught / logged
-    let validationError: Error | undefined;
-    try {
-      validate(invalidDesign);
-    } catch (error) {
-      validationError = error as Error;
-      console.warn('Design validation failed:', error);
-    }
+    const mockStage = {
+      querySelector: vi.fn(),
+      append: vi.fn(),
+    } as unknown as HTMLElement;
 
-    expect(validationError).toBeDefined();
-    expect(validationError?.message).toBe('Panel title is required');
-    expect(warnSpy).toHaveBeenCalledWith('Design validation failed:', validationError);
+    const result = renderStage(invalidDesign, mockStage);
+
+    expect(result).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith('Design validation failed:', expect.any(Error));
+    expect(warnSpy.mock.calls[0][1].message).toBe('Panel title is required');
+    expect(mockStage.querySelector).not.toHaveBeenCalled();
+    expect(mockStage.append).not.toHaveBeenCalled();
+
     warnSpy.mockRestore();
   });
 });

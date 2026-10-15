@@ -83,7 +83,7 @@ export const designerPanel: PanelModule = {
     function current() { return flatten(design.nodes).find(row => row.node.key === selected)?.node; }
     function update(change: () => void, redrawInspector = false) {
       remember(); change();
-      renderOutline(); renderStage(); renderSource();
+      renderOutline(); renderStageLocal(); renderSource();
       if (redrawInspector) renderInspector();
     }
     function renderSource() {
@@ -105,7 +105,7 @@ export const designerPanel: PanelModule = {
         remember(); design = parsed;
         if (!current()) selected = design.nodes[0].key;
         validSource = true; exportButton.disabled = !['c', 'cpp'].includes(language);
-        renderOutline(); renderStage(); renderInspector();
+        renderOutline(); renderStageLocal(); renderInspector();
         undoButton.disabled = !undo.length; redoButton.disabled = !redo.length;
         message('Source parsed / canvas updated');
       } catch (error) {
@@ -121,7 +121,7 @@ export const designerPanel: PanelModule = {
         for (const n of nodes) {
           const li = element('li');
           const b = button(`${n.kind}${n.label ? ` / ${n.label}` : ''}`, () => {
-            selected = n.key; renderOutline(); renderStage(); renderInspector();
+            selected = n.key; renderOutline(); renderStageLocal(); renderInspector();
           });
           b.setAttribute('aria-pressed', String(n.key === selected));
           li.append(b);
@@ -161,35 +161,21 @@ export const designerPanel: PanelModule = {
       }));
       outline.append(body);
     }
-    function renderStage() {
-      try {
-        validate(design);
-      } catch (error) {
-        console.warn('Design validation failed:', error);
-        return;
-      }
-      stage.querySelector('.designer-stage')?.remove();
-      const body = element('div', '', 'designer-stage');
-      body.append(element('p', `${flatten(design.nodes).length} nodes / synthetic preview`, 'designer-badge'));
-      const preview = toDom(renderPanelView(designSnapshot(design)), document, event => {
-        update(() => applyPreviewEvent(design, event));
-        if (event.kind === 'button') message('Preview button activated');
-      });
-      preview.classList.add('designer-preview');
-      for (const row of flatten(design.nodes)) {
-        const item = preview.querySelector<HTMLElement>(`[data-node-id="${row.id}"]`);
-        if (!item) continue;
-        item.classList.add('designer-node');
-        item.dataset.key = row.node.key;
-        item.dataset.kind = row.node.kind;
-        item.dataset.selected = String(row.node.key === selected);
-        item.addEventListener('click', event => {
-          event.stopPropagation(); selected = row.node.key; renderOutline(); renderInspector();
+    function renderStageLocal() {
+      renderStage(
+        design,
+        stage,
+        selected,
+        event => {
+          update(() => applyPreviewEvent(design, event));
+          if (event.kind === 'button') message('Preview button activated');
+        },
+        key => {
+          selected = key; renderOutline(); renderInspector();
           for (const visible of stage.querySelectorAll<HTMLElement>('.designer-node'))
             visible.dataset.selected = String(visible.dataset.key === selected);
-        });
-      }
-      body.append(preview); stage.append(body);
+        }
+      );
     }
     function renderInspector() {
       inspector.querySelector('.designer-body')?.remove();
@@ -254,8 +240,44 @@ export const designerPanel: PanelModule = {
         if (!disposed) message(`Export failed: ${error instanceof Error ? error.message : String(error)}`, true);
       } finally { if (!disposed) exportButton.disabled = !validSource || !['c', 'cpp'].includes(language); }
     }
-    function render() { renderOutline(); renderStage(); renderInspector(); renderSource(); }
+    function render() { renderOutline(); renderStageLocal(); renderInspector(); renderSource(); }
     render();
     return () => { disposed = true; root.remove(); };
   },
 };
+
+export function renderStage(
+  design: Design,
+  stage: HTMLElement,
+  selected = '',
+  onPreviewEvent?: (event: any) => void,
+  onNodeSelect?: (key: string) => void
+): boolean {
+  try {
+    validate(design);
+  } catch (error) {
+    console.warn('Design validation failed:', error);
+    return false;
+  }
+  stage.querySelector('.designer-stage')?.remove();
+  const body = element('div', '', 'designer-stage');
+  body.append(element('p', `${flatten(design.nodes).length} nodes / synthetic preview`, 'designer-badge'));
+  const preview = toDom(renderPanelView(designSnapshot(design)), document, event => {
+    if (onPreviewEvent) onPreviewEvent(event);
+  });
+  preview.classList.add('designer-preview');
+  for (const row of flatten(design.nodes)) {
+    const item = preview.querySelector<HTMLElement>(`[data-node-id="${row.id}"]`);
+    if (!item) continue;
+    item.classList.add('designer-node');
+    item.dataset.key = row.node.key;
+    item.dataset.kind = row.node.kind;
+    item.dataset.selected = String(row.node.key === selected);
+    item.addEventListener('click', event => {
+      event.stopPropagation();
+      if (onNodeSelect) onNodeSelect(row.node.key);
+    });
+  }
+  body.append(preview); stage.append(body);
+  return true;
+}
