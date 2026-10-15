@@ -96,6 +96,12 @@ void TestHeaderHasToken() {
     CHECK(req.header_has_token("connection", "close"));
     CHECK(!req.header_has_token("connection", "open"));
 
+    // Empty token search against empty item list and non-empty item list
+    req.headers = {{"connection", ",,"}};
+    CHECK(!req.header_has_token("connection", ""));
+    req.headers = {{"connection", "keep-alive, upgrade"}};
+    CHECK(!req.header_has_token("connection", ""));
+
     // Consecutive commas and leading/trailing commas
     req.headers = {{"connection", ",, keep-alive, , upgrade,,"}};
     CHECK(req.header_has_token("connection", "keep-alive"));
@@ -108,14 +114,16 @@ void TestHeaderHasToken() {
     CHECK(!req.header_has_token("connection", "alive"));
     CHECK(!req.header_has_token("connection", "keep-alive-extra"));
 
-    // Multiple header fields with the same lowerName
+    // Multiple header fields with the same lowerName across different headers and parameterized values
     req.headers = {
-        {"connection", "keep-alive"},
-        {"connection", "upgrade"}
+        {"accept-encoding", "gzip;q=1.0"},
+        {"accept-encoding", "deflate, br"}
     };
-    CHECK(req.header_has_token("connection", "keep-alive"));
-    CHECK(req.header_has_token("connection", "upgrade"));
-    CHECK(!req.header_has_token("connection", "close"));
+    CHECK(req.header_has_token("accept-encoding", "gzip;q=1.0"));
+    CHECK(req.header_has_token("accept-encoding", "deflate"));
+    CHECK(req.header_has_token("accept-encoding", "br"));
+    CHECK(!req.header_has_token("accept-encoding", "gzip"));
+    CHECK(!req.header_has_token("accept-encoding", "zstd"));
 }
 
 }  // namespace
