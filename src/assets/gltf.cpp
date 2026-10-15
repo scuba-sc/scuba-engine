@@ -72,7 +72,7 @@ void Validate(const Json& document, std::span<const uint8_t> binary) {
         const size_t component = Number(Member(accessor, "componentType"));
         const size_t width = component == 5120 || component == 5121 ? 1 : component == 5122 || component == 5123 ? 2 :
             component == 5125 || component == 5126 ? 4 : 0;
-        const std::string& type = Member(accessor, "type").as_string();
+        const std::string_view type = Member(accessor, "type").as_string();
         const size_t components = type == "SCALAR" ? 1 : type == "VEC2" ? 2 : type == "VEC3" ? 3 : type == "VEC4" ? 4 : 0;
         if (width == 0 || components == 0) throw Error("unsupported glTF accessor type (only scalar/vectors)");
         const size_t element = width * components, stride = Number(view, "byteStride", element);
@@ -233,9 +233,9 @@ Bytes ReadGltf(const std::filesystem::path& path) {
     if (!document || !document->is_object()) throw Error("invalid glTF JSON: " + error);
     const auto& buffers = Member(*document, "buffers");
     if (!buffers.is_array() || buffers.size() != 1) throw Error("glTF import requires one local .bin buffer");
-    const std::string& uri = Member(buffers.at(0), "uri").as_string();
+    const std::string_view uri = Member(buffers.at(0), "uri").as_string();
     const std::filesystem::path relative(uri);
-    if (uri.empty() || uri.find_first_of(":%\\?#") != std::string::npos || relative.is_absolute())
+    if (uri.empty() || uri.find_first_of(":%\\?#") != std::string_view::npos || relative.is_absolute())
         throw Error("glTF buffer must be a relative local .bin file (no data or network URI)");
     for (const auto& part : relative)
         if (part == "..") throw Error("glTF buffer path escapes model directory");
