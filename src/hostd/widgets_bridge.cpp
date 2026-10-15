@@ -106,8 +106,15 @@ Json WidgetPanelToJson(const sco::widgets::Panel& panel, uint64_t revision) {
 }
 
 Json WidgetCapabilitiesJson() {
+    static constexpr const char* kFeatures[] = {
+        "update_nodes", "remove_nodes", "severity", "tooltip", "paging", "event_row", "coalesced_render"
+    };
+    static constexpr const char* kEvents[] = {
+        "button", "toggle", "slider", "combo", "list", "text_input", "page"
+    };
+
     Json features = Json::MakeArray();
-    for (const char* f : { "update_nodes", "remove_nodes", "severity", "tooltip", "paging", "event_row", "coalesced_render" })
+    for (const char* f : kFeatures)
         features.push_back(f);
     Json limits = Json::MakeObject();
     limits.set("max_panels", SCO_WIDGETS_MAX_PANELS);
@@ -118,7 +125,8 @@ Json WidgetCapabilitiesJson() {
     limits.set("max_text", SCO_WIDGETS_MAX_TEXT);
     limits.set("max_events", SCO_WIDGETS_MAX_EVENTS);
     Json events = Json::MakeArray();
-    for (const char* e : { "button", "toggle", "slider", "combo", "list", "text_input", "page" }) events.push_back(e);
+    for (const char* e : kEvents)
+        events.push_back(e);
     Json out = Json::MakeObject();
     out.set("service", SCO_WIDGETS_NAME);
     out.set("version", "1.1");
