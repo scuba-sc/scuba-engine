@@ -1,7 +1,7 @@
 # mp_chat
 
 Room-aware multiplayer chat as a native sco plugin (C11), built against the sco-core
-`host-source-sc` 2.2.0 kit with the kit's `sdk/cmake/sco-plugin.cmake`.
+`host-source-sc` 2.3.0 kit with the kit's `sdk/cmake/sco-plugin.cmake`.
 
 - **sco.net 1.0**: one reliable channel `mp_chat.msg`. Subscribes to `net.peer` (joined/left
   notices) and `net.state` (session started/ended).
@@ -40,12 +40,12 @@ but not encrypted, so do not send anything private.
 ## Build and test
 
 ```
-cmake -S plugins -B build-plugins -DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.2.0 assets>
+cmake -S plugins -B build-plugins -DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.3.0 assets>
 cmake --build build-plugins --target mp_chat mp_chat_model_test mp_chat_host_test
 ctest --test-dir build-plugins --output-on-failure
 ```
 
-Without `SCUBA_SDK_ARCHIVE_DIR` the kit is downloaded from the sco-core `sdk-v2.2.0` release, and
+Without `SCUBA_SDK_ARCHIVE_DIR` the kit is downloaded from the sco-core `sdk-v2.3.0` release, and
 its SHA-256 is checked either way (`cmake/ScubaSdk.cmake`). The built plugin folder is
 `build-plugins/mp_chat/root/mp_chat/` (`plugin.ini` + `mp_chat.dll`). Copy it into a host's
 `data/plugins/`.

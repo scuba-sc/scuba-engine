@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// diegetic_asop: the game.asop section's switch. sco-core 2.2.0 publishes no game.asop service and
-// no sc_asop.h, so the section only activates when query_service answers a game.asop 1.x table.
+// diegetic_asop: the game.asop section's switch. The mock game publishes no game.asop service and
+// sc_asop.h (2.3.0) is not wired yet, so the section only activates when query_service answers a game.asop 1.x table.
 // Even then this build calls nothing in it: it reads the table's leading uint32_t size (the
 // convention every service table follows) and reports it. The calls get wired when the public
 // header ships.

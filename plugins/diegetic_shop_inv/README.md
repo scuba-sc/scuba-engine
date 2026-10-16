@@ -26,7 +26,7 @@ build-app4/diegetic_shop_inv/sco-plugin-check build-app4/diegetic_shop_inv/root/
 
 `plugins/CMakeLists.txt` is a standalone configure entry point as well as an
 add-subdirectory registry. It reuses `cmake/ScubaSdk.cmake` to download the
-published `sdk-v2.2.0` host-source kit and verify SHA-256
+published `sdk-v2.3.0` host-source kit and verify SHA-256
 `0e9f45bc9affb32cf0d158eec396862bf1943d556cc120cf10d5b027e0f96f36`.
 For offline development, add `-DSCUBA_SDK_ARCHIVE_DIR=<release-payload-directory>`
 to the configure command; this option still verifies the archive hash.

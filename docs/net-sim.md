@@ -18,7 +18,7 @@ cd ..
 ./build/scuba-hostd --studio studio/dist
 ```
 
-The foundation downloads the published `sdk-v2.2.0` host-source kit and verifies
+The foundation downloads the published `sdk-v2.3.0` host-source kit and verifies
 its pinned SHA-256. For offline work, set `SCUBA_SDK_ARCHIVE_DIR` at configure
 time to a directory containing the release archive; the same hash check applies.
 

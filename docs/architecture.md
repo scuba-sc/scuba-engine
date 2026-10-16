@@ -1,8 +1,8 @@
 # scuba-engine architecture
 
 scuba-engine is a studio for building and testing sco-core plugins and UI without the game. It
-consumes the published sco-core SDK release (today `sdk-v2.2.0`, the
-`sco-sdk-host-source-sc-2.2.0.zip` kit) and never vendors its sources. Nothing in this repository
+consumes the published sco-core SDK release (today `sdk-v2.3.0`, the
+`sco-sdk-host-source-sc-2.3.0.zip` kit) and never vendors its sources. Nothing in this repository
 has run inside Star Citizen; it ships no game files or game data.
 
 ## Integrated subsystems
@@ -25,7 +25,7 @@ has run inside Star Citizen; it ships no game files or game data.
 6. **NetSandbox** brokers separate ticking kernel processes, private JSON-line pipes and IPC
    namespaces. Its sample plugin uses real authenticated loopback UDP; see [net-sim.md](net-sim.md).
 
-No live-link module was delivered by ENG-8. SDK 2.2.0 diagnostics admits metadata, not spatial
+No live-link module was delivered by ENG-8. SDK 2.3.0 diagnostics admits metadata, not spatial
 observations. Camera/entity streaming requires a separately reviewed upstream endpoint; this
 integration neither invents that endpoint nor transports positions through logs or metadata.
 

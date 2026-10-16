@@ -34,7 +34,7 @@ reports the result plus `last_error`'s text.
 
 ## game.asop
 
-sco-core 2.2.0 publishes neither `game.asop` nor `sc_asop.h`. On every panel refresh, including
+sco-core 2.3.0 ships `sc_asop.h`, but the mock game does not publish `game.asop` yet (roadmap E-2). On every panel refresh, including
 `game.ready`, the plugin queries `game.asop` 1.0. The ASOP section appears only when that query
 answers a table. Even then the plugin reads only the table's leading `size` field and calls nothing
 in it. When the query fails, the section stays inert and adds no panel nodes. The ASOP calls get

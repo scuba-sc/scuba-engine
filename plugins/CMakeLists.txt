@@ -1,7 +1,7 @@
 # scuba-engine plugins: one add_subdirectory per plugin folder.
 #
 # Built from a parent project that has already included cmake/ScubaSdk.cmake, or on its own:
-#   cmake -S plugins -B build-plugins [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.2.0 assets>]
+#   cmake -S plugins -B build-plugins [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.3.0 assets>]
 #   cmake --build build-plugins && ctest --test-dir build-plugins --output-on-failure
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   cmake_minimum_required(VERSION 3.21)
