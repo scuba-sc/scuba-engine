@@ -1,9 +1,32 @@
 #include "check.h"
 #include "hostd/base64.h"
+#include "hostd/server.h"
 #include "hostd/sha1.h"
 #include "hostd/ws.h"
 
 #include <string>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+using SocketHandle = SOCKET;
+const SocketHandle kInvalidSocket = INVALID_SOCKET;
+inline void CloseSocket(SocketHandle s) { closesocket(s); }
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+using SocketHandle = int;
+const SocketHandle kInvalidSocket = -1;
+inline void CloseSocket(SocketHandle s) { ::close(s); }
+#endif
 
 using namespace scuba::hostd;
 
@@ -194,6 +217,117 @@ void TestProtocolErrors() {
     CHECK(!IsValidUtf8("\xc0\xaf"));
 }
 
+SocketHandle ConnectClient(uint16_t port) {
+    SocketHandle s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s == kInvalidSocket) return kInvalidSocket;
+#ifdef _WIN32
+    DWORD timeoutMs = 2000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof timeoutMs);
+#else
+    timeval tv{};
+    tv.tv_sec = 2;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+#endif
+    sockaddr_in sin{};
+    sin.sin_family = AF_INET;
+    auto* bytes = reinterpret_cast<uint8_t*>(&sin.sin_port);
+    bytes[0] = static_cast<uint8_t>(port >> 8);
+    bytes[1] = static_cast<uint8_t>(port & 0xFFu);
+    inet_pton(AF_INET, "127.0.0.1", &sin.sin_addr);
+    if (connect(s, reinterpret_cast<const sockaddr*>(&sin), sizeof sin) != 0) {
+        CloseSocket(s);
+        return kInvalidSocket;
+    }
+    return s;
+}
+
+bool SendAll(SocketHandle s, const std::string& data) {
+    size_t off = 0;
+    while (off < data.size()) {
+#ifdef _WIN32
+        const int r = send(s, data.data() + off, static_cast<int>(data.size() - off), 0);
+#else
+        const ssize_t r = send(s, data.data() + off, data.size() - off, 0);
+#endif
+        if (r <= 0) return false;
+        off += static_cast<size_t>(r);
+    }
+    return true;
+}
+
+void TestServerClientCount() {
+    Registry registry;
+    Broadcaster broadcaster;
+    ServerOptions options;
+    options.bindAddress = "127.0.0.1";
+    options.port = 0;
+
+    Server server(options, registry, broadcaster);
+    std::string err;
+    CHECK(server.Start(&err));
+    CHECK(err.empty());
+    const uint16_t port = server.port();
+    CHECK(port != 0);
+
+    // Initial state: no connected clients
+    CHECK(server.client_count() == 0);
+
+    auto pollForCount = [&](size_t expectedCount) {
+        for (int i = 0; i < 50; ++i) {
+            server.Poll(10);
+            if (server.client_count() == expectedCount) return true;
+        }
+        std::fprintf(stderr, "pollForCount timed out: expected %zu, actual %zu\n", expectedCount, server.client_count());
+        return false;
+    };
+
+    // 1. Non-WebSocket HTTP connection: should NOT increment client_count
+    SocketHandle httpSock = ConnectClient(port);
+    CHECK(httpSock != kInvalidSocket);
+    const std::string httpReq = "GET / HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) + "\r\n\r\n";
+    CHECK(SendAll(httpSock, httpReq));
+    server.Poll(10);
+    server.Poll(10);
+    char httpBuf[1024] = {};
+#ifdef _WIN32
+    const int httpRecv = recv(httpSock, httpBuf, sizeof(httpBuf) - 1, 0);
+#else
+    const ssize_t httpRecv = recv(httpSock, httpBuf, sizeof(httpBuf) - 1, 0);
+#endif
+    CHECK(httpRecv > 0);
+    CHECK(std::string(httpBuf, httpRecv > 0 ? static_cast<size_t>(httpRecv) : 0).rfind("HTTP/1.1 200 OK", 0) == 0);
+    CHECK(server.client_count() == 0);
+    CloseSocket(httpSock);
+    CHECK(pollForCount(0));
+
+    // 2. First WebSocket client connection: should increment client_count to 1
+    SocketHandle ws1 = ConnectClient(port);
+    CHECK(ws1 != kInvalidSocket);
+    const std::string wsReq = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) +
+                              "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n"
+                              "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n";
+    CHECK(SendAll(ws1, wsReq));
+    CHECK(pollForCount(1));
+
+    // 3. Second WebSocket client connection: should increment client_count to 2
+    SocketHandle ws2 = ConnectClient(port);
+    CHECK(ws2 != kInvalidSocket);
+    CHECK(SendAll(ws2, wsReq));
+    CHECK(pollForCount(2));
+
+    // 4. Disconnect first WebSocket client: client_count should drop to 1
+    CloseSocket(ws1);
+    CHECK(pollForCount(1));
+
+    // 5. Disconnect second WebSocket client: client_count should drop to 0
+    CloseSocket(ws2);
+    CHECK(pollForCount(0));
+
+    // 6. Stop server: client_count remains 0
+    server.Stop();
+    CHECK(server.client_count() == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -203,5 +337,6 @@ int main() {
     TestLengthsAndPartialInput();
     TestFragmentsAndControl();
     TestProtocolErrors();
+    TestServerClientCount();
     return CheckExit("test_websocket");
 }
