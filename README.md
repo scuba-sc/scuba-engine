@@ -42,6 +42,8 @@ On Windows add `-A x64` to the configure and `--config Release` / `-C Release` t
 
 ## Build the studio
 
+The web studio is in maintenance mode; see [studio/MAINTENANCE.md](studio/MAINTENANCE.md) for what is accepted.
+
 ```sh
 cd studio
 npm ci
