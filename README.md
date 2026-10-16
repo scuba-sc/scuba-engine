@@ -66,4 +66,6 @@ The bridge is unauthenticated and loopback-only by default; it refuses foreign `
 
 ## Limits
 
+`game.actor_stats` and `game.actor_stats_write` are mocked only once the pinned kit ships their headers (not in sdk-v2.3.0; see [docs/mock-game.md](docs/mock-game.md)). Not run in game.
+
 Mock services are a deterministic test model, not the game: no real physics, entitlement, authenticated game networking, or proprietary catalogs. A shop purchase only debits synthetic balance; it grants no inventory. `game.asop` and `game.contracts` return fixed synthetic values; the game pack holds their capabilities off until an in-game run confirms them. C# and Lua generation support only the published builder subset; native folder export supports C/C++ only. C# requires a separate dotnet environment; CI is its first compile opportunity. Linux GCC and Windows MSVC platform paths require their own builds; a macOS pass is not cross-platform certification.

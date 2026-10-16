@@ -46,6 +46,10 @@ const ServiceDef& WorldService();
 const ServiceDef& WorldControlService();
 const ServiceDef& SpawnService();
 const ServiceDef& TeleportSpatialService();
+#ifdef SCUBA_HAVE_ACTOR_STATS
+const ServiceDef& ActorStatsService();        // actor_stats.cpp, built when the kit has the headers
+const ServiceDef& ActorStatsWriteService();
+#endif
 
 // game.world's ray cast (world.cpp), shared with game.world.control's filtered cast. skip: entity
 // ids the ray passes through. SCO_OK with *hit filled, or SCO_NOT_FOUND with `why`.

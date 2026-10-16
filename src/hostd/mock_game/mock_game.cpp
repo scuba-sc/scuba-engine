@@ -22,12 +22,16 @@ constexpr ServiceFn kServices[] = {
     LoadoutService,    MiningService,       MissionsService,   OwnedService,       PrefabsService,
     PrivateSessionService, QuantumService,  RelocationService, ReputationService,  VehiclesService,
     WorldService,      WorldControlService, SpawnService,      TeleportSpatialService,
+#ifdef SCUBA_HAVE_ACTOR_STATS
+    ActorStatsService, ActorStatsWriteService,
+#endif
 };
 
 struct CapDef {
     const char* name;
     const char* service;
     bool gamePack;
+    bool defaultOn = true;   // in the "all" profile; false for a write switch that is off until turned on
 };
 
 // gamePack: false where the kit's header says the game pack holds the capability off.
@@ -84,6 +88,10 @@ constexpr CapDef kCaps[] = {
     { "game.events.actor_died", "game.* events", true },
     { "game.events.zone_changed", "game.* events", true },
     { "game.events.vehicle_seat", "game.* events", false },
+#ifdef SCUBA_HAVE_ACTOR_STATS
+    { "game.actor_stats.read", "game.actor_stats", true },
+    { "game.actor_stats.write", "game.actor_stats_write", false, false },
+#endif
 };
 
 bool g_published = false;
@@ -186,7 +194,7 @@ bool SetCapability(const std::string& name, bool ready) {
 bool ApplyProfile(const std::string& profile) {
     if (profile != "all" && profile != "game_pack" && profile != "none") return false;
     for (const auto& c : kCaps) {
-        const bool on = profile == "all" || (profile == "game_pack" && c.gamePack);
+        const bool on = (profile == "all" && c.defaultOn) || (profile == "game_pack" && c.gamePack);
         sco::caps::Set(c.name, on, on ? nullptr : "off in the scuba mock game profile");
     }
     return true;

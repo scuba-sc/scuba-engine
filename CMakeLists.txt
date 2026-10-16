@@ -21,6 +21,7 @@ find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 include(cmake/ScubaSdk.cmake)
+include(cmake/ScubaActorStats.cmake)
 
 function(scuba_warnings target)
   if(MSVC)
@@ -85,6 +86,13 @@ add_library(scuba_mock_game STATIC
 target_link_libraries(scuba_mock_game PUBLIC scuba_bridge sco_app)
 target_include_directories(scuba_mock_game PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/plugins/diegetic_shop_inv/src")
+if(SCUBA_HAVE_ACTOR_STATS)
+  target_sources(scuba_mock_game PRIVATE src/hostd/mock_game/actor_stats.cpp)
+  target_compile_definitions(scuba_mock_game PUBLIC SCUBA_HAVE_ACTOR_STATS=1)
+  if(SCUBA_ACTOR_STATS_INCLUDE_DIR)
+    target_include_directories(scuba_mock_game PUBLIC "${SCUBA_ACTOR_STATS_INCLUDE_DIR}")
+  endif()
+endif()
 scuba_warnings(scuba_mock_game)
 add_library(scuba_assets STATIC
   src/assets/io.cpp

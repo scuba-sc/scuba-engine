@@ -28,6 +28,13 @@ namespace {
 
 void Log(const char* line) { std::puts(line); }
 
+// game.actor_stats(+_write) add two services and two capabilities when the kit has the headers.
+#ifdef SCUBA_HAVE_ACTOR_STATS
+constexpr size_t kActorStatsExtra = 2;
+#else
+constexpr size_t kActorStatsExtra = 0;
+#endif
+
 template<class T>
 const T* Query(const char* name, uint32_t version = 0x10000u) {
     const void* out = nullptr;
@@ -58,7 +65,7 @@ bool Success(const Json& response) { return response.find("result") != nullptr; 
 
 void ToggleTests(const sco_api* api) {
     const auto caps = mg::Capabilities();
-    CHECK(caps.size() == 52);
+    CHECK(caps.size() == 52 + kActorStatsExtra);
     for (const auto& cap : caps) {
         CHECK(mg::SetCapability(cap.name, false));
         CHECK(api->has(cap.name.c_str()) == 0);
@@ -237,7 +244,7 @@ int main(int argc, char** argv) {
         const auto& plugin = sco::app::Plugins().back();
         CHECK(plugin.manifest.id == "mock_game_probe" && plugin.state == sco::plugins::State::Loaded);
         if (plugin.state != sco::plugins::State::Loaded) throw std::runtime_error(plugin.reason);
-        CHECK(mg::Services().size() == 24);
+        CHECK(mg::Services().size() == 24 + kActorStatsExtra);
         for (const auto& service : mg::Services()) CHECK(service.published);
         const sco_api* api = sco::host::BuildApi({ platform.hostVersion });
         ToggleTests(api);
