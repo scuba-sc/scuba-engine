@@ -8,7 +8,8 @@ Use `--no-mock-game` to omit the synthetic provider.
 The ABI is the published sdk-v2.3.0 host-source kit's `include/sc_*.h`.
 Every member of every game service table in that kit has an implementation.
 `sc_game_events.h` defines bus payloads, **not** a `game.events` service table.
-`game.asop` and `game.contracts` are absent from this version and are not invented.
+`game.asop` and `game.contracts` (new in 2.3.0) are read-only tables with fixed
+synthetic values. Neither value comes from the game.
 The wire/IPC headers `sc_net.h`, `sc_ipc.h`, `sc_titanlink.h`, and
 `sc_voxel_bridge.h` do not declare additional game service tables.
 
@@ -27,7 +28,7 @@ checks its pinned SHA-256. For local builds, the optional
 mandatory. Kit sources stay in the ignored build tree.
 
 `mock_game_plugins` loads the compiled native `mock_game_probe.dll` through
-the real kit loader, queries all 22 tables, and calls every member. Its commands
+the real kit loader, queries all 24 tables, and calls every member. Its commands
 run a seed phase, two explicit host ticks (streaming and watch delivery), and an
 assertion phase. Coverage includes result codes, text-size handshakes, wrong
 threads, missing classes/entities, ownership, retained removals, keyed replay,
@@ -97,7 +98,12 @@ on the next tick. `Scene::streamTicks` can be changed by C++ test/host consumers
 
 Loadout items: `MockHelmet_Basic`, `MockArmor_Torso_Light`,
 `MockArmor_Arms_Light`, `MockArmor_Legs_Light`, `MockUndersuit_Basic`,
-`MockBackpack_Small`, `MockVisor_Tinted`.
+`MockBackpack_Small`, `MockVisor_Tinted`, and for the 1.1 weapon slots
+`MockRifle_Basic`, `MockPistol_Basic`, `MockOptic_Holo`, `MockMultitool_Basic`,
+`MockTool_Module_Mining`.
+ASOP: claim timeout 30 s, shard persisted. Mission stream radius 5000.
+`Asop()` and `Contracts()` in `services.h` let C++ tests edit them or mark the
+configuration not loaded (`SCO_NOT_FOUND`).
 Prefab catalog: `ObjectContainers/mock/crate_stack.socpak` and
 `ObjectContainers/mock/outpost_small.socpak` (names only, no assets/files).
 Cvars: `mock_hud_enabled=1`, `mock_debug_draw=0`, `mock_volumetric_fog=1`.
@@ -111,6 +117,8 @@ Versions are query-service arguments; the table's first field is its full size.
 | Table | Version | File | Members/behavior |
 |---|---|---|---|
 | `game.actors` | 1.1 | `actors.cpp` | Player IDs; owned NPC spawn/despawn; health, actor state, errors |
+| `game.asop` | 1.0 | `asop.cpp` | Synthetic claim timeout and shard-persisted flag, read only, errors |
+| `game.contracts` | 1.0 | `contracts.cpp` | Synthetic mission stream radius, read only, errors |
 | `game.creative` | 1.0 | `creative.cpp` | Four reversible flags, bounded fly speed, flag query, errors |
 | `game.cvars` | 1.0 | `cvars.cpp` | Exact-name bool observations; unknown name `NOT_FOUND` |
 | `game.cvars_write` | 1.0 | `cvars_write.cpp` | Exclusive per-name claim, canonical bool writes, first-value restore |
@@ -118,7 +126,7 @@ Versions are query-service arguments; the table's first field is its full size.
 | `game.entities` | 1.1 | `entities.cpp` | Alive, class, poses, owned spawn/despawn, keep, watches and radius queries |
 | `game.spatial` | 1.0 | `game_spatial.cpp` | Normalized full-pose conversion, zone records/find/pages; observed ancestry only |
 | `game.hangar` | 1.0 | `hangar.cpp` | Landing-area lift lookup, open/close intent, ATC cancellation, errors |
-| `game.loadout` | 1.0 | `loadout.cpp` | Typed batch equip with per-slot applied/missing/unsupported results |
+| `game.loadout` | 1.1 | `loadout.cpp` | Typed batch equip with per-slot applied/missing/unsupported results; weapon and multitool slots 8-21 also need `game.loadout.weapons` (else that slot stays `UNAVAILABLE`), 22+ `UNSUPPORTED` |
 | `game.mining` | 1.0 | `mining.cpp` | Owner request/state, tick-driven synthetic cell/promotion counters |
 | `game.missions` | 1.0 | `missions.cpp` | Offers, owner-scoped acceptance/status/progress/abandon, bounded script ingestion |
 | `game.owned` | 1.0 | `owned.cpp` | Retain/remove build, owned NPC/seat-NPC removal, receipt/forget |
@@ -192,11 +200,12 @@ IDs fit the exact JSON integer range (0..2^53-1). Player move positions use the
 specified zone; `camera:true` also moves the camera to player eye height in the
 world frame. Camera movement is otherwise independent of the player.
 
-The default `all` profile enables all 48 mock capabilities, including those the
+The default `all` profile enables all 52 mock capabilities, including those the
 real kit holds off. `game_pack` is a **header-derived testing profile**, not a
-claim about live engine readiness: it disables actors.state, entity watch/radius,
-hangar operations, mining, relocation, reputation checks, world free-camera flag
-and controls, and vehicle-seat events. `none` disables all 48. Boolean/string
+claim about live engine readiness: it disables actors.state, both ASOP reads, the
+contracts stream radius, entity watch/radius, hangar operations, loadout weapon
+slots, mining, relocation, reputation checks, world free-camera flag and controls,
+and vehicle-seat events. `none` disables all 52. Boolean/string
 legacy services retain their own ABI return conventions.
 
 Event commands send the SDK payload structs on the kernel bus, gated separately

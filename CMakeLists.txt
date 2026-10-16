@@ -57,6 +57,8 @@ add_library(scuba_mock_game STATIC
   src/hostd/mock_game/common.cpp
   src/hostd/mock_game/mock_game.cpp
   src/hostd/mock_game/actors.cpp
+  src/hostd/mock_game/asop.cpp
+  src/hostd/mock_game/contracts.cpp
   src/hostd/mock_game/creative.cpp
   src/hostd/mock_game/cvars.cpp
   src/hostd/mock_game/cvars_write.cpp

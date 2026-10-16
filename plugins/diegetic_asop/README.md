@@ -6,8 +6,8 @@ driving the `game.hangar` 1.0 service (`include/sc_hangar.h`). The panel is mean
 and for scuba-engine's diegetic kiosk preview.
 
 Nothing here has run in Star Citizen. It has been exercised against the SDK's `sco-plugin-check`
-stand-in host, the kit's `sco-host-sim` (the real host kit, no game), and a unit test with a
-synthetic `game.hangar` table.
+stand-in host, the kit's `sco-host-sim` (the real host kit, no game), scuba-engine's mock game, and
+a unit test with synthetic `game.hangar` and `game.asop` tables.
 
 ## What it does
 
@@ -34,11 +34,20 @@ reports the result plus `last_error`'s text.
 
 ## game.asop
 
-sco-core 2.3.0 ships `sc_asop.h`, but the mock game does not publish `game.asop` yet (roadmap E-2). On every panel refresh, including
-`game.ready`, the plugin queries `game.asop` 1.0. The ASOP section appears only when that query
-answers a table. Even then the plugin reads only the table's leading `size` field and calls nothing
-in it. When the query fails, the section stays inert and adds no panel nodes. The ASOP calls get
-wired once the public header ships.
+The `game.asop` 1.0 service (`include/sc_asop.h`, sco-core 2.3.0) is read only. Its calls go through
+the same four gates as the hangar calls.
+
+| Panel control / command | game.asop call | Gate |
+|---|---|---|
+| Read ASOP / `diegetic_asop.asop` | `claim_timeout`, then `shard_persisted` | `has("game.asop.claim_timeout")` / `has("game.asop.shard_persisted")` + table size |
+
+The plugin queries `game.asop` 1.0 on every panel refresh, including the one on `game.ready`. The
+ASOP section appears only when that query answers a table. A refresh reads only the table's `size`
+and which capabilities are on. It calls nothing, so the section shows "not read" until Read ASOP
+is pressed. Each value shows its own result, and a capability that is off leaves its value
+`unavailable` without touching the game. The command's outcome is the first failure, or both values
+when both reads succeed. Both capabilities are off by default in the game pack. scuba-engine's mock
+game publishes the table with synthetic values: 30 s and persisted.
 
 ## Build and test
 

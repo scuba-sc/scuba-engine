@@ -71,7 +71,9 @@ void ResetScene() {
     s.classes = { "MOCK_Ship_Starter", "MOCK_Ship_Fighter", "MockNPC_Guard", "MockNPC_Civilian",
                   "MockProp_Crate", "MockProp_Barrel" };
     s.items = { "MockHelmet_Basic", "MockArmor_Torso_Light", "MockArmor_Arms_Light", "MockArmor_Legs_Light",
-                "MockUndersuit_Basic", "MockBackpack_Small", "MockVisor_Tinted" };
+                "MockUndersuit_Basic", "MockBackpack_Small", "MockVisor_Tinted",
+                "MockRifle_Basic", "MockPistol_Basic", "MockOptic_Holo", "MockMultitool_Basic",
+                "MockTool_Module_Mining" };
     s.content = { "ObjectContainers/mock/crate_stack.socpak", "ObjectContainers/mock/outpost_small.socpak" };
     for (const auto& item : shop::Catalogue()) {
         if (item.itemClass) s.items.insert(item.itemClass);

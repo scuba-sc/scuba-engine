@@ -1,5 +1,7 @@
 #include "sco_api.h"
 #include "sc_actors.h"
+#include "sc_asop.h"
+#include "sc_contracts.h"
 #include "sc_creative.h"
 #include "sc_cvars_write.h"
 #include "sc_economy.h"
@@ -37,6 +39,8 @@ constexpr double kPos[3]{ 50, 50, 4 };
 constexpr double kRot[4]{ 0, 0, 0, 1 };
 
 const sc_actors_v1* g_actors = nullptr;
+const sc_asop_v1* g_asop = nullptr;
+const sc_contracts_v1* g_contracts = nullptr;
 const sc_creative_v1* g_creative = nullptr;
 const sc_cvars_v1* g_cvars = nullptr;
 const sc_cvars_write_v1* g_cvarsWrite = nullptr;
@@ -134,6 +138,11 @@ void WrongThread() {
         uint64_t id = 42;
         uint32_t flags = 42;
         PROBE(g_actors->local_player(&id, nullptr) == SCO_WRONG_THREAD && id == 0);
+        int32_t seconds = 42;
+        PROBE(g_asop->claim_timeout(g_self, &seconds) == SCO_WRONG_THREAD && seconds == 42);
+        PROBE(g_asop->shard_persisted(g_self, &flags) == SCO_WRONG_THREAD && flags == 42);
+        float radius = 42.0f;
+        PROBE(g_contracts->stream_radius(g_self, &radius) == SCO_WRONG_THREAD && radius == 42.0f);
         PROBE(g_creative->set_god_mode(g_self, 1) == SCO_WRONG_THREAD);
         PROBE(g_cvars->get_bool(g_self, "mock_hud_enabled", 1, &flags) == SCO_WRONG_THREAD && flags == 42);
         PROBE(g_cvarsWrite->restore_all(g_self) == SCO_WRONG_THREAD);
@@ -178,6 +187,17 @@ sco_result Run(const sco_arg*, uint32_t, void*, char* reply, uint32_t capacity) 
     ErrorHandshake(g_actors->last_error);
     PROBE(g_actors->despawn(g_self, g_npc) == SCO_OK);
     PROBE(g_actors->spawn_npc(nullptr, "MockNPC_Guard", 4, kPos, &id) == SCO_BAD_ARG && id == 0);
+
+    int32_t claimSeconds = 0;
+    PROBE(g_asop->claim_timeout(g_self, &claimSeconds) == SCO_OK && claimSeconds == 30);
+    PROBE(g_asop->shard_persisted(g_self, &flags) == SCO_OK && flags == 1);
+    PROBE(g_asop->claim_timeout(g_self, nullptr) == SCO_BAD_ARG);
+    ErrorHandshake(g_asop->last_error);
+    PROBE(g_asop->shard_persisted(g_self, nullptr) == SCO_BAD_ARG);
+    float radius = 0;
+    PROBE(g_contracts->stream_radius(g_self, &radius) == SCO_OK && radius == 5000.0f);
+    PROBE(g_contracts->stream_radius(g_self, nullptr) == SCO_BAD_ARG);
+    ErrorHandshake(g_contracts->last_error);
 
     PROBE(g_creative->set_god_mode(g_self, 1) == SCO_OK);
     PROBE(g_creative->set_fly_mode(g_self, 1) == SCO_OK);
@@ -254,6 +274,16 @@ sco_result Run(const sco_arg*, uint32_t, void*, char* reply, uint32_t capacity) 
     items[1].slot = items[0].slot;
     report.applied = 99;
     PROBE(g_loadout->apply(g_self, &equip, &report) == SCO_BAD_ARG && report.applied == 99);
+    sc_loadout_item weapons[3]{};
+    weapons[0].slot = SC_LOADOUT_SLOT_PRIMARY;
+    weapons[1].slot = SC_LOADOUT_SLOT_PRIMARY_OPTIC;
+    weapons[2].slot = 22;
+    std::snprintf(weapons[0].item_class, sizeof(weapons[0].item_class), "%s", "MockRifle_Basic");
+    std::snprintf(weapons[1].item_class, sizeof(weapons[1].item_class), "%s", "MockOptic_Holo");
+    std::snprintf(weapons[2].item_class, sizeof(weapons[2].item_class), "%s", "MockOptic_Holo");
+    sc_loadout_request arm{ sizeof(sc_loadout_request), 3, sizeof(sc_loadout_item), 0, weapons };
+    PROBE(g_loadout->apply(g_self, &arm, &report) == SCO_FAILED && report.applied == 2 &&
+          report.slots[1].status == SC_LOADOUT_APPLIED && report.slots[2].status == SC_LOADOUT_UNSUPPORTED);
 
     sc_mining_state mining{};
     mining.size = sizeof(mining);
@@ -419,6 +449,27 @@ sco_result Has(const sco_arg* args, uint32_t n, void*, char* reply, uint32_t cap
     return SCO_OK;
 }
 
+// The 2.3.0 additions under whatever capability state the test set: "<claim> <persisted> <radius>
+// <weapon slot status>" (sco_result values, then a sc_loadout_status).
+sco_result Gated(const sco_arg*, uint32_t, void*, char* reply, uint32_t capacity) {
+    int32_t seconds = 0;
+    uint32_t persisted = 0;
+    float radius = 0;
+    sc_loadout_item item{};
+    item.slot = SC_LOADOUT_SLOT_SIDEARM;
+    std::snprintf(item.item_class, sizeof(item.item_class), "%s", "MockPistol_Basic");
+    sc_loadout_request request{ sizeof(sc_loadout_request), 1, sizeof(sc_loadout_item), 0, &item };
+    sc_loadout_report report{};
+    report.size = sizeof(report);
+    const sco_result claim = g_asop->claim_timeout(g_self, &seconds);
+    const sco_result shard = g_asop->shard_persisted(g_self, &persisted);
+    const sco_result stream = g_contracts->stream_radius(g_self, &radius);
+    (void)g_loadout->apply(g_self, &request, &report);
+    std::snprintf(reply, capacity, "%d %d %d %d", static_cast<int>(claim), static_cast<int>(shard),
+                  static_cast<int>(stream), static_cast<int>(report.slots[0].status));
+    return SCO_OK;
+}
+
 sco_result Counts(const sco_arg*, uint32_t, void*, char* reply, uint32_t capacity) {
     std::snprintf(reply, capacity, "%u", g_playerEvents);
     return SCO_OK;
@@ -451,6 +502,8 @@ extern "C" SCO_EXPORT sco_result sco_plugin_load(const sco_api* api, sco_plugin*
     bool ok = true;
 #define QUERY(table, name, version) ok = Query(name, version, table) && ok
     QUERY(g_actors, SC_ACTORS_NAME, SC_ACTORS_VERSION_1_1);
+    QUERY(g_asop, SC_ASOP_SERVICE_NAME, SC_ASOP_SERVICE_VERSION);
+    QUERY(g_contracts, SC_CONTRACTS_SERVICE_NAME, SC_CONTRACTS_SERVICE_VERSION);
     QUERY(g_creative, SC_CREATIVE_SERVICE_NAME, SC_CREATIVE_SERVICE_VERSION);
     QUERY(g_cvars, SC_CVARS_NAME, SC_CVARS_VERSION);
     QUERY(g_cvarsWrite, SC_CVARS_WRITE_NAME, SC_CVARS_WRITE_VERSION);
@@ -458,7 +511,7 @@ extern "C" SCO_EXPORT sco_result sco_plugin_load(const sco_api* api, sco_plugin*
     QUERY(g_entities, SC_ENTITIES_NAME, SC_ENTITIES_VERSION_1_1);
     QUERY(g_spatial, SC_GAME_SPATIAL_NAME, SC_GAME_SPATIAL_VERSION);
     QUERY(g_hangar, SC_HANGAR_SERVICE_NAME, SC_HANGAR_SERVICE_VERSION);
-    QUERY(g_loadout, SC_LOADOUT_SERVICE_NAME, SC_LOADOUT_SERVICE_VERSION);
+    QUERY(g_loadout, SC_LOADOUT_SERVICE_NAME, SC_LOADOUT_VERSION_1_1);
     QUERY(g_mining, SC_MINING_SERVICE_NAME, SC_MINING_SERVICE_VERSION);
     QUERY(g_missions, SC_MISSIONS_SERVICE_NAME, SC_MISSIONS_SERVICE_VERSION);
     QUERY(g_owned, SC_OWNED_NAME, SC_OWNED_VERSION_1_0);
@@ -482,7 +535,8 @@ extern "C" SCO_EXPORT sco_result sco_plugin_load(const sco_api* api, sco_plugin*
         PROBE(api->subscribe(self, name, Event, nullptr) == SCO_OK);
     static const sco_arg_def hasArg{ "name", SCO_ARG_STRING, 0, "capability" };
     if (!Command("mock_game_probe.seed", Seed) || !Command("mock_game_probe.run", Run) ||
-        !Command("mock_game_probe.has", Has, &hasArg, 1) || !Command("mock_game_probe.events", Counts))
+        !Command("mock_game_probe.has", Has, &hasArg, 1) || !Command("mock_game_probe.events", Counts) ||
+        !Command("mock_game_probe.gated", Gated))
         return SCO_FAILED;
     return g_failures ? SCO_FAILED : SCO_OK;
 }

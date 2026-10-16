@@ -1,4 +1,5 @@
-// game.loadout 1.0 (sc_loadout.h): typed local-player equip of the scene's synthetic items.
+// game.loadout 1.1 (sc_loadout.h): typed local-player equip of the scene's synthetic items. Slots
+// 8-21 (weapons and multitool attachments, new in 1.1) also need game.loadout.weapons.
 #include "hostd/mock_game/common.h"
 #include "hostd/mock_game/services.h"
 #include "sc_loadout.h"
@@ -10,7 +11,7 @@ namespace scuba::hostd::mock_game {
 
 namespace {
 
-std::array<std::string, 8> g_equipped;
+std::array<std::string, 22> g_equipped;
 bool g_applying = false;
 
 bool ValidItemName(const char* name) {
@@ -54,8 +55,10 @@ sco_result Apply(sco_plugin* self, const sc_loadout_request* req, sc_loadout_rep
     for (uint32_t i = 0; i < req->count; ++i) {
         const sc_loadout_item& item = req->items[i];
         sc_loadout_status status = SC_LOADOUT_APPLIED;
-        if (item.slot < 1 || item.slot > 7)
+        if (item.slot < SC_LOADOUT_SLOT_HEAD || item.slot > SC_LOADOUT_SLOT_SIDEARM_TOOL_BATTERY)
             status = SC_LOADOUT_UNSUPPORTED;
+        else if (item.slot >= SC_LOADOUT_SLOT_PRIMARY && !Ready("game.loadout.weapons"))
+            status = SC_LOADOUT_UNAVAILABLE;  // the kit's rule: no engine call, the slot stays UNAVAILABLE
         else if (!s.items.count(item.item_class))
             status = SC_LOADOUT_ITEM_MISSING;
         else if (!s.spawned)
@@ -81,10 +84,10 @@ const sc_loadout_v1 kTable = { sizeof(sc_loadout_v1), 0, Apply };
 
 }  // namespace
 
-const std::array<std::string, 8>& EquippedItems() { return g_equipped; }
+const std::array<std::string, 22>& EquippedItems() { return g_equipped; }
 
 const ServiceDef& LoadoutService() {
-    static const ServiceDef def{ SC_LOADOUT_SERVICE_NAME, SC_LOADOUT_SERVICE_VERSION, &kTable, Reset, Release, nullptr };
+    static const ServiceDef def{ SC_LOADOUT_SERVICE_NAME, SC_LOADOUT_VERSION_1_1, &kTable, Reset, Release, nullptr };
     return def;
 }
 

@@ -1,6 +1,7 @@
 #include "check.h"
 #include "hostd/mock_game/common.h"
 #include "hostd/mock_game/mock_game.h"
+#include "hostd/mock_game/services.h"
 #include "hostd/modules.h"
 #include "sco/app.h"
 #include "sco/caps.h"
@@ -57,7 +58,7 @@ bool Success(const Json& response) { return response.find("result") != nullptr; 
 
 void ToggleTests(const sco_api* api) {
     const auto caps = mg::Capabilities();
-    CHECK(caps.size() == 48);
+    CHECK(caps.size() == 52);
     for (const auto& cap : caps) {
         CHECK(mg::SetCapability(cap.name, false));
         CHECK(api->has(cap.name.c_str()) == 0);
@@ -73,6 +74,18 @@ void ToggleTests(const sco_api* api) {
     CHECK(Query<sc_actors_v1>(SC_ACTORS_NAME)->state(256, &state) == SCO_UNAVAILABLE && state == 0);
     CHECK(mg::SetCapability(arg.v.s, true));
     CHECK(Invoke("mock_game_probe.has", &arg, 1) == "1");
+
+    // 2.3.0 additions: all on, then the game_pack profile (all three held off), then a value the
+    // synthetic game hasn't loaded.
+    CHECK(Invoke("mock_game_probe.gated") == "0 0 0 0");
+    CHECK(mg::ApplyProfile("game_pack"));
+    CHECK(Invoke("mock_game_probe.gated") == "1 1 1 4");
+    CHECK(mg::ApplyProfile("all"));
+    mg::Asop().configLoaded = false;
+    mg::Contracts().settingsLoaded = false;
+    CHECK(Invoke("mock_game_probe.gated") == "2 0 2 0");
+    mg::Asop().configLoaded = true;
+    mg::Contracts().settingsLoaded = true;
     CHECK(!mg::SetCapability("made.up", true));
     CHECK(mg::ApplyProfile("none"));
     for (const auto& cap : mg::Capabilities()) CHECK(!cap.ready);
@@ -87,8 +100,12 @@ void ToggleTests(const sco_api* api) {
     CHECK(mg::SetServicePublished("game.actors", true));
     CHECK(api->query_service("game.actors", 0x10000u, &table) == SCO_OK);
     CHECK(api->query_service("game.actors", 0x10002u, &table) == SCO_UNAVAILABLE && !table);
-    CHECK(api->query_service("game.asop", 0x10000u, &table) == SCO_NOT_FOUND);
-    CHECK(api->query_service("game.contracts", 0x10000u, &table) == SCO_NOT_FOUND);
+    CHECK(api->query_service("game.asop", 0x10000u, &table) == SCO_OK && table);
+    CHECK(api->query_service("game.contracts", 0x10000u, &table) == SCO_OK && table);
+    CHECK(api->query_service("game.loadout", 0x10001u, &table) == SCO_OK && table);
+    CHECK(api->query_service("game.loadout", 0x10002u, &table) == SCO_UNAVAILABLE && !table);
+    CHECK(api->query_service("game.gamerules", 0x10000u, &table) == SCO_NOT_FOUND && !table);  // 2.4.0
+    CHECK(api->query_service("sco.ui.surfaces", 0x10000u, &table) == SCO_OK && table);  // the kit's own, 2.3.0
 }
 
 void HandlerTests() {
@@ -220,7 +237,7 @@ int main(int argc, char** argv) {
         const auto& plugin = sco::app::Plugins().back();
         CHECK(plugin.manifest.id == "mock_game_probe" && plugin.state == sco::plugins::State::Loaded);
         if (plugin.state != sco::plugins::State::Loaded) throw std::runtime_error(plugin.reason);
-        CHECK(mg::Services().size() == 22);
+        CHECK(mg::Services().size() == 24);
         for (const auto& service : mg::Services()) CHECK(service.published);
         const sco_api* api = sco::host::BuildApi({ platform.hostVersion });
         ToggleTests(api);

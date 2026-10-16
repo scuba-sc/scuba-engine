@@ -23,6 +23,8 @@ struct ServiceDef {
 };
 
 const ServiceDef& ActorsService();
+const ServiceDef& AsopService();
+const ServiceDef& ContractsService();
 const ServiceDef& CreativeService();
 const ServiceDef& CvarsService();
 const ServiceDef& CvarsWriteService();
@@ -51,9 +53,20 @@ sco_result CastRay(uint64_t zone, const double from[3], const double dir[3], dou
                    const std::set<uint64_t>& skip, sc_world_hit* hit, std::string& why);
 
 // Service state the hostd handlers read or edit.
+struct AsopValues {
+    bool configLoaded = true;           // false: claim_timeout answers SCO_NOT_FOUND
+    int32_t claimTimeoutSeconds = 30;   // synthetic, not a game value
+    bool shardPersisted = true;
+};
+struct ContractsValues {
+    bool settingsLoaded = true;         // false: stream_radius answers SCO_NOT_FOUND
+    float streamRadius = 5000.0f;       // synthetic, not a game value
+};
+AsopValues& Asop();
+ContractsValues& Contracts();
 int64_t& EconomyBalance();
 std::map<std::string, uint32_t>& CvarValues();
-const std::array<std::string, 8>& EquippedItems();
+const std::array<std::string, 22>& EquippedItems();  // by sc_loadout_slot, 1..21
 sc_reputation_checks& ReputationChecks();
 bool AddSessionPeer();
 void BumpSpatialEpoch();

@@ -35,6 +35,15 @@ public:
                       [this](const char* id) { return terminal_.CancelAtc(id); });
         if (r != SCO_OK) return r;
 
+        r = Command("diegetic_asop.asop", "Read ASOP", "game.asop's claim timeout and shard persisted flag")
+                .Handle([this](const sco::sdk::Args&, sco::sdk::Reply& reply) {
+                    const Outcome o = terminal_.ReadAsop();
+                    reply.Set(o.message.c_str());
+                    return o.result;
+                })
+                .Register();
+        if (r != SCO_OK) return r;
+
         r = Command("diegetic_asop.last_error", "Last hangar error", "game.hangar's reason for the last failure")
                 .Handle([this](const sco::sdk::Args&, sco::sdk::Reply& reply) {
                     const Outcome o = terminal_.LastError();

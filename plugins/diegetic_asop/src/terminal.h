@@ -4,7 +4,7 @@
 #ifndef DIEGETIC_ASOP_TERMINAL_H
 #define DIEGETIC_ASOP_TERMINAL_H
 
-#include "asop_probe.h"
+#include "asop_client.h"
 #include "hangar_client.h"
 
 #include "scosdk/menu_builder.hpp"
@@ -26,14 +26,16 @@ public:
     // widgets may be null (no sco.widgets on this host, or a unit test): the tree is still built.
     void Attach(const sco_api* api, sco_plugin* self, sco::sdk::Widgets* widgets) noexcept;
 
-    // Re-probes game.asop, rebuilds the tree and submits it when widgets are attached. On a failed
-    // submit the previous tree stays registered and alive.
+    // Re-probes game.asop (calling nothing in it), rebuilds the tree and submits it when widgets
+    // are attached. On a failed submit the previous tree stays registered and alive.
     sco_result Refresh() noexcept;
 
     Outcome FindLift(std::string_view landingArea);
     Outcome Lift(std::string_view lift, sc_hangar_lift_op op);
     Outcome CancelAtc(std::string_view atc);
     Outcome LastError();
+    // Reads game.asop's claim timeout and shard flag, each behind its own capability.
+    Outcome ReadAsop();
 
     std::string Summary() const;
     const Outcome& Last() const noexcept { return last_; }
@@ -46,9 +48,11 @@ private:
     Outcome Record(Outcome outcome);
 
     HangarClient client_;
+    AsopClient asopClient_;
     const sco_api* api_ = nullptr;
     sco::sdk::Widgets* widgets_ = nullptr;
     AsopStatus asop_;
+    std::string claimText_ = "not read", shardText_ = "not read";
     Outcome last_;
     std::string landing_, lift_, atc_;
     std::string buildError_;
