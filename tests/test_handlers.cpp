@@ -102,7 +102,53 @@ void TestBroadcaster() {
 
 }  // namespace
 
+void TestIsValidMethodName() {
+    // Valid cases
+    CHECK(IsValidMethodName("a.b"));
+    CHECK(IsValidMethodName("system.ping"));
+    CHECK(IsValidMethodName("widgets.panel.render_2"));
+    CHECK(IsValidMethodName("a_1.b_2_c"));
+    CHECK(IsValidMethodName("a.b.c.d.e"));
+
+    // Part length boundary tests (64 chars max)
+    const std::string valid_64_part(64, 'a');
+    CHECK(IsValidMethodName("prefix." + valid_64_part));
+    CHECK(IsValidMethodName(valid_64_part + ".suffix"));
+
+    // Invalid cases: part length exceeding 64 chars
+    const std::string invalid_65_part(65, 'a');
+    CHECK(!IsValidMethodName("prefix." + invalid_65_part));
+    CHECK(!IsValidMethodName(invalid_65_part + ".suffix"));
+
+    // Invalid cases: empty, structure, and dot placements
+    CHECK(!IsValidMethodName(""));
+    CHECK(!IsValidMethodName("ping"));
+    CHECK(!IsValidMethodName(".ping"));
+    CHECK(!IsValidMethodName("system."));
+    CHECK(!IsValidMethodName("system..ping"));
+    CHECK(!IsValidMethodName("a.b."));
+    CHECK(!IsValidMethodName(".a.b"));
+
+    // Invalid cases: first character of a part must be 'a'-'z'
+    CHECK(!IsValidMethodName("1a.b"));
+    CHECK(!IsValidMethodName("a.1b"));
+    CHECK(!IsValidMethodName("_a.b"));
+    CHECK(!IsValidMethodName("a._b"));
+    CHECK(!IsValidMethodName("A.b"));
+    CHECK(!IsValidMethodName("a.B"));
+
+    // Invalid cases: disallowed characters
+    CHECK(!IsValidMethodName("test.x-y"));
+    CHECK(!IsValidMethodName("test.x y"));
+    CHECK(!IsValidMethodName("test.x/y"));
+    CHECK(!IsValidMethodName("test.x@y"));
+    CHECK(!IsValidMethodName("test.x#y"));
+    CHECK(!IsValidMethodName("test.x!y"));
+    CHECK(!IsValidMethodName("test.x?y"));
+}
+
 int main() {
+    TestIsValidMethodName();
     TestRegistration();
     TestDispatch();
     TestBroadcaster();
