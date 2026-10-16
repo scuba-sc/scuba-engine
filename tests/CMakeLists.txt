@@ -97,3 +97,20 @@ add_test(NAME engine_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/integration-smoke.mjs" "$<TARGET_FILE:scuba-hostd>"
   "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures" "${CMAKE_CURRENT_BINARY_DIR}/")
 set_tests_properties(engine_integration PROPERTIES DEPENDS test_assets TIMEOUT 90)
+
+# ---- native engine --------------------------------------------------------------------------
+if(TARGET scuba_engine_core)
+  add_executable(test_engine_core test_engine_core.cpp)
+  target_link_libraries(test_engine_core PRIVATE scuba_engine_core scuba_assets scuba_miniz)
+  scuba_warnings(test_engine_core)
+  add_test(NAME engine_core COMMAND test_engine_core)
+  set_tests_properties(engine_core PROPERTIES TIMEOUT 60)
+endif()
+if(TARGET scuba-engine)
+  # Boots the whole editor on the WARP software adapter with a hidden window, loads the sample
+  # models through the VFS, renders frames and exits; see engine/app/main.cpp --frames.
+  add_test(NAME engine_smoke
+    COMMAND scuba-engine --warp --hidden --no-vsync --frames 60
+      --open models/cube.obj --open models/pyramid.obj)
+  set_tests_properties(engine_smoke PROPERTIES TIMEOUT 120)
+endif()
