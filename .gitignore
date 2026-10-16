@@ -5,3 +5,4 @@ node_modules/
 studio/dist/
 *.log
 .DS_Store
+scuba-engine-layout.ini

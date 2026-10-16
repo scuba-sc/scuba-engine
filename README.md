@@ -15,6 +15,24 @@ Status: integrated out-of-game sandbox. Licence: GPL-3.0-only ([LICENSE](LICENSE
 
 There is **no live game link**: ENG-8 could not implement spatial streaming through the SDK's metadata-only diagnostics contract. Mock camera events are synthetic, not evidence of a live connection.
 
+## Native engine (phase 1, Windows)
+
+`scuba-engine.exe` is the native editor that will replace the browser studio: C++20, D3D12, a
+docking ImGui shell, the sco-core kernel in process (plugins and their `sco.widgets` panels), an
+asynchronous OBJ/glTF/CGF model loader on a job pool, and a virtual file system that mounts
+directories, zip archives and `.scpak` packs with sco-core's overrides on top. Design:
+[docs/engine/architecture.md](docs/engine/architecture.md); VFS: [docs/engine/vfs.md](docs/engine/vfs.md).
+
+```sh
+cmake -S . -B build -A x64 && cmake --build build --config Release
+build/engine/Release/scuba-engine.exe --open models/cube.obj --mount D:/assets.zip=packs@20
+```
+
+Right drag orbits, middle drag pans, the wheel zooms, left click selects, Ctrl + left drag moves
+the selection, F frames it. `--warp --hidden --frames N` renders N frames on the software adapter
+and exits (the `engine_smoke` test). Phase 1 limits: Windows only, constant PBR materials (no
+textures yet), CPU picking, no FBX.
+
 ## Requirements
 
 - CMake 3.21+, a C++20 compiler (clang, GCC or MSVC), 64-bit
