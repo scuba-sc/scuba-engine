@@ -49,6 +49,7 @@ bool ParseEntityId(std::string_view text, uint64_t& out) noexcept {
 void Terminal::Attach(const sco_api* api, sco_plugin* self, sco::sdk::Widgets* widgets) noexcept {
     api_ = api;
     client_ = HangarClient(api, self);
+    asopClient_ = AsopClient(api, self);
     widgets_ = widgets;
 }
 
@@ -61,7 +62,12 @@ std::string Terminal::Summary() const {
     text += "; atc_cancel: ";
     text += s.atcCancel ? "ready" : "off";
     text += "; asop: ";
-    text += asop_.active ? "active (table " + std::to_string(asop_.tableSize) + " bytes)" : "inert";
+    if (!asop_.active) return text + "inert";
+    text += "active (claim_timeout: ";
+    text += asop_.claimTimeout ? "ready" : "off";
+    text += ", shard_persisted: ";
+    text += asop_.shardPersisted ? "ready" : "off";
+    text += ")";
     return text;
 }
 
@@ -90,10 +96,12 @@ scosdk::PanelTree Terminal::Build() {
         b.Label(last_.message.empty() ? std::string("Ready") : LabelText(last_.message))
             .Severity(last_.ok() ? SCO_WIDGET_SEVERITY_INFO : SCO_WIDGET_SEVERITY_ERROR);
         if (asop_.active) {
+            const bool anyAsop = asop_.claimTimeout || asop_.shardPersisted;
             b.Label("ASOP fleet");
-            b.Label("game.asop " + std::to_string(asop_.tableSize) +
-                    "-byte table found; ASOP calls arrive with the public sc_asop.h header")
-                .Severity(SCO_WIDGET_SEVERITY_INFO);
+            b.Label(LabelText("Claim timeout: " + claimText_ + "; shard persisted: " + shardText_))
+                .Severity(anyAsop ? SCO_WIDGET_SEVERITY_INFO : SCO_WIDGET_SEVERITY_WARNING);
+            b.Button("Read ASOP", [this] { (void)ReadAsop(); })
+                .Tooltip("game.asop.claim_timeout and game.asop.shard_persisted (read only)");
         }
     });
     return b.Build();
@@ -101,7 +109,7 @@ scosdk::PanelTree Terminal::Build() {
 
 sco_result Terminal::Refresh() noexcept {
     try {
-        asop_ = ProbeAsop(api_);
+        asop_ = asopClient_.Status();
         scosdk::PanelTree next = Build();
         if (!next) {
             buildError_ = next.Error();
@@ -147,5 +155,18 @@ Outcome Terminal::CancelAtc(std::string_view atc) {
 }
 
 Outcome Terminal::LastError() { return Record(client_.LastError()); }
+
+Outcome Terminal::ReadAsop() {
+    int32_t seconds = 0;
+    bool persisted = false;
+    const Outcome claim = asopClient_.ClaimTimeout(seconds);
+    const Outcome shard = asopClient_.ShardPersisted(persisted);
+    claimText_ = claim.ok() ? std::to_string(seconds) + " s" : ResultName(claim.result);
+    shardText_ = shard.ok() ? (persisted ? "yes" : "no") : ResultName(shard.result);
+    // Both reads succeed or the first failure is the outcome; its message carries the reason.
+    if (!claim.ok()) return Record(claim);
+    if (!shard.ok()) return Record(shard);
+    return Record(Outcome{SCO_OK, claim.message + "; " + shard.message});
+}
 
 }  // namespace diegetic_asop

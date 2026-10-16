@@ -17,11 +17,11 @@ namespace {
 using ServiceFn = const ServiceDef& (*)();
 
 constexpr ServiceFn kServices[] = {
-    ActorsService,    CreativeService,      CvarsService,      CvarsWriteService,  EconomyService,
-    EntitiesService,  GameSpatialService,   HangarService,     LoadoutService,     MiningService,
-    MissionsService,  OwnedService,         PrefabsService,    PrivateSessionService, QuantumService,
-    RelocationService, ReputationService,   VehiclesService,   WorldService,       WorldControlService,
-    SpawnService,     TeleportSpatialService,
+    ActorsService,     AsopService,         ContractsService,  CreativeService,    CvarsService,
+    CvarsWriteService, EconomyService,      EntitiesService,   GameSpatialService, HangarService,
+    LoadoutService,    MiningService,       MissionsService,   OwnedService,       PrefabsService,
+    PrivateSessionService, QuantumService,  RelocationService, ReputationService,  VehiclesService,
+    WorldService,      WorldControlService, SpawnService,      TeleportSpatialService,
 };
 
 struct CapDef {
@@ -37,6 +37,9 @@ constexpr CapDef kCaps[] = {
     { "game.actors.despawn", "game.actors", true },
     { "game.actors.health", "game.actors", true },
     { "game.actors.state", "game.actors", false },
+    { "game.asop.claim_timeout", "game.asop", false },
+    { "game.asop.shard_persisted", "game.asop", false },
+    { "game.contracts.stream_radius", "game.contracts", false },
     { "game.creative.god_mode", "game.creative", true },
     { "game.creative.fly", "game.creative", true },
     { "game.creative.ammo", "game.creative", true },
@@ -55,6 +58,7 @@ constexpr CapDef kCaps[] = {
     { "game.hangar.lift", "game.hangar", false },
     { "game.hangar.atc_cancel", "game.hangar", false },
     { "game.loadout.apply", "game.loadout", true },
+    { "game.loadout.weapons", "game.loadout", false },
     { "game.mining", "game.mining", false },
     { "game.missions.read", "game.missions", true },
     { "game.missions.accept", "game.missions", true },

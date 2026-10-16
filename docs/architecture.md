@@ -7,7 +7,7 @@ has run inside Star Citizen; it ships no game files or game data.
 
 ## Integrated subsystems
 
-1. **Hostd** boots `sco_app` headless and publishes 22 synthetic service tables before external
+1. **Hostd** boots `sco_app` headless and publishes 24 synthetic service tables before external
    plugin discovery. It registers system, widgets, mock-game, designer-export, asset and plugin
    command handlers in `RegisterAllModules`. `main` registers NetSandbox with the executable path.
 2. **Widgets** serializes retained SDK panels through `StudioWidgetRenderer`. `widgets.event`

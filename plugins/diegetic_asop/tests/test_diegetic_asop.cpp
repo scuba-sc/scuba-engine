@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // diegetic_asop unit test: the terminal against a synthetic sco_api and a synthetic game.hangar
 // table (no game, no host). Checks every gate (sco_api size, publication, has(), table size), the
-// calls that reach the table, the last_error size handshake, the inert/active game.asop section
-// and the panel's widget event path.
+// calls that reach the table, the last_error size handshake, the game.asop section (inert, gated
+// and wired) and the panel's widget event path.
 #include "terminal.h"
 
 #include <cstddef>
@@ -28,6 +28,10 @@ struct Fake {
     std::set<std::string> caps;
     bool hangarPublished = true;
     bool asopPublished = false;
+    uint32_t asopSize = sizeof(sc_asop_v1);
+    sco_result asopResult = SCO_OK;
+    int32_t claimSeconds = 30;
+    uint32_t persisted = 1;
     uint32_t hangarSize = sizeof(sc_hangar_v1);
     sco_result nextResult = SCO_OK;
     std::string lastError;
@@ -70,12 +74,21 @@ sco_result FakeLastError(sco_plugin*, char* out, uint32_t* inout) {
 
 sc_hangar_v1 g_hangar;
 
-struct AsopTable {
-    uint32_t size;
-    uint32_t pad;
-    void (*unknown)(void);
-};
-const AsopTable g_asop = {sizeof(AsopTable), 0, nullptr};
+sco_result FakeClaimTimeout(sco_plugin*, int32_t* out) {
+    g_fake.calls.push_back("claim_timeout");
+    if (g_fake.asopResult != SCO_OK) return g_fake.asopResult;
+    *out = g_fake.claimSeconds;
+    return SCO_OK;
+}
+
+sco_result FakeShardPersisted(sco_plugin*, uint32_t* out) {
+    g_fake.calls.push_back("shard_persisted");
+    if (g_fake.asopResult != SCO_OK) return g_fake.asopResult;
+    *out = g_fake.persisted;
+    return SCO_OK;
+}
+
+sc_asop_v1 g_asop;
 
 sco_result FakeQuery(const char* name, uint32_t version, const void** out) {
     ++g_fake.queries;
@@ -86,7 +99,8 @@ sco_result FakeQuery(const char* name, uint32_t version, const void** out) {
         *out = &g_hangar;
         return SCO_OK;
     }
-    if (!std::strcmp(name, diegetic_asop::kAsopServiceName) && g_fake.asopPublished) {
+    if (!std::strcmp(name, SC_ASOP_SERVICE_NAME) && version == SC_ASOP_SERVICE_VERSION && g_fake.asopPublished) {
+        g_asop.size = g_fake.asopSize;
         *out = &g_asop;
         return SCO_OK;
     }
@@ -110,6 +124,10 @@ void Reset() {
     g_hangar.lift_request = FakeLiftRequest;
     g_hangar.atc_cancel_request = FakeAtcCancel;
     g_hangar.last_error = FakeLastError;
+    g_asop = sc_asop_v1{};
+    g_asop.claim_timeout = FakeClaimTimeout;
+    g_asop.shard_persisted = FakeShardPersisted;
+    g_asop.last_error = FakeLastError;
 }
 
 bool Contains(const std::string& s, const char* part) { return s.find(part) != std::string::npos; }
@@ -262,13 +280,50 @@ void TestAsopSection() {
     CHECK(!t.Asop().active);
     CHECK(t.Asop().query == SCO_NOT_FOUND);
     CHECK(!AnyLabelContains(t.Tree(), "ASOP fleet"));
+    CHECK(t.ReadAsop().result == SCO_UNAVAILABLE);
+    CHECK(Contains(t.Last().message, "game.asop 1.0 is not published"));
 
+    // Published, both capabilities off (the game pack default): the section shows, nothing is called.
     g_fake.asopPublished = true;
     CHECK(t.Refresh() == SCO_OK);
-    CHECK(t.Asop().active);
-    CHECK(t.Asop().tableSize == sizeof(AsopTable));
+    CHECK(t.Asop().active && !t.Asop().claimTimeout && !t.Asop().shardPersisted);
+    CHECK(t.Asop().tableSize == sizeof(sc_asop_v1));
     CHECK(AnyLabelContains(t.Tree(), "ASOP fleet"));
-    CHECK(Contains(t.Summary(), "asop: active"));
+    CHECK(Contains(t.Summary(), "asop: active (claim_timeout: off, shard_persisted: off)"));
+    CHECK(t.ReadAsop().result == SCO_UNAVAILABLE);
+    CHECK(Contains(t.Last().message, "game.asop.claim_timeout is off"));
+    CHECK(g_fake.calls.empty());
+
+    // One capability on: that read reaches the table, the other stays gated.
+    g_fake.caps = {diegetic_asop::kCapShardPersisted};
+    CHECK(t.ReadAsop().result == SCO_UNAVAILABLE);
+    CHECK(g_fake.calls.size() == 1 && g_fake.calls[0] == "shard_persisted");
+    CHECK(AnyLabelContains(t.Tree(), "Claim timeout: unavailable; shard persisted: yes"));
+
+    g_fake.caps = {diegetic_asop::kCapClaimTimeout, diegetic_asop::kCapShardPersisted};
+    g_fake.calls.clear();
+    CHECK(t.Refresh() == SCO_OK);
+    CHECK(Contains(t.Summary(), "claim_timeout: ready, shard_persisted: ready"));
+    CHECK(Click(t, "Read ASOP"));
+    CHECK(t.Last().ok() && t.Last().message == "claim timeout 30 s; shard persisted: yes");
+    CHECK(g_fake.calls.size() == 2);
+    CHECK(AnyLabelContains(t.Tree(), "Claim timeout: 30 s; shard persisted: yes"));
+
+    // A failing read carries last_error's text.
+    g_fake.asopResult = SCO_NOT_FOUND;
+    g_fake.lastError = "insurance configuration not loaded";
+    CHECK(t.ReadAsop().result == SCO_NOT_FOUND);
+    CHECK(t.Last().message == "claim_timeout: not_found: insurance configuration not loaded");
+
+    // A table too short for shard_persisted: gated by size, never called.
+    g_fake.asopResult = SCO_OK;
+    g_fake.asopSize = static_cast<uint32_t>(offsetof(sc_asop_v1, shard_persisted));
+    g_fake.calls.clear();
+    CHECK(t.Refresh() == SCO_OK);
+    CHECK(t.Asop().claimTimeout && !t.Asop().shardPersisted);
+    CHECK(t.ReadAsop().result == SCO_UNAVAILABLE);
+    CHECK(Contains(t.Last().message, "has no shard_persisted"));
+    CHECK(g_fake.calls.size() == 1 && g_fake.calls[0] == "claim_timeout");
 }
 
 void TestPanelEvents() {

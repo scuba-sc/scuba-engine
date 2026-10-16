@@ -5,7 +5,7 @@
 
 set(DIEGETIC_ASOP_CORE
   src/hangar_client.cpp
-  src/asop_probe.cpp
+  src/asop_client.cpp
   src/terminal.cpp)
 set(DIEGETIC_ASOP_ROOT "${CMAKE_CURRENT_BINARY_DIR}/root")
 set(DIEGETIC_ASOP_DIR "${DIEGETIC_ASOP_ROOT}/diegetic_asop")
@@ -60,6 +60,9 @@ if(SCUBA_BUILD_TESTS)
   diegetic_asop_expect(diegetic_asop_host_sim_find_lift 1 PROGRAM "${_sim}"
     ARGS "${DIEGETIC_ASOP_ROOT}" --no-lua --cap game.hangar.lift --invoke diegetic_asop.find_lift 0x2a
     MATCH "invoke diegetic_asop\\.find_lift -> [A-Za-z_]+ \"game\\.hangar 1\\.0 is not published by this host")
+  diegetic_asop_expect(diegetic_asop_host_sim_asop 1 PROGRAM "${_sim}"
+    ARGS "${DIEGETIC_ASOP_ROOT}" --no-lua --cap game.asop.claim_timeout --invoke diegetic_asop.asop
+    MATCH "invoke diegetic_asop\\.asop -> [A-Za-z_]+ \"game\\.asop 1\\.0 is not published by this host")
   diegetic_asop_expect(diegetic_asop_host_sim_bad_id 1 PROGRAM "${_sim}"
     ARGS "${DIEGETIC_ASOP_ROOT}" --no-lua --invoke diegetic_asop.lift_open nope
     MATCH "lift 'nope' is not a non-zero id")
