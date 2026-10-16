@@ -37,9 +37,16 @@ for (const [language, generator] of [['c', c], ['cpp', cpp]]) {
     const build = join(folder, 'build');
     const flags = process.platform === 'win32' ? '/W4 /WX' : '-Wall -Wextra -Wshadow -Wconversion -Werror';
     await run('cmake', ['-S', folder, '-B', build, `-DSCO_SDK=${join(sdkRoot, 'sdk')}`,
-      `-DCMAKE_C_FLAGS=${flags}`, ...(language === 'cpp' ? [`-DCMAKE_CXX_FLAGS=${flags}`] : [])]);
+      `-DCMAKE_C_FLAGS=${flags}`, ...(language === 'cpp' ? [`-DCMAKE_CXX_FLAGS=${flags}${process.platform === 'win32' ? ' /EHsc' : ''}`] : [])]);
     await run('cmake', ['--build', build, '--config', 'Debug', '--target', 'check']);
   }
+}
+
+// CMake passes <var>-NOTFOUND when no Lua 5.4 is installed (a stock Windows box): the native
+// plugins above are still checked, and the result says Lua was not.
+if (luaExecutable.endsWith('-NOTFOUND')) {
+  console.log('DESIGNER_PLUGINS_OK: six native plugins passed both checker modes; Lua NOT checked (no lua5.4 found)');
+  process.exit(0);
 }
 
 // The published checker has no widgets/panel_builder stand-in. It still checks the
