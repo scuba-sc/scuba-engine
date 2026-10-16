@@ -105,9 +105,9 @@ export const designerPanel: PanelModule = {
         remember(); design = parsed;
         if (!current()) selected = design.nodes[0].key;
         validSource = true; exportButton.disabled = !['c', 'cpp'].includes(language);
-        renderOutline(); renderStage(); renderInspector();
+        renderOutline(); const previewed = renderStage(); renderInspector();
         undoButton.disabled = !undo.length; redoButton.disabled = !redo.length;
-        message('Source parsed / canvas updated');
+        if (previewed) message('Source parsed / canvas updated');
       } catch (error) {
         validSource = false; exportButton.disabled = true;
         message(`Source not applied: ${error instanceof Error ? error.message : String(error)}`, true);
@@ -161,8 +161,11 @@ export const designerPanel: PanelModule = {
       }));
       outline.append(body);
     }
-    function renderStage() {
-      try { validate(design); } catch { return; }
+    function renderStage(): boolean {
+      try { validate(design); } catch (error) {
+        message(`Preview not updated: ${error instanceof Error ? error.message : String(error)}`, true);
+        return false;
+      }
       stage.querySelector('.designer-stage')?.remove();
       const body = element('div', '', 'designer-stage');
       body.append(element('p', `${flatten(design.nodes).length} nodes / synthetic preview`, 'designer-badge'));
@@ -185,6 +188,7 @@ export const designerPanel: PanelModule = {
         });
       }
       body.append(preview); stage.append(body);
+      return true;
     }
     function renderInspector() {
       inspector.querySelector('.designer-body')?.remove();
