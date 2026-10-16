@@ -32,10 +32,10 @@ ctest --test-dir build --output-on-failure
 
 Build and CTest before running studio tests: Asset Lab's loader tests consume synthetic files generated at `build/tests/assets-fixtures`. If using another build directory, generate its fixtures and copy them to that location before `npm test`.
 
-Configure downloads `sco-sdk-host-source-sc-2.2.0.zip` from the sco-core `sdk-v2.2.0` release, checks its SHA-256 (`0e9f45bc…f96f36`, the value in the release's `SHA256SUMS`) and builds it under `build/_sdk/`. A mismatched archive stops the configure. To build offline from a local copy of the release assets:
+Configure downloads `sco-sdk-host-source-sc-2.3.0.zip` from the sco-core `sdk-v2.3.0` release, checks its SHA-256 (`ec6c43d3…a1e79a`, the value in the release's `SHA256SUMS`) and builds it under `build/_sdk/`. A mismatched archive stops the configure. To build offline from a local copy of the release assets:
 
 ```sh
-cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.2.0-assets
+cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.3.0-assets
 ```
 
 On Windows add `-A x64` to the configure and `--config Release` / `-C Release` to build and ctest.

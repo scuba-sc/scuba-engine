@@ -5,7 +5,7 @@ There is no game image, signature scan, proprietary fixture, engine call, or
 network session behind these tables. Nothing here has been run in Star Citizen.
 Use `--no-mock-game` to omit the synthetic provider.
 
-The ABI is the published sdk-v2.2.0 host-source kit's `include/sc_*.h`.
+The ABI is the published sdk-v2.3.0 host-source kit's `include/sc_*.h`.
 Every member of every game service table in that kit has an implementation.
 `sc_game_events.h` defines bus payloads, **not** a `game.events` service table.
 `game.asop` and `game.contracts` are absent from this version and are not invented.

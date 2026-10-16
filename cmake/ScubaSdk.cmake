@@ -1,15 +1,15 @@
 # Fetches the published sco-core host-source kit, verifies its SHA-256 and adds it to the build.
 #
-#   SCUBA_SDK_VERSION       kit version (default 2.2.0, release tag sdk-v<version>)
+#   SCUBA_SDK_VERSION       kit version (default 2.3.0, release tag sdk-v<version>)
 #   SCUBA_SDK_ARCHIVE_DIR   directory holding a local copy of the release assets; when set, the
 #                           archive is taken from there instead of downloaded. Either way the
 #                           archive must match SCUBA_SDK_HOST_SOURCE_SHA256 or configure fails.
 #
 # The kit sources are never copied into this repository: they are extracted under the build tree.
 
-set(SCUBA_SDK_VERSION "2.2.0" CACHE STRING "sco-core SDK release consumed by scuba-engine")
+set(SCUBA_SDK_VERSION "2.3.0" CACHE STRING "sco-core SDK release consumed by scuba-engine")
 set(SCUBA_SDK_ARCHIVE_DIR "" CACHE PATH "Local directory with the sdk-v<version> release assets (optional)")
-set(SCUBA_SDK_HOST_SOURCE_SHA256 "0e9f45bc9affb32cf0d158eec396862bf1943d556cc120cf10d5b027e0f96f36"
+set(SCUBA_SDK_HOST_SOURCE_SHA256 "ec6c43d3ef33570e5624f7d5ec7d89fb656337d195103d1f97973ab965e1a79a"
     CACHE STRING "SHA-256 of sco-sdk-host-source-sc-<version>.zip (from the release SHA256SUMS)")
 
 set(_scuba_sdk_name "sco-sdk-host-source-sc-${SCUBA_SDK_VERSION}")
