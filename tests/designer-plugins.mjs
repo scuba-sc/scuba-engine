@@ -1,10 +1,10 @@
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { flatten, sampleDesigns } from '../studio/src/panels/designer/model';
-import * as cpp from '../studio/src/codegen/cpp';
-import * as c from '../studio/src/codegen/c';
-import * as lua from '../studio/src/codegen/lua';
+import { flatten, sampleDesigns } from '../tools/designer-codegen/src/model';
+import * as cpp from '../tools/designer-codegen/src/codegen/cpp';
+import * as c from '../tools/designer-codegen/src/codegen/c';
+import * as lua from '../tools/designer-codegen/src/codegen/lua';
 
 const [sdkRoot, outputRoot, python = 'python3', luaExecutable = 'lua5.4'] = process.argv.slice(2);
 if (!sdkRoot || !outputRoot) throw new Error('Usage: bun tests/designer-plugins.mjs SDK_SOURCE OUTPUT_ROOT [PYTHON] [LUA54]');

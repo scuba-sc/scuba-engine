@@ -71,6 +71,9 @@ if(SCUBA_BUN_EXECUTABLE)
       "${SCUBA_SDK_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/designer-plugins"
       "${Python3_EXECUTABLE}" "${SCUBA_LUA_EXECUTABLE}")
   set_tests_properties(designer_generated_plugins PROPERTIES TIMEOUT 240)
+  add_test(NAME designer_codegen_unit COMMAND "${SCUBA_BUN_EXECUTABLE}" test
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../tools/designer-codegen")
+  set_tests_properties(designer_codegen_unit PROPERTIES TIMEOUT 60)
 endif()
 add_executable(test_assets test_assets.cpp)
 target_link_libraries(test_assets PRIVATE scuba_assets)
@@ -97,3 +100,8 @@ add_test(NAME engine_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/integration-smoke.mjs" "$<TARGET_FILE:scuba-hostd>"
   "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures" "${CMAKE_CURRENT_BINARY_DIR}/")
 set_tests_properties(engine_integration PROPERTIES DEPENDS test_assets TIMEOUT 90)
+add_executable(test_glb_fixtures test_glb_fixtures.cpp)
+target_link_libraries(test_glb_fixtures PRIVATE scuba_bridge)
+scuba_warnings(test_glb_fixtures)
+add_test(NAME glb_fixtures COMMAND test_glb_fixtures "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures")
+set_tests_properties(glb_fixtures PROPERTIES DEPENDS test_assets TIMEOUT 60)

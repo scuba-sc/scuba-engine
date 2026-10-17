@@ -1,0 +1,317 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`cpp full widgets 1.1 snapshots and parses instrument 1`] = `
+"// scuba-panel {"id":"instrument","title":"Instrument control"}
+#include "sco_api.h"
+#include "sco_widgets.h"
+#include <stddef.h>
+#include "scosdk/scosdk.hpp"
+#include "scosdk/menu_builder.hpp"
+static bool v3 = false;
+static double v4 = 0.5;
+static scosdk::PanelTree BuildDesignedPanel() {
+    scosdk::PanelBuilder panel;
+    panel.Column([&] {
+        panel.Button("Run diagnostics");
+        panel.Toggle("Telemetry", &v3);
+        panel.Slider("Gain", &v4, 0.0, 1.0);
+    });
+    return panel.Build();
+}
+
+namespace {
+class DesignedPlugin final : public sco::sdk::Plugin {
+public:
+    sco_result OnLoad() override {
+        if (widgets_.Open(*this) != SCO_OK) return SCO_OK;
+        auto next = BuildDesignedPanel();
+        if (!next) return next.Result();
+        const auto result = next.Submit(widgets_, "instrument.main", "Instrument control");
+        if (result == SCO_OK) tree_ = std::move(next);
+        return result;
+    }
+    void OnUnload() override {
+        if (widgets_) (void)widgets_.RemovePanel("instrument.main");
+    }
+private:
+    sco::sdk::Widgets widgets_;
+    scosdk::PanelTree tree_;
+};
+}
+SCO_PLUGIN(DesignedPlugin, "instrument", "0.1.0", "the maintainer");
+"
+`;
+
+exports[`cpp full widgets 1.1 snapshots and parses telemetry 1`] = `
+"// scuba-panel {"id":"telemetry","title":"Telemetry console"}
+#include "sco_api.h"
+#include "sco_widgets.h"
+#include <stddef.h>
+#include "scosdk/scosdk.hpp"
+#include "scosdk/menu_builder.hpp"
+static bool v3 = false;
+static double v4 = 0.5;
+static int v6 = -1;
+static std::string v7 = "";
+static scosdk::PanelTree BuildDesignedPanel() {
+    scosdk::PanelBuilder panel;
+    panel.Column([&] {
+        panel.Button("Run diagnostics").Tooltip("Synthetic diagnostics only").Severity(1u);
+        panel.Toggle("Telemetry", &v3);
+        panel.Slider("Gain", &v4, 0.0, 1.0);
+        panel.Row([&] {
+            panel.Combo("Combo", &v6, {"Alpha", "Beta", "Gamma"});
+            panel.TextInput("TextInput", &v7);
+        });
+    });
+    return panel.Build();
+}
+
+namespace {
+class DesignedPlugin final : public sco::sdk::Plugin {
+public:
+    sco_result OnLoad() override {
+        if (widgets_.Open(*this) != SCO_OK) return SCO_OK;
+        auto next = BuildDesignedPanel();
+        if (!next) return next.Result();
+        const auto result = next.Submit(widgets_, "telemetry.main", "Telemetry console");
+        if (result == SCO_OK) tree_ = std::move(next);
+        return result;
+    }
+    void OnUnload() override {
+        if (widgets_) (void)widgets_.RemovePanel("telemetry.main");
+    }
+private:
+    sco::sdk::Widgets widgets_;
+    scosdk::PanelTree tree_;
+};
+}
+SCO_PLUGIN(DesignedPlugin, "telemetry", "0.1.0", "the maintainer");
+"
+`;
+
+exports[`cpp full widgets 1.1 snapshots and parses workbench 1`] = `
+"// scuba-panel {"id":"workbench","title":"Widget workbench"}
+#include "sco_api.h"
+#include "sco_widgets.h"
+#include <stddef.h>
+#include "scosdk/scosdk.hpp"
+#include "scosdk/menu_builder.hpp"
+static bool v3 = false;
+static double v4 = 0.5;
+static int v6 = -1;
+static std::string v7 = "";
+static int v9 = -1;
+static scosdk::PanelTree BuildDesignedPanel() {
+    scosdk::PanelBuilder panel;
+    panel.Column([&] {
+        panel.Button("Run diagnostics").Tooltip("Synthetic diagnostics only").Severity(1u);
+        panel.Toggle("Telemetry", &v3);
+        panel.Slider("Gain", &v4, 0.0, 1.0);
+        panel.Row([&] {
+            panel.Combo("Combo", &v6, {"Alpha", "Beta", "Gamma"});
+            panel.TextInput("TextInput", &v7);
+        });
+        panel.Label("Synthetic instrument panel");
+        panel.List("List", &v9, {"Alpha", "Beta", "Gamma"}).Paging(0u, 2u);
+        panel.Table("Table", 2u, {"Item", "Status", "Probe", "Ready"}).Paging(0u, 1u);
+    });
+    return panel.Build();
+}
+
+namespace {
+class DesignedPlugin final : public sco::sdk::Plugin {
+public:
+    sco_result OnLoad() override {
+        if (widgets_.Open(*this) != SCO_OK) return SCO_OK;
+        auto next = BuildDesignedPanel();
+        if (!next) return next.Result();
+        const auto result = next.Submit(widgets_, "workbench.main", "Widget workbench");
+        if (result == SCO_OK) tree_ = std::move(next);
+        return result;
+    }
+    void OnUnload() override {
+        if (widgets_) (void)widgets_.RemovePanel("workbench.main");
+    }
+private:
+    sco::sdk::Widgets widgets_;
+    scosdk::PanelTree tree_;
+};
+}
+SCO_PLUGIN(DesignedPlugin, "workbench", "0.1.0", "the maintainer");
+"
+`;
+
+exports[`c full widgets 1.1 snapshots and parses instrument 1`] = `
+"// scuba-panel {"id":"instrument","title":"Instrument control"}
+#include "sco_api.h"
+#include "sco_widgets.h"
+#include <stddef.h>
+
+static const sco_widget_node_1_1 designed_nodes[] = {
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_COLUMN, .id = 1u, .parent = 0u, .flags = 0u, .label = "" }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_BUTTON, .id = 2u, .parent = 1u, .flags = 0u, .label = "Run diagnostics" }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_TOGGLE, .id = 3u, .parent = 1u, .flags = 0u, .label = "Telemetry", .value = 0.0 }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_SLIDER, .id = 4u, .parent = 1u, .flags = 0u, .label = "Gain", .value = 0.5, .minimum = 0.0, .maximum = 1.0 }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+};
+
+static const sco_widgets_v1* designed_widgets;
+static sco_plugin* designed_self;
+static const sco_plugin_info designed_info = {
+    sizeof(sco_plugin_info), SCO_API_MAJOR, SCO_API_MINOR, "instrument", "0.1.0", "the maintainer"
+};
+SCO_EXPORT const sco_plugin_info* sco_plugin_query(void) { return &designed_info; }
+SCO_EXPORT sco_result sco_plugin_load(const sco_api* api, sco_plugin* self) {
+    const void* table = NULL;
+    designed_self = self;
+    if (api->size < offsetof(sco_api, query_service) + sizeof(api->query_service) || !api->query_service)
+        return SCO_OK;
+    if (api->query_service(SCO_WIDGETS_NAME, SCO_WIDGETS_VERSION_1_0, &table) != SCO_OK || !table)
+        return SCO_OK;
+    designed_widgets = (const sco_widgets_v1*)table;
+    if (designed_widgets->size < offsetof(sco_widgets_v1, remove_panel) + sizeof(designed_widgets->remove_panel) ||
+        !designed_widgets->set_panel || !designed_widgets->remove_panel) {
+        designed_widgets = NULL;
+        return SCO_OK;
+    }
+    return designed_widgets->set_panel(self, "instrument.main", "Instrument control", &designed_nodes[0].base,
+        4u, sizeof(designed_nodes[0]), NULL, NULL);
+}
+SCO_EXPORT void sco_plugin_unload(void) {
+    if (designed_widgets) (void)designed_widgets->remove_panel(designed_self, "instrument.main");
+    designed_widgets = NULL;
+}
+"
+`;
+
+exports[`c full widgets 1.1 snapshots and parses telemetry 1`] = `
+"// scuba-panel {"id":"telemetry","title":"Telemetry console"}
+#include "sco_api.h"
+#include "sco_widgets.h"
+#include <stddef.h>
+static const char* const items6[] = {"Alpha", "Beta", "Gamma"};
+static const sco_widget_node_1_1 designed_nodes[] = {
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_COLUMN, .id = 1u, .parent = 0u, .flags = 0u, .label = "" }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_BUTTON, .id = 2u, .parent = 1u, .flags = 0u, .label = "Run diagnostics" }, .tooltip = "Synthetic diagnostics only", .severity = 1u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_TOGGLE, .id = 3u, .parent = 1u, .flags = 0u, .label = "Telemetry", .value = 0.0 }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_SLIDER, .id = 4u, .parent = 1u, .flags = 0u, .label = "Gain", .value = 0.5, .minimum = 0.0, .maximum = 1.0 }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_ROW, .id = 5u, .parent = 1u, .flags = 0u, .label = "" }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_COMBO, .id = 6u, .parent = 5u, .flags = 0u, .label = "Combo", .index = -1, .items = items6, .item_count = 3u }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_TEXT_INPUT, .id = 7u, .parent = 5u, .flags = 0u, .label = "TextInput", .text = "" }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+};
+
+static const sco_widgets_v1* designed_widgets;
+static sco_plugin* designed_self;
+static const sco_plugin_info designed_info = {
+    sizeof(sco_plugin_info), SCO_API_MAJOR, SCO_API_MINOR, "telemetry", "0.1.0", "the maintainer"
+};
+SCO_EXPORT const sco_plugin_info* sco_plugin_query(void) { return &designed_info; }
+SCO_EXPORT sco_result sco_plugin_load(const sco_api* api, sco_plugin* self) {
+    const void* table = NULL;
+    designed_self = self;
+    if (api->size < offsetof(sco_api, query_service) + sizeof(api->query_service) || !api->query_service)
+        return SCO_OK;
+    if (api->query_service(SCO_WIDGETS_NAME, SCO_WIDGETS_VERSION_1_0, &table) != SCO_OK || !table)
+        return SCO_OK;
+    designed_widgets = (const sco_widgets_v1*)table;
+    if (designed_widgets->size < offsetof(sco_widgets_v1, remove_panel) + sizeof(designed_widgets->remove_panel) ||
+        !designed_widgets->set_panel || !designed_widgets->remove_panel) {
+        designed_widgets = NULL;
+        return SCO_OK;
+    }
+    return designed_widgets->set_panel(self, "telemetry.main", "Telemetry console", &designed_nodes[0].base,
+        7u, sizeof(designed_nodes[0]), NULL, NULL);
+}
+SCO_EXPORT void sco_plugin_unload(void) {
+    if (designed_widgets) (void)designed_widgets->remove_panel(designed_self, "telemetry.main");
+    designed_widgets = NULL;
+}
+"
+`;
+
+exports[`c full widgets 1.1 snapshots and parses workbench 1`] = `
+"// scuba-panel {"id":"workbench","title":"Widget workbench"}
+#include "sco_api.h"
+#include "sco_widgets.h"
+#include <stddef.h>
+static const char* const items6[] = {"Alpha", "Beta", "Gamma"};
+static const char* const items9[] = {"Alpha", "Beta", "Gamma"};
+static const char* const items10[] = {"Item", "Status", "Probe", "Ready"};
+static const sco_widget_node_1_1 designed_nodes[] = {
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_COLUMN, .id = 1u, .parent = 0u, .flags = 0u, .label = "" }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_BUTTON, .id = 2u, .parent = 1u, .flags = 0u, .label = "Run diagnostics" }, .tooltip = "Synthetic diagnostics only", .severity = 1u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_TOGGLE, .id = 3u, .parent = 1u, .flags = 0u, .label = "Telemetry", .value = 0.0 }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_SLIDER, .id = 4u, .parent = 1u, .flags = 0u, .label = "Gain", .value = 0.5, .minimum = 0.0, .maximum = 1.0 }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_ROW, .id = 5u, .parent = 1u, .flags = 0u, .label = "" }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_COMBO, .id = 6u, .parent = 5u, .flags = 0u, .label = "Combo", .index = -1, .items = items6, .item_count = 3u }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_TEXT_INPUT, .id = 7u, .parent = 5u, .flags = 0u, .label = "TextInput", .text = "" }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_LABEL, .id = 8u, .parent = 1u, .flags = 0u, .label = "Synthetic instrument panel" }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 0u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_LIST, .id = 9u, .parent = 1u, .flags = 0u, .label = "List", .index = -1, .items = items9, .item_count = 3u }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 2u },
+    { .base = { .size = sizeof(sco_widget_node_1_1), .kind = SCO_WIDGET_TABLE, .id = 10u, .parent = 1u, .flags = 0u, .label = "Table", .items = items10, .item_count = 4u, .columns = 2u }, .tooltip = "", .severity = 0u, .first_row = 0u, .visible_rows = 1u },
+};
+
+static const sco_widgets_v1* designed_widgets;
+static sco_plugin* designed_self;
+static const sco_plugin_info designed_info = {
+    sizeof(sco_plugin_info), SCO_API_MAJOR, SCO_API_MINOR, "workbench", "0.1.0", "the maintainer"
+};
+SCO_EXPORT const sco_plugin_info* sco_plugin_query(void) { return &designed_info; }
+SCO_EXPORT sco_result sco_plugin_load(const sco_api* api, sco_plugin* self) {
+    const void* table = NULL;
+    designed_self = self;
+    if (api->size < offsetof(sco_api, query_service) + sizeof(api->query_service) || !api->query_service)
+        return SCO_OK;
+    if (api->query_service(SCO_WIDGETS_NAME, SCO_WIDGETS_VERSION_1_0, &table) != SCO_OK || !table)
+        return SCO_OK;
+    designed_widgets = (const sco_widgets_v1*)table;
+    if (designed_widgets->size < offsetof(sco_widgets_v1, remove_panel) + sizeof(designed_widgets->remove_panel) ||
+        !designed_widgets->set_panel || !designed_widgets->remove_panel) {
+        designed_widgets = NULL;
+        return SCO_OK;
+    }
+    return designed_widgets->set_panel(self, "workbench.main", "Widget workbench", &designed_nodes[0].base,
+        10u, sizeof(designed_nodes[0]), NULL, NULL);
+}
+SCO_EXPORT void sco_plugin_unload(void) {
+    if (designed_widgets) (void)designed_widgets->remove_panel(designed_self, "workbench.main");
+    designed_widgets = NULL;
+}
+"
+`;
+
+exports[`csharp published builder subset snapshots and roundtrips actual supported calls 1`] = `
+"// scuba-panel {"id":"instrument","title":"Instrument control"}
+using Sco.Sdk;
+
+public static class DesignedPanel {
+    public static (WidgetNode[] Nodes, PanelBuilder Builder) Build() {
+    var panel = new PanelBuilder();
+    panel.Column(1u, scope1 => {
+        panel.Button(2u, "Run diagnostics", disabled: false);
+        panel.Toggle(3u, "Telemetry", false, disabled: false);
+        panel.Slider(4u, "Gain", 0.5, 0.0, 1.0, disabled: false);
+        panel.Row(5u, scope5 => {
+            panel.Button(6u, "Button", disabled: false);
+        }, disabled: true);
+    }, disabled: false);
+    return (panel.Build(), panel);
+    }
+}
+"
+`;
+
+exports[`lua published builder subset snapshots and roundtrips actual supported calls 1`] = `
+"-- scuba-panel {"id":"instrument","title":"Instrument control"}
+local panel = sco.panel_builder.new()
+    panel:column(function(panel)
+        panel:button({ label = "Run diagnostics", disabled = false })
+        panel:toggle({ label = "Telemetry", disabled = false, value = false })
+        panel:slider({ label = "Gain", disabled = false, value = 0.5, minimum = 0.0, maximum = 1.0 })
+        panel:row(function(panel)
+            panel:button({ label = "Button", disabled = false })
+        end, { disabled = true })
+    end, { disabled = false })
+local nodes, dispatch = panel:build()
+return nodes, dispatch
+"
+`;
