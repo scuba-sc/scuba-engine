@@ -54,6 +54,16 @@ add_dependencies(test_mock_game mock_game_probe)
 scuba_warnings(test_mock_game)
 add_test(NAME mock_game_plugins COMMAND test_mock_game "${mock_plugin_root}")
 set_tests_properties(mock_game_plugins PROPERTIES TIMEOUT 60)
+if(SCUBA_HAVE_ACTOR_STATS AND SCUBA_ACTOR_STATS_PROBE_DIR)
+  # game.actor_stats(+_write) mock and the kit's actor_stats_probe loaded against it. Built only
+  # when the pinned kit (or the local pre-release override) has the headers: cmake/ScubaActorStats.cmake.
+  add_executable(test_mock_actor_stats test_mock_actor_stats.cpp)
+  target_link_libraries(test_mock_actor_stats PRIVATE scuba_mock_game)
+  add_dependencies(test_mock_actor_stats actor_stats_probe)
+  scuba_warnings(test_mock_actor_stats)
+  add_test(NAME mock_actor_stats COMMAND test_mock_actor_stats "${CMAKE_BINARY_DIR}/plugins/actor_stats_probe_root")
+  set_tests_properties(mock_actor_stats PROPERTIES TIMEOUT 60)
+endif()
 add_executable(test_designer_export test_designer_export.cpp)
 target_link_libraries(test_designer_export PRIVATE scuba_bridge)
 target_compile_definitions(test_designer_export PRIVATE

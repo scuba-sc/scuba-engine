@@ -252,7 +252,12 @@ int main(int argc, char** argv) {
         const Json scene = Rpc(ws, reader, R"({"id":10,"method":"mock_game.state"})");
         CHECK(scene.find("result") && scene.find("result")->find("player")->find("spawned")->as_bool());
         const Json caps = Rpc(ws, reader, R"({"id":11,"method":"mock_game.caps.set","params":{"name":"game.actors.state","ready":false}})");
-        CHECK(caps.find("result") && caps.find("result")->size() == 52);
+#ifdef SCUBA_HAVE_ACTOR_STATS
+        constexpr size_t expectedCapabilities = 59;
+#else
+        constexpr size_t expectedCapabilities = 57;
+#endif
+        CHECK(caps.find("result") && caps.find("result")->size() == expectedCapabilities);
         const Json moved = Rpc(ws, reader, R"({"id":12,"method":"mock_game.player.move","params":{"zone":4,"pos":[7,8,9],"camera":true}})");
         CHECK(moved.find("result"));
         const Json changed = Rpc(ws, reader, R"({"id":13,"method":"mock_game.state"})");

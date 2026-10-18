@@ -5,6 +5,27 @@ There is no game image, signature scan, proprietary fixture, engine call, or
 network session behind these tables. Nothing here has been run in Star Citizen.
 Use `--no-mock-game` to omit the synthetic provider.
 
+### Explicit SDK 2.4.0 candidate configuration
+
+The published default remains SDK 2.3.0. An explicitly selected, hash-verified
+2.4.0 host-source candidate additionally provides synthetic build identity,
+three inventory ports, GameRules state and 17 parameter definitions, and the
+archive's 1,267 named input actions. Metadata vocabulary comes from the verified
+archive; values and entity identities are fictional. Build identity does not
+claim a real game build match.
+
+When the archive contains actor-stat headers, the existing PR25 mock provides
+`game.actor_stats` and `game.actor_stats_write`. Reads start at deterministic
+synthetic values; writes remain capability-off by default, including in the
+`all` profile. Optional drift is disabled unless explicitly enabled. The
+inspector only uses reads. The source archive may omit the example probe; that
+does not disable the service, but its probe-specific test is not registered.
+
+External consumer integration is tested in sc-offline, not through an inspector
+dependency in this repository. Its hostd test covers explicit refresh, historical
+cached state, provider withdrawal, no-mock fallback, shutdown and closed ports.
+These are synthetic checks, not run in game.
+
 The ABI is the published sdk-v2.3.0 host-source kit's `include/sc_*.h`.
 Every member of every game service table in that kit has an implementation.
 `sc_game_events.h` defines bus payloads, **not** a `game.events` service table.

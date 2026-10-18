@@ -17,21 +17,35 @@ namespace {
 using ServiceFn = const ServiceDef& (*)();
 
 constexpr ServiceFn kServices[] = {
-    ActorsService,     AsopService,         ContractsService,  CreativeService,    CvarsService,
+    ActorsService,     BuildService,        InventoryService,   GameRulesService,  InputService,         AsopService,         ContractsService,
+    CreativeService,   CvarsService,
     CvarsWriteService, EconomyService,      EntitiesService,   GameSpatialService, HangarService,
     LoadoutService,    MiningService,       MissionsService,   OwnedService,       PrefabsService,
     PrivateSessionService, QuantumService,  RelocationService, ReputationService,  VehiclesService,
     WorldService,      WorldControlService, SpawnService,      TeleportSpatialService,
+#ifdef SCUBA_HAVE_ACTOR_STATS
+    ActorStatsService, ActorStatsWriteService,
+#endif
 };
 
 struct CapDef {
     const char* name;
     const char* service;
     bool gamePack;
+    bool defaultOn = true;
 };
 
 // gamePack: false where the kit's header says the game pack holds the capability off.
 constexpr CapDef kCaps[] = {
+#ifdef SCUBA_HAVE_ACTOR_STATS
+    { "game.actor_stats.read", "game.actor_stats", true },
+    { "game.actor_stats.write", "game.actor_stats_write", false, false },
+#endif
+    { "game.build", "game.build", true },
+    { "game.inventory.read", "game.inventory", false },
+    { "game.gamerules.read", "game.gamerules", false },
+    { "game.gamerules.params", "game.gamerules", true },
+    { "game.input.registry", "game.input", true },
     { "game.actors.local_player", "game.actors", true },
     { "game.actors.spawn_npc", "game.actors", true },
     { "game.actors.despawn", "game.actors", true },
@@ -186,7 +200,7 @@ bool SetCapability(const std::string& name, bool ready) {
 bool ApplyProfile(const std::string& profile) {
     if (profile != "all" && profile != "game_pack" && profile != "none") return false;
     for (const auto& c : kCaps) {
-        const bool on = profile == "all" || (profile == "game_pack" && c.gamePack);
+        const bool on = (profile == "all" && c.defaultOn) || (profile == "game_pack" && c.gamePack);
         sco::caps::Set(c.name, on, on ? nullptr : "off in the scuba mock game profile");
     }
     return true;

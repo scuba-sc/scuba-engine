@@ -4,6 +4,10 @@
 #include "sco_api.h"
 #include "sc_reputation.h"
 #include "sc_world.h"
+#include "sc_game_build.h"
+#include "sc_inventory.h"
+#include "sc_gamerules.h"
+#include "sc_input.h"
 
 #include <array>
 #include <cstdint>
@@ -23,6 +27,14 @@ struct ServiceDef {
 };
 
 const ServiceDef& ActorsService();
+#ifdef SCUBA_HAVE_ACTOR_STATS
+const ServiceDef& ActorStatsService();
+const ServiceDef& ActorStatsWriteService();
+#endif
+const ServiceDef& BuildService();
+const ServiceDef& InventoryService();
+const ServiceDef& GameRulesService();
+const ServiceDef& InputService();
 const ServiceDef& AsopService();
 const ServiceDef& ContractsService();
 const ServiceDef& CreativeService();

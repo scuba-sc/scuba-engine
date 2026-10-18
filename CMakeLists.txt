@@ -21,6 +21,7 @@ find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 include(cmake/ScubaSdk.cmake)
+include(cmake/ScubaActorStats.cmake)
 
 function(scuba_warnings target)
   if(MSVC)
@@ -57,6 +58,10 @@ add_library(scuba_mock_game STATIC
   src/hostd/mock_game/common.cpp
   src/hostd/mock_game/mock_game.cpp
   src/hostd/mock_game/actors.cpp
+  src/hostd/mock_game/build.cpp
+  src/hostd/mock_game/inventory.cpp
+  src/hostd/mock_game/gamerules.cpp
+  src/hostd/mock_game/input.cpp
   src/hostd/mock_game/asop.cpp
   src/hostd/mock_game/contracts.cpp
   src/hostd/mock_game/creative.cpp
@@ -82,9 +87,26 @@ add_library(scuba_mock_game STATIC
   src/hostd/mock_game/spawn.cpp
   src/hostd/mock_game/teleport_spatial.cpp
   src/hostd/mock_game/handlers.cpp)
+file(STRINGS "${SCUBA_SDK_SOURCE_DIR}/src/game/services/input.cpp" _scuba_input_actions
+  REGEX "^    \\{\"[^\"]+\", [0-9]+, [0-9]+u\\},$")
+list(LENGTH _scuba_input_actions _scuba_input_action_count)
+if(NOT _scuba_input_action_count EQUAL 1267)
+  message(FATAL_ERROR "Locked host-source input registry contains ${_scuba_input_action_count} actions; expected 1267")
+endif()
+string(JOIN "\n" _scuba_input_action_rows ${_scuba_input_actions})
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated_mock_input_actions.inc"
+  "constexpr Action actions[] = {\n${_scuba_input_action_rows}\n};\n")
+target_include_directories(scuba_mock_game PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(scuba_mock_game PUBLIC scuba_bridge sco_app)
 target_include_directories(scuba_mock_game PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/plugins/diegetic_shop_inv/src")
+if(SCUBA_HAVE_ACTOR_STATS)
+  target_sources(scuba_mock_game PRIVATE src/hostd/mock_game/actor_stats.cpp)
+  target_compile_definitions(scuba_mock_game PUBLIC SCUBA_HAVE_ACTOR_STATS=1)
+  if(SCUBA_ACTOR_STATS_INCLUDE_DIR)
+    target_include_directories(scuba_mock_game PUBLIC "${SCUBA_ACTOR_STATS_INCLUDE_DIR}")
+  endif()
+endif()
 scuba_warnings(scuba_mock_game)
 add_library(scuba_assets STATIC
   src/assets/io.cpp
@@ -128,5 +150,8 @@ scuba_warnings(scuba-hostd)
 if(SCUBA_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+  if(SCUBA_HAVE_ACTOR_STATS)
+    target_compile_definitions(test_e2e PRIVATE SCUBA_HAVE_ACTOR_STATS=1)
+  endif()
 endif()
 add_subdirectory(plugins)
