@@ -26,7 +26,7 @@ bool Kernel::Start(const KernelOptions& options, LogFn log) {
     }
 
     sco::app::Platform pf;
-    pf.hostVersion = "scuba-hostd " SCUBA_VERSION;
+    pf.hostVersion = options.hostVersion ? options.hostVersion : "scuba-hostd " SCUBA_VERSION;
     pf.pluginRoot = options.pluginRoot;
     pf.pluginsEnabled = !options.pluginRoot.empty();
     pf.dataRoot = options.dataRoot;

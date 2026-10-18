@@ -16,10 +16,19 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(SCUBA_BUILD_TESTS "Build the scuba-engine tests and register them with CTest" ON)
 option(SCUBA_WERROR "Treat warnings in scuba-engine's own code as errors" ON)
+option(SCUBA_BUILD_ENGINE "Build the native engine: core, VFS and assets everywhere; the scuba-engine app on Windows" ON)
 
 find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+if(SCUBA_BUILD_ENGINE)
+  include(cmake/ScubaDeps.cmake)
+  if(WIN32)
+    # The kit's host-only sco::widgets::ImGuiRenderer draws plugin panels into the engine's ImGui.
+    set(SCO_WIDGETS_IMGUI ON CACHE BOOL "" FORCE)
+    set(SCO_WIDGETS_IMGUI_INCLUDE_DIR "${SCUBA_IMGUI_DIR}" CACHE PATH "" FORCE)
+  endif()
+endif()
 include(cmake/ScubaSdk.cmake)
 
 function(scuba_warnings target)
@@ -104,9 +113,14 @@ add_library(scuba_net_sim STATIC
 target_link_libraries(scuba_net_sim PUBLIC scuba_bridge)
 scuba_warnings(scuba_net_sim)
 
+# The sco-core kernel booted in-process with the mock game: shared by scuba-hostd and the engine.
+add_library(scuba_kernel STATIC src/hostd/kernel.cpp)
+target_link_libraries(scuba_kernel PUBLIC scuba_mock_game sco_lua_game)
+target_compile_definitions(scuba_kernel PRIVATE SCUBA_VERSION="${PROJECT_VERSION}")
+scuba_warnings(scuba_kernel)
+
 add_executable(scuba-hostd
   src/hostd/main.cpp
-  src/hostd/kernel.cpp
   src/hostd/modules.cpp
   src/hostd/system_handlers.cpp
   src/hostd/plugins_handlers.cpp
@@ -118,12 +132,16 @@ add_executable(scuba-hostd
 # sco_plugins, sco_widgets, sco_ui, sco_storage, sco_settings, sco_content, sco_ipc,
 # sco_net_service -> sco_net, sco_datacore_service -> sco_datacore -> sco_vfs). Lua is separate:
 # sco_lua_game links sco_lua.
-target_link_libraries(scuba-hostd PRIVATE scuba_mock_game scuba_assets scuba_net_sim sco_lua_game)
+target_link_libraries(scuba-hostd PRIVATE scuba_kernel scuba_assets scuba_net_sim)
 target_compile_definitions(scuba-hostd PRIVATE
   SCUBA_VERSION="${PROJECT_VERSION}"
   SCUBA_SDK_VERSION="${SCUBA_SDK_VERSION}"
   SCUBA_DEFAULT_STUDIO_DIR="${CMAKE_CURRENT_SOURCE_DIR}/studio/dist")
 scuba_warnings(scuba-hostd)
+
+if(SCUBA_BUILD_ENGINE)
+  add_subdirectory(engine)
+endif()
 
 if(SCUBA_BUILD_TESTS)
   enable_testing()
