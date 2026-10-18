@@ -24,3 +24,22 @@ tooling parity over the out-of-game sandbox and studio runtime.
 ## 3. Protocol & Transport
 - **Transport**: Standard stdio JSON-RPC (MCP protocol version `2025-11-25`).
 - **Loopback Bridge**: Connects to active `scuba-hostd` on `ws://127.0.0.1:<port>/ws`. Rejects foreign origins (Rule 11).
+
+## 4. Implemented stdio bridge
+
+`tools/scuba-engine-mcp/server.mjs` implements these tools with Node.js 22.12+
+or Bun, without dependencies. The explicit endpoint accepts numeric IPv4 loopback
+only. MCP initialization and the initialized notification precede tool calls.
+The server forwards only the seven named methods, validates arguments and does
+not retry mutating calls after a timeout or disconnect. EOF closes its bridge;
+hostd remains independently owned.
+
+`send_widget_event` also accepts value, index and row for the host's existing
+toggle/slider, combo/list and page events. No tab event primitive is invented.
+Hostd receives `panel` for events and `id` for panel reads. Runtime control is
+opt-in: plugin commands, widget callbacks and conversion can mutate local state
+or create output files. This is sandbox access, not game certification.
+
+Run the tool directory's Bun tests and `integration.mjs HOSTD PLUGIN_ROOT` for
+real stdio-to-native verification. See its README for client launch details and
+failure semantics.

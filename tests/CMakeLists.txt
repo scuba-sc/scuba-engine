@@ -74,6 +74,9 @@ if(SCUBA_BUN_EXECUTABLE)
   add_test(NAME designer_codegen_unit COMMAND "${SCUBA_BUN_EXECUTABLE}" test
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../tools/designer-codegen")
   set_tests_properties(designer_codegen_unit PROPERTIES TIMEOUT 60)
+  add_test(NAME studio_mcp_unit COMMAND "${SCUBA_BUN_EXECUTABLE}" test
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../tools/scuba-engine-mcp")
+  set_tests_properties(studio_mcp_unit PROPERTIES TIMEOUT 60)
 endif()
 add_executable(test_assets test_assets.cpp)
 target_link_libraries(test_assets PRIVATE scuba_assets)
@@ -96,6 +99,10 @@ add_test(NAME netsim_eight_peer_bounds COMMAND test_net_sim $<TARGET_FILE:scuba-
 set_tests_properties(netsim_two_peer_delivery netsim_four_peer_join_leave netsim_eight_peer_bounds PROPERTIES TIMEOUT 120)
 
 find_program(SCUBA_NODE_EXECUTABLE node REQUIRED)
+add_test(NAME studio_mcp_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../tools/scuba-engine-mcp/integration.mjs"
+  "$<TARGET_FILE:scuba-hostd>" "${CMAKE_BINARY_DIR}/plugins/runtime")
+set_tests_properties(studio_mcp_integration PROPERTIES TIMEOUT 60)
 add_test(NAME engine_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/integration-smoke.mjs" "$<TARGET_FILE:scuba-hostd>"
   "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures" "${CMAKE_CURRENT_BINARY_DIR}/")
