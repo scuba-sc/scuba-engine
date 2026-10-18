@@ -38,6 +38,19 @@ Configure downloads `sco-sdk-host-source-sc-2.3.0.zip` from the sco-core `sdk-v2
 cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.3.0-assets
 ```
 
+To test an unpublished, independently verified candidate without changing the published default,
+pass its exact version and locked archive hash explicitly:
+
+```sh
+cmake -S . -B build-candidate \
+  -DSCUBA_SDK_VERSION=2.4.0 \
+  -DSCUBA_SDK_HOST_SOURCE_SHA256=d321f6b34e50a892dd58895dce043ad57e3fa4d7899f086c738e668b71cae78c \
+  -DSCUBA_SDK_ARCHIVE_DIR=/path/to/verified-candidate-assets
+```
+
+The local directory must contain `sco-sdk-host-source-sc-2.4.0.zip`. Configure checks its SHA-256
+before extraction; the candidate coordinates do not imply that SDK 2.4.0 has been published.
+
 On Windows add `-A x64` to the configure and `--config Release` / `-C Release` to build and ctest.
 
 ## Build the studio

@@ -4,6 +4,8 @@
 #   SCUBA_SDK_ARCHIVE_DIR   directory holding a local copy of the release assets; when set, the
 #                           archive is taken from there instead of downloaded. Either way the
 #                           archive must match SCUBA_SDK_HOST_SOURCE_SHA256 or configure fails.
+#   SCUBA_SDK_HOST_SOURCE_SHA256 can explicitly select a verified candidate archive; the shipped
+#                           default remains the published 2.3.0 kit until 2.4.0 is published.
 #
 # The kit sources are never copied into this repository: they are extracted under the build tree.
 
@@ -11,6 +13,16 @@ set(SCUBA_SDK_VERSION "2.3.0" CACHE STRING "sco-core SDK release consumed by scu
 set(SCUBA_SDK_ARCHIVE_DIR "" CACHE PATH "Local directory with the sdk-v<version> release assets (optional)")
 set(SCUBA_SDK_HOST_SOURCE_SHA256 "ec6c43d3ef33570e5624f7d5ec7d89fb656337d195103d1f97973ab965e1a79a"
     CACHE STRING "SHA-256 of sco-sdk-host-source-sc-<version>.zip (from the release SHA256SUMS)")
+string(LENGTH "${SCUBA_SDK_HOST_SOURCE_SHA256}" _scuba_sdk_hash_length)
+if(NOT SCUBA_SDK_HOST_SOURCE_SHA256 MATCHES "^[0-9a-fA-F]+$" OR NOT _scuba_sdk_hash_length EQUAL 64)
+  message(FATAL_ERROR "SCUBA_SDK_HOST_SOURCE_SHA256 must be a 64-digit SHA-256")
+endif()
+if((NOT SCUBA_SDK_VERSION STREQUAL "2.3.0" OR
+    NOT SCUBA_SDK_HOST_SOURCE_SHA256 STREQUAL "ec6c43d3ef33570e5624f7d5ec7d89fb656337d195103d1f97973ab965e1a79a")
+   AND NOT SCUBA_SDK_ARCHIVE_DIR)
+  message(FATAL_ERROR
+    "Non-default SDK version or hash requires SCUBA_SDK_ARCHIVE_DIR with the exact local archive")
+endif()
 
 set(_scuba_sdk_name "sco-sdk-host-source-sc-${SCUBA_SDK_VERSION}")
 set(_scuba_sdk_zip_name "${_scuba_sdk_name}.zip")
