@@ -24,12 +24,13 @@ test('requires initialized notification before exposing tools', async () => {
   expect((await server.handle(request('ping', null))).error.code).toBe(-32602);
 });
 
-test('advertises seven explicit tools with object schemas and mutation annotations', async () => {
+test('advertises explicit tools with object schemas and mutation annotations', async () => {
   const server = await initialized({});
   const tools = (await server.handle(request('tools/list'))).result.tools;
-  expect(tools).toHaveLength(7);
+  expect(tools).toHaveLength(8);
   expect(tools.every(t => t.inputSchema.additionalProperties === false && !('map' in t) && !('method' in t))).toBe(true);
   expect(tools.find(t => t.name === 'host_status').annotations.readOnlyHint).toBe(true);
+  expect(tools.find(t => t.name === 'plugin_commands').annotations.readOnlyHint).toBe(true);
   expect(tools.find(t => t.name === 'invoke_command').annotations.destructiveHint).toBe(true);
 });
 
@@ -38,6 +39,7 @@ test('maps every approved tool to the actual hostd field names', async () => {
   const server = await initialized({ async call(method, params) { calls.push({ method, params }); return { result: 'OK' }; } });
   const samples = [
     ['host_status', {}, 'system.status', {}],
+    ['plugin_commands', {}, 'plugins.commands', {}],
     ['invoke_command', { name: 'mp_chat.status' }, 'plugins.invoke', { name: 'mp_chat.status', args: [] }],
     ['get_widget_panel', { panel_id: 'mp_chat.main' }, 'widgets.get', { id: 'mp_chat.main' }],
     ['send_widget_event', { panel_id: 'mp_chat.main', node_id: 3, kind: 'button' }, 'widgets.event',
@@ -57,7 +59,7 @@ test('rejects invalid input without making any bridge call', async () => {
   let forwards = 0;
   const server = await initialized({ async call() { forwards++; return {}; } });
   const invalid = [
-    ['host_status', { ignored: 1 }], ['invoke_command', { name: 'x', args: [null] }],
+    ['host_status', { ignored: 1 }], ['plugin_commands', { ignored: 1 }], ['invoke_command', { name: 'x', args: [null] }],
     ['invoke_command', { name: 'bad\0name' }], ['invoke_command', { name: 'x', args: [{}] }],
     ['get_widget_panel', {}], ['mock_set_service', { service: 'game.actors', published: 'false' }],
     ['mock_move_camera', { pos: [1, 2] }], ['mock_move_camera', { pos: [1, NaN, 3] }],

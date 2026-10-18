@@ -85,11 +85,22 @@ try {
     clientInfo: { name: 'studio-mcp-integration', version: '1' } });
   assert.equal(initial.result.protocolVersion, '2025-11-25');
   server.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
-  assert.equal((await request('tools/list')).result.tools.length, 7);
+  assert.equal((await request('tools/list')).result.tools.length, 8);
+  const commands = await call('plugin_commands');
+  assert(Array.isArray(commands) && commands.some(command => command.name === 'mp_chat.status'));
+  for (const command of commands) {
+    assert.equal(typeof command.ready, 'boolean');
+    assert(Array.isArray(command.args));
+    assert(command.args.every(arg => ['integer', 'number', 'string', 'boolean'].includes(arg.type)));
+  }
   const status = await call('host_status');
   assert.equal(status.name, 'scuba-hostd');
   assert(status.kernel.plugins.some(p => p.id === 'diegetic_asop' && p.state === 'loaded'));
   assert.equal((await call('invoke_command', { name: 'mp_chat.status', args: [] })).result, 'OK');
+  const wrongCount = await request('tools/call', { name: 'invoke_command',
+    arguments: { name: 'mp_chat.status', args: [1] } });
+  assert.equal(wrongCount.result.isError, true);
+  assert(wrongCount.result.content[0].text.includes('wrong command argument count'));
   const panel = await call('get_widget_panel', { panel_id: 'diegetic_asop.terminal' });
   const input = panel.nodes.find(n => n.kind === 'text_input');
   assert(input);

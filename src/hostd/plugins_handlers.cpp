@@ -1,5 +1,6 @@
 #include "hostd/modules.h"
 #include "sco/runtime.h"
+#include "sco/caps.h"
 
 #include <array>
 #include <cmath>
@@ -19,6 +20,37 @@ void OnReply(sco::Result, const char* text, void* context) {
 }  // namespace
 
 void RegisterPluginHandlers(Registry& registry, HostContext&) {
+    registry.register_handler("plugins.commands", [](const Json&, const CallContext&) {
+        std::array<const sco::Command*, sco::kMaxCommands> commands{};
+        const size_t count = sco::ListCommands(commands.data(), commands.size());
+        Json out = Json::MakeArray();
+        for (size_t i = 0; i < count; ++i) {
+            const auto& command = *commands[i];
+            Json item = Json::MakeObject();
+            item.set("name", command.name);
+            item.set("title", command.title);
+            item.set("help", command.help ? command.help : "");
+            item.set("capability", command.capability ? command.capability : "");
+            item.set("ready", !command.capability || sco::caps::Has(command.capability));
+            Json args = Json::MakeArray();
+            for (uint32_t j = 0; j < command.nargs; ++j) {
+                const auto& arg = command.args[j];
+                Json definition = Json::MakeObject();
+                definition.set("name", arg.name);
+                definition.set("help", arg.help ? arg.help : "");
+                switch (arg.type) {
+                    case sco::ArgType::Int: definition.set("type", "integer"); break;
+                    case sco::ArgType::Float: definition.set("type", "number"); break;
+                    case sco::ArgType::String: definition.set("type", "string"); break;
+                    case sco::ArgType::Bool: definition.set("type", "boolean"); break;
+                }
+                args.push_back(std::move(definition));
+            }
+            item.set("args", std::move(args));
+            out.push_back(std::move(item));
+        }
+        return out;
+    });
     registry.register_handler("plugins.invoke", [](const Json& params, const CallContext&) {
         const Json* name = params.find("name");
         const Json* values = params.find("args");

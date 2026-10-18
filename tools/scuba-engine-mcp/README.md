@@ -1,6 +1,6 @@
 # Local sandbox MCP bridge
 
-`scuba-engine-mcp` exposes seven tools over newline-delimited stdio JSON-RPC,
+`scuba-engine-mcp` exposes eight tools over newline-delimited stdio JSON-RPC,
 using MCP protocol `2025-11-25`. Requires Node.js 22.12+ or Bun; no dependencies.
 Start an existing `scuba-hostd` on loopback with the plugins you trust, then run:
 
@@ -9,10 +9,12 @@ node tools/scuba-engine-mcp/server.mjs --host ws://127.0.0.1:7878/ws
 ```
 
 Initialize, send `notifications/initialized`, then use `tools/list` and
-`tools/call`. The tools are `host_status`, `invoke_command`, `get_widget_panel`,
+`tools/call`. The tools are `host_status`, `plugin_commands`, `invoke_command`, `get_widget_panel`,
 `send_widget_event`, `mock_move_camera`, `mock_set_service`, and `convert_asset`.
 Their JSON Schemas are returned by `tools/list`. `panel_id` maps to hostd's `id`
 for reads and `panel` for events; `service` maps to `name`.
+`plugin_commands` reads the live command registry, including typed argument
+definitions and current capability readiness. Discovery does not invoke commands.
 
 This is an opt-in control channel for the out-of-game sandbox. Plugin commands,
 widget callbacks and asset conversion may mutate state or write local files;
@@ -34,3 +36,20 @@ node tools/scuba-engine-mcp/integration.mjs /path/to/scuba-hostd /path/to/plugin
 The integration starts real native hostd and the actual stdio server, exercises
 all tools, and verifies shutdown, port closure and temporary-directory cleanup.
 It requires the four built APP examples under the supplied plugin root.
+
+## Opt-in local developer tools
+
+Add `--projects /absolute/path/projects.json` to expose `project_build`,
+`project_check` and `project_test` alongside the eight default tools. Each takes
+only `{ "project": "id" }`. The operator-owned configuration has version 1 and
+at most 16 projects, each with `id`, absolute `cwd`, `timeout_ms` (100-1800000),
+and `build`, `check`, `test` arrays containing an absolute executable followed
+by fixed arguments. The configuration is trusted code execution authority;
+keep it private and choose projects whose build scripts you trust.
+
+The agent cannot supply a command, working directory or extra arguments. Runs
+use no shell, capture at most 64 KiB, report exit code, timeout, truncation and
+diagnostic lines, and terminate the process tree on timeout. No retry occurs.
+Build failures become MCP tool errors with the structured result retained.
+The default invocation exposes exactly eight tools. A passing local
+build or checker does not certify game behavior.

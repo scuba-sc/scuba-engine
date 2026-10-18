@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import { pathToFileURL } from 'node:url';
+import { DEVELOPER_TOOLS, loadProjects, runProject } from './developer.mjs';
 
 export const PROTOCOL = '2025-11-25';
 const MAX_FRAME = 64 * 1024;
@@ -26,6 +27,8 @@ const widgetSchema = object({
 export const TOOLS = [
   spec('host_status', 'Inspect the local sandbox host; not a game-session result.', object({}),
     'system.status', () => ({}), true),
+  spec('plugin_commands', 'List live plugin commands, typed arguments and current capability readiness.', object({}),
+    'plugins.commands', () => ({}), true),
   spec('invoke_command', 'Invoke a registered trusted native plugin command in the local sandbox. May mutate state.',
     object({ name: string, args: { type: 'array', maxItems: 32,
       items: { type: ['string', 'number', 'boolean'] } } }, ['name']),
@@ -138,7 +141,7 @@ export class Bridge {
 }
 
 export class Server {
-  constructor(bridge) { this.bridge = bridge; this.state = 'new'; }
+  constructor(bridge, projects) { this.bridge = bridge; this.projects = projects; this.state = 'new'; }
   async handle(request) {
     let id = null;
     try {
@@ -167,7 +170,7 @@ export class Server {
         case 'tools/list':
           if (this.state !== 'ready') throw new RpcError(-32002, 'Initialization required');
           validate(params, object({}));
-          result = { tools: TOOLS.map(({ method, map, ...tool }) => tool) };
+          result = { tools: [...TOOLS.map(({ method, map, ...tool }) => tool), ...(this.projects ? DEVELOPER_TOOLS : [])] };
           break;
         case 'tools/call': {
           if (this.state !== 'ready') throw new RpcError(-32002, 'Initialization required');
@@ -175,7 +178,7 @@ export class Server {
             throw new RpcError(-32602, 'Expected tool name and arguments object');
           if (Object.keys(params).some(key => !['name', 'arguments', '_meta'].includes(key)))
             throw new RpcError(-32602, 'Unknown tool-call field');
-          const tool = TOOLS.find(t => t.name === params.name);
+          const tool = [...TOOLS, ...(this.projects ? DEVELOPER_TOOLS : [])].find(t => t.name === params.name);
           if (!tool) throw new RpcError(-32602, 'Unknown tool');
           try {
             const args = params.arguments ?? {};
@@ -187,8 +190,9 @@ export class Server {
                   throw new RpcError(-32602, `Widget ${field} does not match event kind`);
               }
             }
-            const value = await this.bridge.call(tool.method, tool.map(args));
-            const failed = record(value) && typeof value.result === 'string' && value.result !== 'OK';
+            const value = tool.name.startsWith('project_') ?
+              await runProject(this.projects, tool.name.slice(8), args) : await this.bridge.call(tool.method, tool.map(args));
+            const failed = value.success === false || (record(value) && typeof value.result === 'string' && value.result !== 'OK');
             result = { content: [{ type: 'text', text: JSON.stringify(value) }], isError: failed };
           } catch (error) {
             result = { content: [{ type: 'text', text: error instanceof Error ? error.message : 'Tool failed' }], isError: true };
@@ -205,8 +209,8 @@ export class Server {
   }
 }
 
-export async function stdio(bridge, input = process.stdin, output = process.stdout) {
-  const server = new Server(bridge);
+export async function stdio(bridge, input = process.stdin, output = process.stdout, projects) {
+  const server = new Server(bridge, projects);
   let pending = Buffer.alloc(0);
   const emit = value => {
     if (value === null) return;
@@ -235,9 +239,11 @@ export async function stdio(bridge, input = process.stdin, output = process.stdo
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    if (process.argv.length !== 4 || process.argv[2] !== '--host')
-      throw new RpcError(-32602, 'usage: node server.mjs --host ws://127.0.0.1:<port>/ws');
-    await stdio(new Bridge(process.argv[3]));
+    if (![4, 6].includes(process.argv.length) || process.argv[2] !== '--host' ||
+        (process.argv.length === 6 && process.argv[4] !== '--projects'))
+      throw new RpcError(-32602, 'usage: node server.mjs --host ws://127.0.0.1:<port>/ws [--projects CONFIG]');
+    const projects = process.argv.length === 6 ? await loadProjects(process.argv[5]) : undefined;
+    await stdio(new Bridge(process.argv[3]), process.stdin, process.stdout, projects);
   } catch (error) {
     process.stderr.write((error instanceof Error ? error.message : 'Server failed') + '\n');
     process.exitCode = 1;
