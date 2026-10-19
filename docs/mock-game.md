@@ -13,6 +13,11 @@ studio additionally publishes `game.inventory.contents` 1.0. Its synthetic crate
 supports truncation, malformed-record refusal, capability toggling and withdrawal.
 The released SDK pin is unchanged; older kits do not compile or advertise this
 optional service. Neither profile is evidence of native game container behavior.
+Candidate kits declaring `SC_ACTOR_STATS_VERSION_1_1` additionally publish
+`game.actor_stats` 1.1. `ActorStatValues()` edits synthetic per-entity float values;
+missing/non-actor/unstreamed entities and missing stat records return NOT_FOUND,
+non-finite values fail, and capability revocation refuses reads. Both 1.0 and 1.1
+queries share the unchanged table layout. No actor-stat write provider is added.
 Every member of every game service table in that kit has an implementation.
 `sc_game_events.h` defines bus payloads, **not** a `game.events` service table.
 `game.asop` and `game.contracts` (new in 2.3.0) are read-only tables with fixed

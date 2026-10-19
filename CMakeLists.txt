@@ -99,6 +99,14 @@ if(EXISTS "${SCUBA_SDK_SOURCE_DIR}/include/sc_container_contents.h")
   target_sources(scuba_mock_game PRIVATE src/hostd/mock_game/container_contents.cpp)
   target_compile_definitions(scuba_mock_game PUBLIC SCUBA_CONTAINER_CONTENTS=1)
 endif()
+if(EXISTS "${SCUBA_SDK_SOURCE_DIR}/include/sc_actor_stats.h")
+  file(STRINGS "${SCUBA_SDK_SOURCE_DIR}/include/sc_actor_stats.h" _actor_stats_minor
+    REGEX "^#define SC_ACTOR_STATS_VERSION_1_1 ")
+  if(_actor_stats_minor)
+    target_sources(scuba_mock_game PRIVATE src/hostd/mock_game/actor_stats.cpp)
+    target_compile_definitions(scuba_mock_game PUBLIC SCUBA_ACTOR_CONDITIONS=1)
+  endif()
+endif()
 add_library(scuba_assets STATIC
   src/assets/io.cpp
   src/assets/datacore.cpp

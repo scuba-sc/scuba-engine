@@ -14,11 +14,15 @@
 #include "sc_game_spatial.h"
 #include "sc_owned.h"
 #include "sc_relocation.h"
+#ifdef SCUBA_ACTOR_CONDITIONS
+#include <sc_actor_stats.h>
+#endif
 
 #include <cstdio>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 using namespace scuba::hostd;
@@ -58,11 +62,14 @@ bool Success(const Json& response) { return response.find("result") != nullptr; 
 
 void ToggleTests(const sco_api* api) {
     const auto caps = mg::Capabilities();
+    size_t expected_caps = 52;
 #ifdef SCUBA_CONTAINER_CONTENTS
-    CHECK(caps.size() == 53);
-#else
-    CHECK(caps.size() == 52);
+    ++expected_caps;
 #endif
+#ifdef SCUBA_ACTOR_CONDITIONS
+    ++expected_caps;
+#endif
+    CHECK(caps.size() == expected_caps);
     for (const auto& cap : caps) {
         CHECK(mg::SetCapability(cap.name, false));
         CHECK(api->has(cap.name.c_str()) == 0);
@@ -241,11 +248,14 @@ int main(int argc, char** argv) {
         const auto& plugin = sco::app::Plugins().back();
         CHECK(plugin.manifest.id == "mock_game_probe" && plugin.state == sco::plugins::State::Loaded);
         if (plugin.state != sco::plugins::State::Loaded) throw std::runtime_error(plugin.reason);
+        size_t expected_services = 24;
 #ifdef SCUBA_CONTAINER_CONTENTS
-        CHECK(mg::Services().size() == 25);
-#else
-        CHECK(mg::Services().size() == 24);
+        ++expected_services;
 #endif
+#ifdef SCUBA_ACTOR_CONDITIONS
+        ++expected_services;
+#endif
+        CHECK(mg::Services().size() == expected_services);
         for (const auto& service : mg::Services()) CHECK(service.published);
         const sco_api* api = sco::host::BuildApi({ platform.hostVersion });
         ToggleTests(api);
@@ -271,6 +281,39 @@ int main(int argc, char** argv) {
         const void* absent = nullptr;
         CHECK(api->query_service(SC_CONTAINER_CONTENTS_NAME, SC_CONTAINER_CONTENTS_VERSION_1_0, &absent) != SCO_OK);
         CHECK(mg::SetServicePublished(SC_CONTAINER_CONTENTS_NAME, true));
+#endif
+#ifdef SCUBA_ACTOR_CONDITIONS
+        const auto* stats = Query<sc_actor_stats_v1>(SC_ACTOR_STATS_NAME, SC_ACTOR_STATS_VERSION_1_1);
+        float stat_value = 99;
+        CHECK(sc_actor_stats_read(stats, mg::GetScene().player, SC_ACTOR_STAT_HEALTH_HEAD, &stat_value) == SCO_OK && stat_value == 100);
+        CHECK(Query<sc_actor_stats_v1>(SC_ACTOR_STATS_NAME, SC_ACTOR_STATS_VERSION_1_0) == stats);
+        mg::ActorStatValues()[mg::GetScene().player][SC_ACTOR_STAT_WEAR_LEFT_ARM] = 0.25f;
+        CHECK(sc_actor_stats_read(stats, mg::GetScene().player, SC_ACTOR_STAT_WEAR_LEFT_ARM, &stat_value) == SCO_OK && stat_value == 0.25f);
+        CHECK(sc_actor_stats_read(stats, mg::GetScene().player, 30, &stat_value) == SCO_BAD_ARG && stat_value == 0);
+        CHECK(sc_actor_stats_read(stats, 999, SC_ACTOR_STAT_HYGIENE, &stat_value) == SCO_NOT_FOUND && stat_value == 0);
+        mg::ActorStatValues()[mg::GetScene().player].erase(SC_ACTOR_STAT_HYGIENE);
+        CHECK(sc_actor_stats_read(stats, mg::GetScene().player, SC_ACTOR_STAT_HYGIENE, &stat_value) == SCO_NOT_FOUND);
+        mg::ActorStatValues()[mg::GetScene().player][SC_ACTOR_STAT_HYGIENE] = std::numeric_limits<float>::quiet_NaN();
+        CHECK(sc_actor_stats_read(stats, mg::GetScene().player, SC_ACTOR_STAT_HYGIENE, &stat_value) == SCO_FAILED);
+        CHECK(mg::SetCapability("game.actor_stats.read", false));
+        CHECK(sc_actor_stats_read(stats, mg::GetScene().player, SC_ACTOR_STAT_HEALTH_HEAD, &stat_value) == SCO_UNAVAILABLE);
+        CHECK(mg::SetCapability("game.actor_stats.read", true));
+        for (uint32_t stat = 1; stat <= SC_ACTOR_STAT_LAST_1_1; ++stat)
+            mg::ActorStatValues()[mg::GetScene().player][stat] = static_cast<float>(stat);
+        for (uint32_t stat = 1; stat <= SC_ACTOR_STAT_LAST_1_1; ++stat)
+            CHECK(sc_actor_stats_read(stats, mg::GetScene().player, stat, &stat_value) == SCO_OK && stat_value == static_cast<float>(stat));
+        CHECK(sc_actor_stats_read(stats, 289, SC_ACTOR_STAT_HYGIENE, &stat_value) == SCO_NOT_FOUND);
+        auto& player_entity = mg::GetScene().entities.at(mg::GetScene().player);
+        player_entity.streamed = false;
+        CHECK(sc_actor_stats_read(stats, mg::GetScene().player, SC_ACTOR_STAT_HYGIENE, &stat_value) == SCO_NOT_FOUND);
+        player_entity.streamed = true;
+        sco_result actor_thread_result = SCO_OK;
+        std::thread actor_thread([&] {
+            float other_value = 999;
+            actor_thread_result = sc_actor_stats_read(stats, mg::GetScene().player, SC_ACTOR_STAT_HYGIENE, &other_value);
+        });
+        actor_thread.join();
+        CHECK(actor_thread_result == SCO_WRONG_THREAD);
 #endif
         HandlerTests();
         const mg::Vec3 cameraBefore = mg::GetScene().cameraPos;

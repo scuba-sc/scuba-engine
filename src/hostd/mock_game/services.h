@@ -32,6 +32,10 @@ const ServiceDef& ContractsService();
 const ServiceDef& ContainerContentsService();
 std::map<uint64_t, sc_container_snapshot>& ContainerContentsValues();
 #endif
+#ifdef SCUBA_ACTOR_CONDITIONS
+const ServiceDef& ActorStatsService();
+std::map<uint64_t, std::map<uint32_t, float>>& ActorStatValues();
+#endif
 const ServiceDef& CreativeService();
 const ServiceDef& CvarsService();
 const ServiceDef& CvarsWriteService();

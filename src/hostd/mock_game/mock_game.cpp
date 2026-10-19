@@ -20,6 +20,9 @@ constexpr ServiceFn kServices[] = {
 #ifdef SCUBA_CONTAINER_CONTENTS
     ContainerContentsService,
 #endif
+#ifdef SCUBA_ACTOR_CONDITIONS
+    ActorStatsService,
+#endif
     ActorsService,     AsopService,         ContractsService,  CreativeService,    CvarsService,
     CvarsWriteService, EconomyService,      EntitiesService,   GameSpatialService, HangarService,
     LoadoutService,    MiningService,       MissionsService,   OwnedService,       PrefabsService,
@@ -37,6 +40,9 @@ struct CapDef {
 constexpr CapDef kCaps[] = {
 #ifdef SCUBA_CONTAINER_CONTENTS
     { "game.inventory.contents.read", "game.inventory.contents", false },
+#endif
+#ifdef SCUBA_ACTOR_CONDITIONS
+    { "game.actor_stats.read", "game.actor_stats", true },
 #endif
     { "game.actors.local_player", "game.actors", true },
     { "game.actors.spawn_npc", "game.actors", true },
