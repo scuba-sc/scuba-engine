@@ -126,6 +126,23 @@ void HandlerTests() {
     host.broadcaster = &broadcast;
     RegisterMockGameHandlers(registry, host);
     CHECK(Success(Call(registry, R"({"id":1,"method":"mock_game.state"})")));
+#ifdef SCUBA_ACTOR_CONDITIONS
+    CHECK(Success(Call(registry, R"({"id":101,"method":"mock_game.actor_stats.get","params":{"entity":256}})")));
+    CHECK(Success(Call(registry, R"({"id":102,"method":"mock_game.actor_stats.set","params":{"entity":256,"stat":21,"value":0.75}})")));
+    CHECK(mg::ActorStatValues()[256][21] == 0.75f);
+    CHECK(Call(registry, R"({"id":103,"method":"mock_game.actor_stats.set","params":{"entity":256,"stat":30,"value":1}})").find("error"));
+    CHECK(Call(registry, R"({"id":104,"method":"mock_game.actor_stats.set","params":{"entity":289,"stat":1,"value":1}})").find("error"));
+#endif
+#ifdef SCUBA_CONTAINER_CONTENTS
+    CHECK(Success(Call(registry, R"({"id":105,"method":"mock_game.container.get","params":{"container":289}})")));
+    const auto generation = mg::ContainerContentsValues()[289].generation;
+    CHECK(Success(Call(registry, R"({"id":106,"method":"mock_game.container.set","params":{"container":289,"volume_known":true,"items":[{"item":5101,"class":7101,"quantity":3,"unit_volume":4}]}})")));
+    CHECK(mg::ContainerContentsValues()[289].used_volume == 12 && mg::ContainerContentsValues()[289].generation == generation + 1);
+    CHECK(Call(registry, R"({"id":107,"method":"mock_game.container.set","params":{"container":289,"volume_known":true,"items":[{"item":5101,"class":7101,"quantity":3,"unit_volume":4},{"item":5101,"class":7102,"quantity":1,"unit_volume":1}]}})").find("error"));
+    CHECK(mg::ContainerContentsValues()[289].generation == generation + 1);
+    CHECK(Call(registry, R"({"id":108,"method":"mock_game.container.set","params":{"container":289,"volume_known":false,"items":[{"item":5101,"class":7101,"quantity":3,"unit_volume":4}]}})").find("error"));
+    CHECK(mg::ContainerContentsValues()[289].generation == generation + 1);
+#endif
     CHECK(Success(Call(registry, R"({"id":2,"method":"mock_game.caps.set","params":{"name":"game.events.player_spawned","ready":false}})")));
     const std::string before = Invoke("mock_game_probe.events");
     const Json noEvent = Call(registry, R"({"id":3,"method":"mock_game.event.player_spawned"})");

@@ -6,6 +6,10 @@
 #include "hostd/modules.h"
 
 #include <cmath>
+#include <limits>
+#ifdef SCUBA_ACTOR_CONDITIONS
+#include <sc_actor_stats.h>
+#endif
 
 namespace scuba::hostd {
 
@@ -154,6 +158,89 @@ void Changed(HostContext& host, const char* what) {
 }  // namespace
 
 void RegisterMockGameHandlers(Registry& registry, HostContext& host) {
+#ifdef SCUBA_ACTOR_CONDITIONS
+    registry.register_handler("mock_game.actor_stats.get", [](const Json& params, const CallContext&) {
+        RequirePublished();
+        const auto id = Id(params, "entity", 0, true);
+        const auto* entity = mg::FindEntity(id);
+        if (!entity || !entity->actor)
+            throw HandlerError(rpc_error::kInvalidParams, "entity must be a synthetic actor");
+        Json values = Json::MakeArray();
+        const auto actor = mg::ActorStatValues().find(id);
+        if (actor != mg::ActorStatValues().end()) for (const auto& [stat, value] : actor->second) {
+            if (!std::isfinite(value)) continue;
+            Json row = Json::MakeObject(); row.set("stat", stat); row.set("value", static_cast<double>(value));
+            values.push_back(std::move(row));
+        }
+        Json out = Json::MakeObject(); out.set("entity", id); out.set("values", std::move(values));
+        return out;
+    });
+    registry.register_handler("mock_game.actor_stats.set", [&host](const Json& params, const CallContext&) {
+        RequirePublished();
+        const auto id = Id(params, "entity", 0, true), stat = Id(params, "stat", 0, true);
+        const auto* entity = mg::FindEntity(id);
+        const Json& value = Need(params, "value");
+        const double number = value.as_number(std::numeric_limits<double>::quiet_NaN());
+        if (!entity || !entity->actor || !stat || stat > SC_ACTOR_STAT_LAST_1_1 || !value.is_number() ||
+            !std::isfinite(number) || std::abs(number) > std::numeric_limits<float>::max())
+            throw HandlerError(rpc_error::kInvalidParams, "expected synthetic actor, stat 1..29 and finite float value");
+        mg::ActorStatValues()[id][static_cast<uint32_t>(stat)] = static_cast<float>(number);
+        Changed(host, "actor_stats");
+        Json out = Json::MakeObject(); out.set("entity", id); out.set("stat", stat);
+        out.set("value", static_cast<double>(static_cast<float>(number))); return out;
+    });
+#endif
+#ifdef SCUBA_CONTAINER_CONTENTS
+    registry.register_handler("mock_game.container.get", [](const Json& params, const CallContext&) {
+        RequirePublished();
+        const auto id = Id(params, "container", 0, true);
+        const auto found = mg::ContainerContentsValues().find(id);
+        if (found == mg::ContainerContentsValues().end())
+            throw HandlerError(rpc_error::kInvalidParams, "unknown synthetic container");
+        const auto& state = found->second;
+        Json items = Json::MakeArray();
+        for (uint32_t i = 0; i < state.count && i < SC_CONTAINER_CONTENTS_MAX_ITEMS; ++i) {
+            const auto& item = state.items[i]; Json row = Json::MakeObject();
+            row.set("item", item.item_id); row.set("class", item.class_id);
+            row.set("quantity", item.quantity); row.set("unit_volume", item.unit_volume); items.push_back(std::move(row));
+        }
+        Json out = Json::MakeObject(); out.set("container", id); out.set("generation", state.generation);
+        out.set("volume_known", (state.flags & SC_CONTAINER_CONTENTS_VOLUME_KNOWN) != 0);
+        out.set("used_volume", state.used_volume); out.set("items", std::move(items)); return out;
+    });
+    registry.register_handler("mock_game.container.set", [&host](const Json& params, const CallContext&) {
+        RequirePublished();
+        const auto id = Id(params, "container", 0, true);
+        const auto found = mg::ContainerContentsValues().find(id);
+        const Json& items = Need(params, "items");
+        const Json& known = Need(params, "volume_known");
+        if (found == mg::ContainerContentsValues().end() || !items.is_array() ||
+            items.size() > SC_CONTAINER_CONTENTS_MAX_ITEMS || !known.is_bool())
+            throw HandlerError(rpc_error::kInvalidParams, "expected existing container, at most 64 items and volume_known bool");
+        sc_container_snapshot next{}; next.size = sizeof(next); next.container_id = id;
+        if (found->second.generation >= 9007199254740991ull)
+            throw HandlerError(rpc_error::kInvalidParams, "generation exhausted; reset scene");
+        next.generation = found->second.generation + 1;
+        next.count = next.total_seen = static_cast<uint32_t>(items.size());
+        next.flags = known.as_bool() ? SC_CONTAINER_CONTENTS_VOLUME_KNOWN : 0;
+        for (uint32_t i = 0; i < next.count; ++i) {
+            const auto& row = items.at(i);
+            const auto item = Id(row, "item", 0, true), cls = Id(row, "class", 0, true);
+            const auto quantity = Id(row, "quantity", 0, true), unit = Id(row, "unit_volume", 0, true);
+            if (!item || !cls || !quantity || quantity > UINT32_MAX || (!known.as_bool() && unit))
+                throw HandlerError(rpc_error::kInvalidParams, "item/class/quantity must be positive; unknown volume must be zero");
+            for (uint32_t j = 0; j < i; ++j) if (next.items[j].item_id == item)
+                throw HandlerError(rpc_error::kInvalidParams, "duplicate item id");
+            if (unit > 9007199254740991ull / quantity || next.used_volume > 9007199254740991ull - unit * quantity)
+                throw HandlerError(rpc_error::kInvalidParams, "volume exceeds exact JSON integer range");
+            next.used_volume += unit * quantity;
+            next.items[i] = {sizeof(sc_container_item), static_cast<uint32_t>(quantity), item, cls, unit};
+        }
+        found->second = next; Changed(host, "container");
+        Json out = Json::MakeObject(); out.set("container", id); out.set("generation", next.generation);
+        out.set("count", next.count); return out;
+    });
+#endif
     registry.register_handler("mock_game.state", [](const Json&, const CallContext&) {
         RequirePublished();
         return StateJson();

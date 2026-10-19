@@ -181,6 +181,15 @@ Script content is declarative and never executed.
 
 ## Bridge methods
 
+Candidate SDK foundation profiles add `mock_game.actor_stats.get {entity}` and
+`mock_game.actor_stats.set {entity,stat,value}` for editable synthetic actor floats,
+and `mock_game.container.get {container}` / `mock_game.container.set
+{container,volume_known,items:[{item,class,quantity,unit_volume}]}` for existing
+synthetic containers. Replacements are validated completely before changing state;
+duplicate IDs, unknown volumes with nonzero values, over-capacity, zero quantities
+and integer overflow refuse atomically. Container generation advances only on
+success. These studio scene edits do not grant game SDK mutation authority.
+
 Use the existing `/ws` envelope `{id,method,params}`; responses are `{id,result}`
 or `{id,error:{code,message}}`. Invalid parameters use -32602; a mock disabled
 with `--no-mock-game` uses -32001. Scene changes broadcast
