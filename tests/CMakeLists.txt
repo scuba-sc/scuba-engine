@@ -49,6 +49,24 @@ set_target_properties(mock_game_probe PROPERTIES PREFIX "" SUFFIX ".dll"
 scuba_warnings(mock_game_probe)
 
 add_executable(test_mock_game test_mock_game.cpp)
+if(EXISTS "${SCUBA_SDK_SOURCE_DIR}/sdk/examples/container_reader/container_reader.c")
+  set(_container_plugin_root "${CMAKE_CURRENT_BINARY_DIR}/container_plugins")
+  file(MAKE_DIRECTORY "${_container_plugin_root}/container_reader")
+  configure_file("${SCUBA_SDK_SOURCE_DIR}/sdk/examples/container_reader/plugin.ini"
+    "${_container_plugin_root}/container_reader/plugin.ini" COPYONLY)
+  add_library(studio_container_reader MODULE "${SCUBA_SDK_SOURCE_DIR}/sdk/examples/container_reader/container_reader.c")
+  target_include_directories(studio_container_reader PRIVATE "${SCUBA_SDK_SOURCE_DIR}/include")
+  set_target_properties(studio_container_reader PROPERTIES PREFIX "" SUFFIX ".dll"
+    OUTPUT_NAME "container_reader"
+    LIBRARY_OUTPUT_DIRECTORY "$<1:${_container_plugin_root}/container_reader>"
+    RUNTIME_OUTPUT_DIRECTORY "$<1:${_container_plugin_root}/container_reader>")
+  add_executable(test_container_plugin test_container_plugin.cpp)
+  target_link_libraries(test_container_plugin PRIVATE scuba_mock_game)
+  add_dependencies(test_container_plugin studio_container_reader)
+  scuba_warnings(test_container_plugin)
+  add_test(NAME container_sdk_plugin COMMAND test_container_plugin "${_container_plugin_root}")
+  set_tests_properties(container_sdk_plugin PROPERTIES TIMEOUT 60)
+endif()
 target_link_libraries(test_mock_game PRIVATE scuba_mock_game)
 add_dependencies(test_mock_game mock_game_probe)
 scuba_warnings(test_mock_game)

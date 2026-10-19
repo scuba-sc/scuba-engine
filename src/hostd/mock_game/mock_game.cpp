@@ -17,6 +17,9 @@ namespace {
 using ServiceFn = const ServiceDef& (*)();
 
 constexpr ServiceFn kServices[] = {
+#ifdef SCUBA_CONTAINER_CONTENTS
+    ContainerContentsService,
+#endif
     ActorsService,     AsopService,         ContractsService,  CreativeService,    CvarsService,
     CvarsWriteService, EconomyService,      EntitiesService,   GameSpatialService, HangarService,
     LoadoutService,    MiningService,       MissionsService,   OwnedService,       PrefabsService,
@@ -32,6 +35,9 @@ struct CapDef {
 
 // gamePack: false where the kit's header says the game pack holds the capability off.
 constexpr CapDef kCaps[] = {
+#ifdef SCUBA_CONTAINER_CONTENTS
+    { "game.inventory.contents.read", "game.inventory.contents", false },
+#endif
     { "game.actors.local_player", "game.actors", true },
     { "game.actors.spawn_npc", "game.actors", true },
     { "game.actors.despawn", "game.actors", true },

@@ -4,6 +4,9 @@
 #include "sco_api.h"
 #include "sc_reputation.h"
 #include "sc_world.h"
+#ifdef SCUBA_CONTAINER_CONTENTS
+#include <sc_container_contents.h>
+#endif
 
 #include <array>
 #include <cstdint>
@@ -25,6 +28,10 @@ struct ServiceDef {
 const ServiceDef& ActorsService();
 const ServiceDef& AsopService();
 const ServiceDef& ContractsService();
+#ifdef SCUBA_CONTAINER_CONTENTS
+const ServiceDef& ContainerContentsService();
+std::map<uint64_t, sc_container_snapshot>& ContainerContentsValues();
+#endif
 const ServiceDef& CreativeService();
 const ServiceDef& CvarsService();
 const ServiceDef& CvarsWriteService();

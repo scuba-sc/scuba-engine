@@ -95,6 +95,10 @@ target_link_libraries(scuba_mock_game PUBLIC scuba_bridge sco_app)
 target_include_directories(scuba_mock_game PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/plugins/diegetic_shop_inv/src")
 scuba_warnings(scuba_mock_game)
+if(EXISTS "${SCUBA_SDK_SOURCE_DIR}/include/sc_container_contents.h")
+  target_sources(scuba_mock_game PRIVATE src/hostd/mock_game/container_contents.cpp)
+  target_compile_definitions(scuba_mock_game PUBLIC SCUBA_CONTAINER_CONTENTS=1)
+endif()
 add_library(scuba_assets STATIC
   src/assets/io.cpp
   src/assets/datacore.cpp

@@ -58,7 +58,11 @@ bool Success(const Json& response) { return response.find("result") != nullptr; 
 
 void ToggleTests(const sco_api* api) {
     const auto caps = mg::Capabilities();
+#ifdef SCUBA_CONTAINER_CONTENTS
+    CHECK(caps.size() == 53);
+#else
     CHECK(caps.size() == 52);
+#endif
     for (const auto& cap : caps) {
         CHECK(mg::SetCapability(cap.name, false));
         CHECK(api->has(cap.name.c_str()) == 0);
@@ -237,10 +241,37 @@ int main(int argc, char** argv) {
         const auto& plugin = sco::app::Plugins().back();
         CHECK(plugin.manifest.id == "mock_game_probe" && plugin.state == sco::plugins::State::Loaded);
         if (plugin.state != sco::plugins::State::Loaded) throw std::runtime_error(plugin.reason);
+#ifdef SCUBA_CONTAINER_CONTENTS
+        CHECK(mg::Services().size() == 25);
+#else
         CHECK(mg::Services().size() == 24);
+#endif
         for (const auto& service : mg::Services()) CHECK(service.published);
         const sco_api* api = sco::host::BuildApi({ platform.hostVersion });
         ToggleTests(api);
+#ifdef SCUBA_CONTAINER_CONTENTS
+        const auto* contents = Query<sc_container_contents_v1>(SC_CONTAINER_CONTENTS_NAME);
+        sc_container_snapshot snapshot{};
+        auto prepare = [&] { snapshot = {}; snapshot.size = sizeof(snapshot); snapshot.count = 64; };
+        prepare();
+        CHECK(sc_container_contents_read(contents, plugin.self, 289, &snapshot) == SCO_OK);
+        CHECK(snapshot.count == 2 && snapshot.items[0].quantity == 2 && snapshot.used_volume == 16);
+        prepare(); snapshot.count = 1;
+        CHECK(sc_container_contents_read(contents, plugin.self, 289, &snapshot) == SCO_OK);
+        CHECK(snapshot.count == 1 && snapshot.total_seen == 2 && (snapshot.flags & SC_CONTAINER_CONTENTS_TRUNCATED));
+        prepare(); CHECK(sc_container_contents_read(contents, plugin.self, 290, &snapshot) == SCO_OK && snapshot.total_seen == 0);
+        prepare(); CHECK(sc_container_contents_read(contents, plugin.self, 999, &snapshot) == SCO_NOT_FOUND && snapshot.count == 0);
+        CHECK(mg::SetCapability("game.inventory.contents.read", false));
+        prepare(); CHECK(sc_container_contents_read(contents, plugin.self, 289, &snapshot) == SCO_UNAVAILABLE);
+        CHECK(mg::SetCapability("game.inventory.contents.read", true));
+        mg::ContainerContentsValues()[289].items[0].quantity = 0;
+        prepare(); CHECK(sc_container_contents_read(contents, plugin.self, 289, &snapshot) == SCO_FAILED);
+        mg::ContainerContentsValues()[289].items[0].quantity = 2;
+        CHECK(mg::SetServicePublished(SC_CONTAINER_CONTENTS_NAME, false));
+        const void* absent = nullptr;
+        CHECK(api->query_service(SC_CONTAINER_CONTENTS_NAME, SC_CONTAINER_CONTENTS_VERSION_1_0, &absent) != SCO_OK);
+        CHECK(mg::SetServicePublished(SC_CONTAINER_CONTENTS_NAME, true));
+#endif
         HandlerTests();
         const mg::Vec3 cameraBefore = mg::GetScene().cameraPos;
         const sco_plugin* oldHandle = plugin.self;

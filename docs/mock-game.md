@@ -6,6 +6,13 @@ network session behind these tables. Nothing here has been run in Star Citizen.
 Use `--no-mock-game` to omit the synthetic provider.
 
 The ABI is the published sdk-v2.3.0 host-source kit's `include/sc_*.h`.
+With a checksum-verified candidate kit containing `sc_container_contents.h`, the
+studio additionally publishes `game.inventory.contents` 1.0. Its synthetic crate
+289 contains two item records (quantities 2 and 1, total used volume 16); container
+290 is empty. `ContainerContentsValues()` permits fixture/host editing. The mock
+supports truncation, malformed-record refusal, capability toggling and withdrawal.
+The released SDK pin is unchanged; older kits do not compile or advertise this
+optional service. Neither profile is evidence of native game container behavior.
 Every member of every game service table in that kit has an implementation.
 `sc_game_events.h` defines bus payloads, **not** a `game.events` service table.
 `game.asop` and `game.contracts` (new in 2.3.0) are read-only tables with fixed
