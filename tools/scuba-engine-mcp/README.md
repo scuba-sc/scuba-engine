@@ -1,6 +1,6 @@
 # Local sandbox MCP bridge
 
-`scuba-engine-mcp` exposes seven tools over newline-delimited stdio JSON-RPC,
+`scuba-engine-mcp` exposes eleven tools over newline-delimited stdio JSON-RPC,
 using MCP protocol `2025-11-25`. Requires Node.js 22.12+ or Bun; no dependencies.
 Start an existing `scuba-hostd` on loopback with the plugins you trust, then run:
 
@@ -13,6 +13,13 @@ Initialize, send `notifications/initialized`, then use `tools/list` and
 `send_widget_event`, `mock_move_camera`, `mock_set_service`, and `convert_asset`.
 Their JSON Schemas are returned by `tools/list`. `panel_id` maps to hostd's `id`
 for reads and `panel` for events; `service` maps to `name`.
+
+Candidate SDK foundation hosts also support `mock_get_actor_stats`,
+`mock_set_actor_stat`, `mock_get_container` and `mock_set_container`. These map to
+the explicit synthetic-scene inspection/edit endpoints; they never read or write
+the live game. Older hosts refuse missing methods explicitly. Container edits
+validate the entire replacement before mutation; unknown-volume items require
+zero unit_volume. Actor IDs/stat IDs and quantities use bounded integer schemas.
 
 This is an opt-in control channel for the out-of-game sandbox. Plugin commands,
 widget callbacks and asset conversion may mutate state or write local files;

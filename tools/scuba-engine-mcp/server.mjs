@@ -7,6 +7,7 @@ const MAX_REPLY = 4 * 1024 * 1024;
 const string = { type: 'string', minLength: 1, maxLength: 4096 };
 const number = { type: 'number' };
 const integer = { type: 'integer', minimum: 0, maximum: 0xffffffff };
+const sceneId = { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER };
 const vector = n => ({ type: 'array', items: number, minItems: n, maxItems: n });
 const object = (properties, required = Object.keys(properties)) => ({
   type: 'object', properties, required, additionalProperties: false,
@@ -39,6 +40,19 @@ export const TOOLS = [
   spec('mock_set_service', 'Publish or withdraw a synthetic game service in the sandbox.',
     object({ service: string, published: { type: 'boolean' } }),
     'mock_game.services.set', a => ({ name: a.service, published: a.published })),
+  spec('mock_get_actor_stats', 'Inspect synthetic actor stat values; not live game memory.',
+    object({ entity: sceneId }), 'mock_game.actor_stats.get', a => a, true),
+  spec('mock_set_actor_stat', 'Edit one synthetic actor stat; does not authorize game SDK writes.',
+    object({ entity: sceneId, stat: { ...integer, minimum: 1, maximum: 29 }, value: number }),
+    'mock_game.actor_stats.set', a => a),
+  spec('mock_get_container', 'Inspect a synthetic stored-item container, not the game inventory.',
+    object({ container: sceneId }), 'mock_game.container.get', a => a, true),
+  spec('mock_set_container', 'Replace one synthetic container atomically; unknown-volume items must have zero volume.',
+    object({ container: sceneId, volume_known: { type: 'boolean' },
+      items: { type: 'array', maxItems: 64, items: object({ item: sceneId, class: sceneId,
+        quantity: { ...integer, minimum: 1 },
+        unit_volume: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER } }) } }),
+    'mock_game.container.set', a => a),
   spec('convert_asset', 'Convert a local asset using hostd bounded readers; may write hostd conversion output.',
     object({ path: string }), 'assets.convert', a => a),
 ];

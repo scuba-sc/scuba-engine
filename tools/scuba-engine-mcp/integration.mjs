@@ -85,7 +85,7 @@ try {
     clientInfo: { name: 'studio-mcp-integration', version: '1' } });
   assert.equal(initial.result.protocolVersion, '2025-11-25');
   server.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
-  assert.equal((await request('tools/list')).result.tools.length, 7);
+  assert.equal((await request('tools/list')).result.tools.length, 11);
   const status = await call('host_status');
   assert.equal(status.name, 'scuba-hostd');
   assert(status.kernel.plugins.some(p => p.id === 'diegetic_asop' && p.state === 'loaded'));
@@ -103,6 +103,18 @@ try {
   assert.equal((await call('mock_set_service', { service: 'game.actors', published: false })).published, false);
   assert.equal((await adminCall('mock_game.services.list')).find(s => s.name === 'game.actors').published, false);
   await call('mock_set_service', { service: 'game.actors', published: true });
+  const services = await adminCall('mock_game.services.list');
+  if (services.some(s => s.name === 'game.actor_stats')) {
+    await call('mock_set_actor_stat', { entity: 256, stat: 21, value: 0.5 });
+    assert((await call('mock_get_actor_stats', { entity: 256 })).values.some(v => v.stat === 21 && v.value === 0.5));
+  }
+  if (services.some(s => s.name === 'game.inventory.contents')) {
+    await call('mock_set_container', { container: 289, volume_known: true,
+      items: [{ item: 5501, class: 7501, quantity: 2, unit_volume: 3 }] });
+    const contents = await call('mock_get_container', { container: 289 });
+    assert.equal(contents.used_volume, 6);
+    assert.equal(contents.items[0].quantity, 2);
+  }
   assert((await call('convert_asset', { path: fixture })).bytes > 0);
   const invalid = await request('tools/call', { name: 'mock_move_camera', arguments: { pos: [1, 2] } });
   assert.equal(invalid.result.isError, true);
@@ -119,7 +131,7 @@ try {
     probe.once('connect', () => { probe.destroy(); reject(new Error('host port remained open')); });
     probe.once('error', error => error.code === 'ECONNREFUSED' ? accept() : reject(error));
   });
-  console.log(JSON.stringify({ status: 'PASS', tools: 7, transcript, cleanup: { hostExit: 0, serverExit: 0, portClosed: true } }, null, 2));
+  console.log(JSON.stringify({ status: 'PASS', tools: 11, transcript, cleanup: { hostExit: 0, serverExit: 0, portClosed: true } }, null, 2));
 } catch (error) {
   console.error(hostLog, serverLog);
   throw error;

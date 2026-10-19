@@ -24,10 +24,10 @@ test('requires initialized notification before exposing tools', async () => {
   expect((await server.handle(request('ping', null))).error.code).toBe(-32602);
 });
 
-test('advertises seven explicit tools with object schemas and mutation annotations', async () => {
+test('advertises explicit tools with object schemas and mutation annotations', async () => {
   const server = await initialized({});
   const tools = (await server.handle(request('tools/list'))).result.tools;
-  expect(tools).toHaveLength(7);
+  expect(tools).toHaveLength(11);
   expect(tools.every(t => t.inputSchema.additionalProperties === false && !('map' in t) && !('method' in t))).toBe(true);
   expect(tools.find(t => t.name === 'host_status').annotations.readOnlyHint).toBe(true);
   expect(tools.find(t => t.name === 'invoke_command').annotations.destructiveHint).toBe(true);
@@ -44,6 +44,11 @@ test('maps every approved tool to the actual hostd field names', async () => {
       { panel: 'mp_chat.main', node_id: 3, kind: 'button' }],
     ['mock_move_camera', { pos: [1, 2, 3], rot: [0, 0, 0, 1] }, 'mock_game.camera.move', { pos: [1, 2, 3], rot: [0, 0, 0, 1] }],
     ['mock_set_service', { service: 'game.actors', published: false }, 'mock_game.services.set', { name: 'game.actors', published: false }],
+    ['mock_get_actor_stats', { entity: 256 }, 'mock_game.actor_stats.get', { entity: 256 }],
+    ['mock_set_actor_stat', { entity: 256, stat: 21, value: 0.25 }, 'mock_game.actor_stats.set', { entity: 256, stat: 21, value: 0.25 }],
+    ['mock_get_container', { container: 289 }, 'mock_game.container.get', { container: 289 }],
+    ['mock_set_container', { container: 289, volume_known: true, items: [{ item: 5001, class: 7001, quantity: 2, unit_volume: 3 }] },
+      'mock_game.container.set', { container: 289, volume_known: true, items: [{ item: 5001, class: 7001, quantity: 2, unit_volume: 3 }] }],
     ['convert_asset', { path: 'fixture.obj' }, 'assets.convert', { path: 'fixture.obj' }],
   ];
   for (const [name, args, method, params] of samples) {
@@ -66,6 +71,11 @@ test('rejects invalid input without making any bridge call', async () => {
     ['send_widget_event', { panel_id: 'p', node_id: 1, kind: 'toggle' }],
     ['send_widget_event', { panel_id: 'p', node_id: 1, kind: 'button', text: 'x' }],
     ['send_widget_event', { panel_id: 'p', node_id: 1, kind: 'tab' }],
+    ['mock_get_actor_stats', { entity: 0 }],
+    ['mock_set_actor_stat', { entity: 256, stat: 30, value: 1 }],
+    ['mock_set_actor_stat', { entity: 256, stat: 21, value: NaN }],
+    ['mock_get_container', { container: 1.5 }],
+    ['mock_set_container', { container: 289, volume_known: true, items: [{ item: 1, class: 2, quantity: 0, unit_volume: 3 }] }],
   ];
   for (const [name, args] of invalid)
     expect((await server.handle(request('tools/call', { name, arguments: args }))).result.isError).toBe(true);
