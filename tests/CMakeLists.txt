@@ -49,6 +49,11 @@ set_target_properties(mock_game_probe PROPERTIES PREFIX "" SUFFIX ".dll"
 scuba_warnings(mock_game_probe)
 
 add_executable(test_mock_game test_mock_game.cpp)
+if(_actor_stats_minor)
+  add_executable(test_actor_plugin test_actor_plugin.cpp)
+  target_link_libraries(test_actor_plugin PRIVATE scuba_mock_game)
+  scuba_warnings(test_actor_plugin)
+endif()
 if(EXISTS "${SCUBA_SDK_SOURCE_DIR}/sdk/examples/container_reader/container_reader.c")
   set(_container_plugin_root "${CMAKE_CURRENT_BINARY_DIR}/container_plugins")
   file(MAKE_DIRECTORY "${_container_plugin_root}/container_reader")
