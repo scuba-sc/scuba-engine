@@ -27,7 +27,7 @@ test('requires initialized notification before exposing tools', async () => {
 test('advertises explicit tools with object schemas and mutation annotations', async () => {
   const server = await initialized({});
   const tools = (await server.handle(request('tools/list'))).result.tools;
-  expect(tools).toHaveLength(8);
+  expect(tools).toHaveLength(15);
   expect(tools.every(t => t.inputSchema.additionalProperties === false && !('map' in t) && !('method' in t))).toBe(true);
   expect(tools.find(t => t.name === 'host_status').annotations.readOnlyHint).toBe(true);
   expect(tools.find(t => t.name === 'plugin_commands').annotations.readOnlyHint).toBe(true);
@@ -40,6 +40,12 @@ test('maps every approved tool to the actual hostd field names', async () => {
   const samples = [
     ['host_status', {}, 'system.status', {}],
     ['plugin_commands', {}, 'plugins.commands', {}],
+    ['engine_actions', {}, 'engine.actions.list', {}],
+    ['engine_state', {}, 'engine.state.get', {}],
+    ['engine_describe', { id: 'sco.mock.admit' }, 'engine.actions.get', { id: 'sco.mock.admit' }],
+    ['engine_screenshot', { path: 'capture.png' }, 'engine.screenshot', { path: 'capture.png' }],
+    ['engine_invoke', { id: 'sco.mock.admit', request_id: 'fixture' }, 'engine.actions.invoke',
+      { id: 'sco.mock.admit', request_id: 'fixture', args: [] }],
     ['invoke_command', { name: 'mp_chat.status' }, 'plugins.invoke', { name: 'mp_chat.status', args: [] }],
     ['get_widget_panel', { panel_id: 'mp_chat.main' }, 'widgets.get', { id: 'mp_chat.main' }],
     ['send_widget_event', { panel_id: 'mp_chat.main', node_id: 3, kind: 'button' }, 'widgets.event',
@@ -55,6 +61,30 @@ test('maps every approved tool to the actual hostd field names', async () => {
   }
 });
 
+test('frame bridge handles ready events before or after ticket replies', async () => {
+  let ticket = 0;
+  const host = Bun.serve({ port: 0, hostname: '127.0.0.1',
+    fetch(req, server) { if (server.upgrade(req)) return; return new Response('', { status: 400 }); },
+    websocket: { message(ws, text) {
+      const req = JSON.parse(String(text)); const next = ++ticket;
+      const event = JSON.stringify({ event: 'engine.frame.ready', data: { ticket: next, frame: next + 10 } });
+      ws.send(JSON.stringify({ event: 'engine.frame.ready', data: { ticket: 999, frame: 1 } }));
+      if (next === 1) ws.send(event);
+      ws.send(JSON.stringify({ id: req.id, result: { ticket: next } }));
+      if (next !== 1) ws.send(event);
+    } },
+  });
+  const bridge = new Bridge(`ws://127.0.0.1:${host.port}/ws`);
+  try {
+    expect(await bridge.frame()).toEqual({ ticket: 1, frame: 11 });
+    const server = await initialized(bridge);
+    const reply = await server.handle(request('tools/call', { name: 'engine_frame', arguments: {} }));
+    expect(reply.result.isError).toBe(false);
+    expect(JSON.parse(reply.result.content[0].text)).toEqual({ ticket: 2, frame: 12 });
+    expect(bridge.frameWaiters.size).toBe(0);
+  } finally { bridge.close(); host.stop(true); }
+});
+
 test('rejects invalid input without making any bridge call', async () => {
   let forwards = 0;
   const server = await initialized({ async call() { forwards++; return {}; } });
@@ -62,6 +92,7 @@ test('rejects invalid input without making any bridge call', async () => {
     ['host_status', { ignored: 1 }], ['plugin_commands', { ignored: 1 }], ['invoke_command', { name: 'x', args: [null] }],
     ['invoke_command', { name: 'bad\0name' }], ['invoke_command', { name: 'x', args: [{}] }],
     ['get_widget_panel', {}], ['mock_set_service', { service: 'game.actors', published: 'false' }],
+    ['engine_invoke', { id: 'sco.mock.admit' }], ['engine_describe', {}],
     ['mock_move_camera', { pos: [1, 2] }], ['mock_move_camera', { pos: [1, NaN, 3] }],
     ['send_widget_event', { panel_id: 'p', node_id: 0, kind: 'button' }],
     ['send_widget_event', { panel_id: 'p', node_id: 1.5, kind: 'button' }],
@@ -113,6 +144,49 @@ test('disconnect rejects an in-flight call without reconnecting or replaying it'
   try {
     await expect(bridge.call('a.b', {})).rejects.toThrow();
     await expect(bridge.call('a.b', {})).rejects.toThrow();
+    expect(received).toBe(1);
+  } finally { bridge.close(); host.stop(true); }
+});
+
+test('instance completion correlates exact id and reports terminal refusal as tool error', async () => {
+  let ticket = 0;
+  const host = Bun.serve({ port: 0, hostname: '127.0.0.1',
+    fetch(req, server) { if (server.upgrade(req)) return; return new Response('', { status: 400 }); },
+    websocket: { message(ws, text) {
+      const req = JSON.parse(String(text)); const next = ++ticket;
+      ws.send(JSON.stringify({ event: 'engine.instance.completed', data: { ticket: next, id: 999, outcome: 'ready' } }));
+      ws.send(JSON.stringify({ event: 'engine.instance.completed', data: { ticket: next, id: req.params.id,
+        outcome: req.params.id === 1 ? 'ready' : 'removed' } }));
+      ws.send(JSON.stringify({ id: req.id, result: { ticket: next } }));
+    } },
+  });
+  const bridge = new Bridge(`ws://127.0.0.1:${host.port}/ws`);
+  try {
+    expect((await bridge.instance(1)).outcome).toBe('ready');
+    const server = await initialized(bridge);
+    const reply = await server.handle(request('tools/call', { name: 'engine_instance', arguments: { id: 2 } }));
+    expect(reply.result.isError).toBe(true);
+    expect(JSON.parse(reply.result.content[0].text).outcome).toBe('removed');
+    expect(bridge.frameWaiters.size).toBe(0);
+  } finally { bridge.close(); host.stop(true); }
+});
+
+test('disconnect rejects frame completion and clears its subscription without replay', async () => {
+  let received = 0;
+  const host = Bun.serve({ port: 0, hostname: '127.0.0.1',
+    fetch(req, server) { if (server.upgrade(req)) return; return new Response('', { status: 400 }); },
+    websocket: { message(ws, text) {
+      received++;
+      const req = JSON.parse(String(text));
+      ws.send(JSON.stringify({ id: req.id, result: { ticket: 1 } }));
+      ws.close();
+    } },
+  });
+  const bridge = new Bridge(`ws://127.0.0.1:${host.port}/ws`);
+  try {
+    await expect(bridge.frame()).rejects.toThrow('Host disconnected');
+    expect(bridge.frameWaiters.size).toBe(0);
+    await expect(bridge.frame()).rejects.toThrow();
     expect(received).toBe(1);
   } finally { bridge.close(); host.stop(true); }
 });

@@ -85,7 +85,7 @@ try {
     clientInfo: { name: 'studio-mcp-integration', version: '1' } });
   assert.equal(initial.result.protocolVersion, '2025-11-25');
   server.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
-  assert.equal((await request('tools/list')).result.tools.length, 8);
+  assert.equal((await request('tools/list')).result.tools.length, 15);
   const commands = await call('plugin_commands');
   assert(Array.isArray(commands) && commands.some(command => command.name === 'mp_chat.status'));
   for (const command of commands) {

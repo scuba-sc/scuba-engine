@@ -29,6 +29,22 @@ export const TOOLS = [
     'system.status', () => ({}), true),
   spec('plugin_commands', 'List live plugin commands, typed arguments and current capability readiness.', object({}),
     'plugins.commands', () => ({}), true),
+  spec('engine_actions', 'List actions registered by the native editor command bus.', object({}),
+    'engine.actions.list', () => ({}), true),
+  spec('engine_state', 'Read native editor scene instances, selection, camera and synthetic capability readiness.', object({}),
+    'engine.state.get', () => ({}), true),
+  spec('engine_frame', 'Request and await the next GPU-completed native scene frame; does not await asset loading.', object({}),
+    'engine.frame.request', () => ({})),
+  spec('engine_instance', 'Await a native scene instance readiness or terminal failure receipt.',
+    object({ id: { ...integer, minimum: 1 } }), 'engine.instance.watch', a => a),
+  spec('engine_describe', 'Read one native action descriptor.', object({ id: string }),
+    'engine.actions.get', a => a, true),
+  spec('engine_screenshot', 'Capture native renderer client pixels into a new PNG under the configured data root.',
+    object({ path: { type: 'string', minLength: 5, maxLength: 96 } }), 'engine.screenshot', a => a),
+  spec('engine_invoke', 'Invoke a named native editor action once; outcome is not retried.',
+    object({ id: string, args: { type: 'array', maxItems: 16, items: { type: ['string', 'number', 'boolean'] } },
+      request_id: { type: 'string', minLength: 1, maxLength: 128 } }, ['id', 'request_id']),
+    'engine.actions.invoke', a => ({ ...a, args: a.args ?? [] })),
   spec('invoke_command', 'Invoke a registered trusted native plugin command in the local sandbox. May mutate state.',
     object({ name: string, args: { type: 'array', maxItems: 32,
       items: { type: ['string', 'number', 'boolean'] } } }, ['name']),
@@ -89,11 +105,13 @@ export class Bridge {
   constructor(url, timeoutMs = 10000) {
     this.url = endpoint(url); this.timeoutMs = timeoutMs;
     this.socket = null; this.pending = new Map(); this.sequence = 0; this.opening = null; this.failed = false;
+    this.frameWaiters = new Set();
   }
   fail(message) {
     this.failed = true;
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new RpcError(-32000, message)); }
     this.pending.clear();
+    for (const waiter of [...this.frameWaiters]) waiter.reject(new RpcError(-32000, message));
     this.socket?.close();
   }
   async open() {
@@ -114,7 +132,11 @@ export class Bridge {
             throw new RpcError(-32000, 'Invalid host frame');
           const msg = JSON.parse(event.data);
           if (!record(msg)) throw new RpcError(-32000, 'Invalid host envelope');
-          if (typeof msg.event === 'string' && !Object.hasOwn(msg, 'id')) return;
+          if (typeof msg.event === 'string' && !Object.hasOwn(msg, 'id')) {
+            for (const waiter of this.frameWaiters)
+              if (waiter.name === msg.event) waiter.event(msg.data);
+            return;
+          }
           if (!Number.isSafeInteger(msg.id) || (!Object.hasOwn(msg, 'result') && !record(msg.error)))
             throw new RpcError(-32000, 'Invalid host reply');
           const p = this.pending.get(msg.id);
@@ -138,6 +160,45 @@ export class Bridge {
     });
   }
   close() { this.fail('MCP server stopped'); }
+  async frame() {
+    return this.completion('engine.frame.request', {}, 'engine.frame.ready',
+      data => Number.isSafeInteger(data.frame) && data.frame > 0);
+  }
+  async instance(id) {
+    return this.completion('engine.instance.watch', { id }, 'engine.instance.completed',
+      data => data.id === id && ['ready', 'failed', 'cancelled', 'removed'].includes(data.outcome));
+  }
+  async completion(method, params, eventName, valid) {
+    await this.open();
+    if (this.frameWaiters.size >= 64) throw new RpcError(-32000, 'Too many frame requests');
+    return new Promise((resolve, reject) => {
+      let ticket;
+      const early = new Map();
+      const finish = (error, value) => {
+        clearTimeout(timer); this.frameWaiters.delete(waiter);
+        if (error) reject(error); else resolve(value);
+      };
+      const waiter = {
+        name: eventName,
+        reject: error => finish(error),
+        event: data => {
+          if (!record(data) || !Number.isSafeInteger(data.ticket) || data.ticket < 1 || !valid(data)) return;
+          if (ticket === data.ticket) finish(null, data);
+          else if (ticket === undefined && early.size < 64) early.set(data.ticket, data);
+        },
+      };
+      const timer = setTimeout(() => finish(new RpcError(-32000, 'Native completion timed out; not retried')), this.timeoutMs);
+      this.frameWaiters.add(waiter);
+      this.call(method, params).then(value => {
+        if (!this.frameWaiters.has(waiter)) return;
+        if (!record(value) || !Number.isSafeInteger(value.ticket) || value.ticket < 1)
+          return finish(new RpcError(-32000, 'Invalid frame ticket'));
+        ticket = value.ticket;
+        if (early.has(ticket)) finish(null, early.get(ticket));
+        early.clear();
+      }, error => finish(error));
+    });
+  }
 }
 
 export class Server {
@@ -191,8 +252,11 @@ export class Server {
               }
             }
             const value = tool.name.startsWith('project_') ?
-              await runProject(this.projects, tool.name.slice(8), args) : await this.bridge.call(tool.method, tool.map(args));
-            const failed = value.success === false || (record(value) && typeof value.result === 'string' && value.result !== 'OK');
+              await runProject(this.projects, tool.name.slice(8), args) : tool.name === 'engine_frame' ?
+                await this.bridge.frame() : tool.name === 'engine_instance' ? await this.bridge.instance(args.id) :
+                  await this.bridge.call(tool.method, tool.map(args));
+            const failed = value.success === false || (record(value) && typeof value.result === 'string' && value.result !== 'OK') ||
+              (tool.name === 'engine_instance' && value.outcome !== 'ready');
             result = { content: [{ type: 'text', text: JSON.stringify(value) }], isError: failed };
           } catch (error) {
             result = { content: [{ type: 'text', text: error instanceof Error ? error.message : 'Tool failed' }], isError: true };

@@ -35,7 +35,7 @@ test('opt-in tools execute through MCP alongside the default surface', async () 
       protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: 'fixture', version: '1' } } });
     await server.handle({ jsonrpc: '2.0', method: 'notifications/initialized' });
     const listed = await server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    expect(listed.result.tools.length).toBe(projects ? 11 : 8);
+    expect(listed.result.tools.length).toBe(projects ? 18 : 15);
     if (projects) {
       for (const tool of DEVELOPER_TOOLS) {
         const result = await server.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call',
