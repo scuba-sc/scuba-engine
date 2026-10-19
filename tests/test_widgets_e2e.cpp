@@ -272,18 +272,28 @@ void Exercise(uint16_t port) {
     const Json list = s.Call("widgets.list", Json::MakeObject());
     const Json* result = list.find("result");
     CHECK(result && result->find("started") && result->find("started")->as_bool());
-    CHECK(result && result->find("capabilities") && result->find("capabilities")->find("version")->as_string() == "1.1");
+    CHECK(result && result->find("capabilities") && result->find("capabilities")->find("version")->as_string() == "1.2");
     const Json* panels = result ? result->find("panels") : nullptr;
-    CHECK(panels && panels->size() == 2);
+    CHECK(panels && panels->size() == 3);
     if (!panels) return;
     const Json* native = FindPanel(*panels, "widgets.main");
     const Json* lua = FindPanel(*panels, "widgets_lua.main");
-    CHECK(native && lua);
-    if (!native || !lua) return;
+    const Json* named = FindPanel(*panels, "widgets.named");
+    CHECK(native && lua && named);
+    if (!native || !lua || !named) {
+        (void)s.Call("system.shutdown", Json::MakeObject());
+        return;
+    }
     std::printf("widgets.main: %s\n", native->dump().c_str());
     CHECK(native->find("nodes")->size() == 10);
     CHECK(lua->find("nodes")->size() == 10);
     CHECK(native->find("owner")->as_string() == "widgets");
+    const Json* tagged = FindNode(*named, 1);
+    CHECK(tagged && tagged->find("tag") && tagged->find("tag")->as_string() == "widgets.sample.anchor");
+    const Json namedReadback = s.Call("widgets.get", Obj({ { "id", "widgets.named" } }));
+    CHECK(namedReadback.find("result") && FindNode(*namedReadback.find("result"), 1) &&
+          FindNode(*namedReadback.find("result"), 1)->find("tag") &&
+          FindNode(*namedReadback.find("result"), 1)->find("tag")->as_string() == "widgets.sample.anchor");
     CHECK(FindNode(*native, 4) && FindNode(*native, 4)->find("kind")->as_string() == "button");
     CHECK(NodeValue(*native, 6) == 0.5);
     CHECK(NodeValue(*lua, 6) == 0.5);

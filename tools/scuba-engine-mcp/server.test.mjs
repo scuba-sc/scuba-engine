@@ -61,6 +61,23 @@ test('maps every approved tool to the actual hostd field names', async () => {
   }
 });
 
+test('widget panel readback preserves optional SDK stable tags', async () => {
+  const server = await initialized({ async call(method, params) {
+    expect(method).toBe('widgets.get'); expect(params).toEqual({ id: 'widgets.named' });
+    return { id: 'widgets.named', title: 'Named widgets', nodes: [
+      { id: 1, kind: 'label', tag: 'widgets.sample.anchor' },
+      { id: 2, kind: 'label' },
+    ] };
+  } });
+  const reply = await server.handle(request('tools/call', {
+    name: 'get_widget_panel', arguments: { panel_id: 'widgets.named' },
+  }));
+  expect(reply.result.isError).toBe(false);
+  const panel = JSON.parse(reply.result.content[0].text);
+  expect(panel.nodes[0].tag).toBe('widgets.sample.anchor');
+  expect(Object.hasOwn(panel.nodes[1], 'tag')).toBe(false);
+});
+
 test('frame bridge handles ready events before or after ticket replies', async () => {
   let ticket = 0;
   const host = Bun.serve({ port: 0, hostname: '127.0.0.1',
