@@ -4,12 +4,14 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { Bridge, Server, PROTOCOL } from '../tools/scuba-engine-mcp/server.mjs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, cp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inflateSync } from 'node:zlib';
 const [executable] = process.argv.slice(2);
 assert(executable);
+const stagedPlugins = join(dirname(executable), '..', '..', 'plugins', 'runtime');
 const work = await mkdtemp(join(tmpdir(), 'native-control-'));
 const child = spawn(executable, ['--warp', '--hidden', '--no-plugins', '--control-port', '0', '--width', '1280', '--height', '800', '--data', work, '--open', 'models/cube.obj', '--open', 'models/pyramid.obj'],
   { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -167,6 +169,31 @@ try {
   assert.equal((await call('engine.actions.invoke', { id: 'vfs.unmount', args: [tempMount.id] })).result.result, 'NOT_FOUND');
   assert.equal((await call('engine.actions.invoke', { id: 'vfs.unmount', args: [0] })).result.result, 'BAD_ARG');
   assert.equal((await call('engine.actions.invoke', { id: 'vfs.unmount', args: ['x'] })).error.code, -32602);
+  assert.equal((await call('engine.actions.invoke', { id: 'product.export', args: [join(work, 'early.zip')] })).result.result, 'FAILED');  assert.equal((await call('engine.actions.invoke', { id: 'product.load', args: [work] })).result.result, 'BAD_ARG');
+  await cp(stagedPlugins, join(work, 'data', 'plugins'), { recursive: true });
+  assert.equal((await call('engine.actions.invoke', { id: 'product.load', args: [work], request_id: 'profile-queue' })).result.result, 'OK');
+  const profileFrame = await call('engine.frame.request');
+  await new Promise(resolve => {
+    const listener = event => {
+      const message = JSON.parse(event.data);
+      if (message.event === 'engine.frame.ready' && message.data.ticket === profileFrame.result.ticket) {
+        socket.removeEventListener('message', listener); resolve();
+      }
+    };
+    socket.addEventListener('message', listener);
+  });
+  const profileState = (await call('engine.state.get')).result;
+  assert.equal(profileState.started, true);
+  assert(profileState.product_root.replace(/\\/g, '/').endsWith(work.split(/[\\/]/).pop()));
+  const exportWork = await mkdtemp(join(tmpdir(), 'native-export-'));
+  const bundleDestination = join(exportWork, 'bundle');
+  assert.equal((await call('engine.actions.invoke', { id: 'product.export', args: ['../escape'] })).result.result, 'BAD_ARG');
+  const exportDest = await call('engine.actions.invoke', { id: 'product.export', args: [bundleDestination] });
+  assert.equal(exportDest.result.result, 'OK', exportDest.result.reply);
+  const bundleFiles = await readdir(bundleDestination);
+  assert(bundleFiles.length > 0);
+  assert.equal((await call('engine.actions.invoke', { id: 'product.export', args: [bundleDestination] })).result.result, 'FAILED');
+  await rm(exportWork, { recursive: true, force: true });
   assert.equal((await call('engine.actions.invoke', { id: 'scene.selection.transform', args: [3, 4, 5, 0.5, 2] })).result.result, 'OK');
   const transformed = (await call('engine.state.get')).result.scene.find(item => item.id === sceneBefore.selected).transform;
   assert.deepEqual(transformed, { x: 3, y: 4, z: 5, yaw: 0.5, scale: 2 });

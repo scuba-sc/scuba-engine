@@ -211,6 +211,7 @@ struct Editor {
     char contentFilter[128] = "";
     char productPath[512] = "";
     std::string productStatus;
+    std::filesystem::path pendingProductRoot;
     ScoHostOptions hostOptions;
     uint64_t logSeen = 0;
     std::vector<log::Line> logLines;
@@ -761,6 +762,13 @@ void Editor::DrawUi() {
     if (showDemo) ImGui::ShowDemoWindow(&showDemo);
 }
 
+// Studio command owner: registration is name-unique for the process, app::Stop only frees
+// plugin-owned slots, so re-registering the studio commands after a profile restart must first
+// Release the current session's token (which removes its scene.*/vfs.*/product.* slots) and move
+// to a fresh address; released addresses are never reused.
+static std::array<int, 64> kStudioTokens{};
+static int kStudioGeneration = 0;
+
 // Scene files are studio documents: <data-root>/scenes/<name>.json, schema 1.
 static bool ScenePathFor(const Editor& editor, const std::string& name, std::filesystem::path* out, std::string* why) {
     if (editor.hostOptions.dataRoot.empty()) { *why = "Data root not set"; return false; }
@@ -774,6 +782,9 @@ static bool ScenePathFor(const Editor& editor, const std::string& name, std::fil
 }
 
 void Editor::RegisterControls() {
+    if (kStudioGeneration > 0) sco::Release(&kStudioTokens[kStudioGeneration - 1]);   // drop the previous session's slots
+    ++kStudioGeneration;
+    const auto studioOwner = &kStudioTokens[kStudioGeneration - 1];
     const sco::ArgDef sceneNameArg{"name", sco::ArgType::String, "Scene file in the data root: 1-96 of [A-Za-z0-9._-], no .."};
     const sco::ArgDef args[] = {{"yaw", sco::ArgType::Float, "Radians, -pi..pi"},
         {"pitch", sco::ArgType::Float, "Radians, -1.5..1.5"},
@@ -789,7 +800,7 @@ void Editor::RegisterControls() {
             camera.yaw = static_cast<float>(yaw); camera.pitch = static_cast<float>(pitch); camera.distance = static_cast<float>(distance);
             std::snprintf(reply, size, "Editor camera updated"); return sco::Result::Ok;
         }, this};
-    if (sco.started() && sco::RegisterCommand(this, nullptr, command) != sco::Result::Ok)
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, command) != sco::Result::Ok)
         log::Error("control", "Editor camera command registration refused");
     const sco::Command clear{"scene.clear", "Clear scene", "Remove all scene instances and selection; retain cached assets",
         nullptr, nullptr, 0, [](const sco::Arg*, uint32_t, void* context, char* reply, uint32_t size) {
@@ -797,7 +808,7 @@ void Editor::RegisterControls() {
             editor.scene.clear(); editor.selected = 0;
             std::snprintf(reply, size, "Scene cleared"); return sco::Result::Ok;
         }, this};
-    if (sco.started() && sco::RegisterCommand(this, nullptr, clear) != sco::Result::Ok)
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, clear) != sco::Result::Ok)
         log::Error("control", "Scene clear command registration refused");
     const sco::Command frame{"scene.selection.frame", "Frame selection", "Frame the selected loaded scene instance",
         nullptr, nullptr, 0, [](const sco::Arg*, uint32_t, void* context, char* reply, uint32_t size) {
@@ -819,8 +830,8 @@ void Editor::RegisterControls() {
             std::snprintf(reply, size, "Selection removed"); return sco::Result::Ok;
         }, this};
     if (sco.started()) {
-        if (sco::RegisterCommand(this, nullptr, frame) != sco::Result::Ok ||
-            sco::RegisterCommand(this, nullptr, remove) != sco::Result::Ok)
+        if (sco::RegisterCommand(studioOwner, nullptr, frame) != sco::Result::Ok ||
+            sco::RegisterCommand(studioOwner, nullptr, remove) != sco::Result::Ok)
             log::Error("control", "Scene selection command registration refused");
     }
     const sco::ArgDef selectArg{"id", sco::ArgType::Int, "Existing instance ID, or zero to deselect"};
@@ -834,7 +845,7 @@ void Editor::RegisterControls() {
             editor.selected = static_cast<uint32_t>(id);
             std::snprintf(reply, size, "Selection updated"); return sco::Result::Ok;
         }, this};
-    if (sco.started() && sco::RegisterCommand(this, nullptr, select) != sco::Result::Ok)
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, select) != sco::Result::Ok)
         log::Error("control", "Scene select command registration refused");
     const sco::ArgDef transformArgs[] = {{"x", sco::ArgType::Float, "Metres, -1000000..1000000"},
         {"y", sco::ArgType::Float, "Metres, -1000000..1000000"},
@@ -862,7 +873,7 @@ void Editor::RegisterControls() {
             item->transform.scale = static_cast<float>(values[4].v.f);
             std::snprintf(reply, size, "Selection transformed"); return sco::Result::Ok;
         }, this};
-    if (sco.started() && sco::RegisterCommand(this, nullptr, transform) != sco::Result::Ok)
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, transform) != sco::Result::Ok)
         log::Error("control", "Scene transform command registration refused");
     const sco::ArgDef materialArgs[] = {{"red", sco::ArgType::Float, "0..1"},
         {"green", sco::ArgType::Float, "0..1"}, {"blue", sco::ArgType::Float, "0..1"},
@@ -886,7 +897,7 @@ void Editor::RegisterControls() {
             item->material.roughness = static_cast<float>(values[4].v.f);
             std::snprintf(reply, size, "Selection material updated"); return sco::Result::Ok;
         }, this};
-    if (sco.started() && sco::RegisterCommand(this, nullptr, material) != sco::Result::Ok)
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, material) != sco::Result::Ok)
         log::Error("control", "Scene material command registration refused");
     const sco::ArgDef pathArg{"path", sco::ArgType::String, "Existing mounted model VFS path, at most 4096 bytes"};
     const sco::Command place{"scene.place", "Place model", "Request a mounted model and add a scene instance; loading is asynchronous",
@@ -901,7 +912,7 @@ void Editor::RegisterControls() {
             editor.Spawn(path);
             std::snprintf(reply, size, "Instance %u requested; loading may be pending", editor.selected); return sco::Result::Ok;
         }, this};
-    if (sco.started() && sco::RegisterCommand(this, nullptr, place) != sco::Result::Ok)
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, place) != sco::Result::Ok)
         log::Error("control", "Scene placement command registration refused");
     const sco::ArgDef mountArgs[] = {{"path", sco::ArgType::String, "Existing directory, .zip or .scpak; at most 4096 bytes"},
         {"mount_point", sco::ArgType::String, "VFS prefix, empty for root"}, {"priority", sco::ArgType::Int, "-1000..1000"}};
@@ -929,7 +940,7 @@ void Editor::RegisterControls() {
             std::snprintf(reply, size, "Mounted as id %u", newId);
             return sco::Result::Ok;
         }, this};
-    if (sco.started() && sco::RegisterCommand(this, nullptr, mount) != sco::Result::Ok)
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, mount) != sco::Result::Ok)
         log::Error("control", "VFS mount command registration refused");
     const sco::ArgDef unmountArg{"id", sco::ArgType::Int, "Existing VFS mount id"};
     const sco::Command unmount{"vfs.unmount", "Unmount archive", "Remove a studio VFS mount; scene instances keep the files they already opened",
@@ -944,7 +955,7 @@ void Editor::RegisterControls() {
             }
             std::snprintf(reply, size, "Mount %lld unmounted", static_cast<long long>(id)); return sco::Result::Ok;
         }, this};
-    if (sco.started() && sco::RegisterCommand(this, nullptr, unmount) != sco::Result::Ok)
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, unmount) != sco::Result::Ok)
         log::Error("control", "VFS unmount command registration refused");
     const sco::Command save{"scene.save", "Save scene", "Write all scene instances to a new scene file under the data root",
         nullptr, &sceneNameArg, 1, [](const sco::Arg* values, uint32_t, void* context, char* reply, uint32_t size) {
@@ -985,7 +996,7 @@ void Editor::RegisterControls() {
             }
             std::snprintf(reply, size, "Saved %zu instance(s)", editor.scene.size()); return sco::Result::Ok;
         }, this};
-    if (sco.started() && sco::RegisterCommand(this, nullptr, save) != sco::Result::Ok)
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, save) != sco::Result::Ok)
         log::Error("control", "Scene save command registration refused");
     const sco::Command load{"scene.load", "Load scene", "Validate a scene file, then rebuild the scene all-or-nothing; instances load asynchronously",
         nullptr, &sceneNameArg, 1, [](const sco::Arg* values, uint32_t, void* context, char* reply, uint32_t size) {
@@ -1047,8 +1058,42 @@ void Editor::RegisterControls() {
             }
             std::snprintf(reply, size, "Loaded %zu instance(s); assets loading", entries.size()); return sco::Result::Ok;
         }, this};
-    if (sco.started() && sco::RegisterCommand(this, nullptr, load) != sco::Result::Ok)
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, load) != sco::Result::Ok)
         log::Error("control", "Scene load command registration refused");
+    const sco::ArgDef productArgs[] = {{"path", sco::ArgType::String, "Absolute product profile directory containing data/plugins"},
+        {"path", sco::ArgType::String, "Absolute new destination directory for export, at most 4096 bytes"}};
+    const sco::Command profile{"product.load", "Load product profile", "Queue a sc-offline product profile reload; applies on the next frame",
+        nullptr, &productArgs[0], 1, [](const sco::Arg* values, uint32_t, void* context, char* reply, uint32_t size) {
+            auto& editor = *static_cast<Editor*>(context);
+            const std::string path = values[0].v.s ? values[0].v.s : "";
+            if (path.empty() || path.size() > 4096) {
+                std::snprintf(reply, size, "Profile path invalid"); return sco::Result::BadArg;
+            }
+            std::error_code error;
+            const auto root = PathFromUtf8(path);
+            if (!fs::is_directory(root / "data" / "plugins", error)) {
+                std::snprintf(reply, size, "Profile requires an existing data/plugins directory"); return sco::Result::BadArg;
+            }
+            editor.pendingProductRoot = root;
+            std::snprintf(reply, size, "Profile load queued"); return sco::Result::Ok;
+        }, this};
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, profile) != sco::Result::Ok)
+        log::Error("control", "Product load command registration refused");
+    const sco::Command bundle{"product.export", "Export product bundle", "Copy the loaded product profile to a new destination directory",
+        nullptr, &productArgs[1], 1, [](const sco::Arg* values, uint32_t, void* context, char* reply, uint32_t size) {
+            auto& editor = *static_cast<Editor*>(context);
+            const std::string name = values[0].v.s ? values[0].v.s : "";
+            if (name.empty() || name.size() > 4096 || !PathFromUtf8(name).is_absolute()) {
+                std::snprintf(reply, size, "Bundle destination must be an absolute path"); return sco::Result::BadArg;
+            }
+            const auto status = editor.sco.ExportProduct(PathFromUtf8(name));
+            if (!status) {
+                std::snprintf(reply, size, "%s", status.error.c_str()); return sco::Result::Failed;
+            }
+            std::snprintf(reply, size, "Exported bundle"); return sco::Result::Ok;
+        }, this};
+    if (sco.started() && sco::RegisterCommand(studioOwner, nullptr, bundle) != sco::Result::Ok)
+        log::Error("control", "Product export command registration refused");
 }
 
 int Run(const Args& args) {
@@ -1200,6 +1245,7 @@ int Run(const Args& args) {
         controls.register_handler("engine.state.get", [&ed, &window](const hostd::Json&, const hostd::CallContext&) {
             hostd::Json out = hostd::Json::MakeObject();
             out.set("schema", 1); out.set("started", ed.sco.started());
+            out.set("product_root", ed.hostOptions.productRoot.generic_string());
             out.set("width", window.width()); out.set("height", window.height());
             out.set("selected", ed.selected);
             hostd::Json instances = hostd::Json::MakeArray();
@@ -1291,6 +1337,22 @@ int Run(const Args& args) {
         if (drive) ed.sco.Tick(static_cast<uint32_t>(driveIndex));
         else ed.sco.Tick();
         if (controlServer) controlServer->Poll(0);
+        if (!ed.pendingProductRoot.empty()) {
+            const auto root = std::exchange(ed.pendingProductRoot, {});
+            const auto previous = ed.hostOptions.productRoot;
+            ed.sco.Stop();
+            ed.hostOptions.productRoot = root;
+            auto status = ed.sco.Start(ed.hostOptions);
+            if (!status) {
+                ed.hostOptions.productRoot = previous;
+                status = ed.sco.Start(ed.hostOptions);
+                if (!status) log::Error("control", "Profile rollback restart failed: " + status.error);
+            } else {
+                ed.RegisterControls();
+            }
+            ed.productStatus = status ? "Product profile loaded" : status.error;
+            if (!status) log::Error("control", "Queued profile load failed: " + status.error);
+        }
         if (drive) {
             const auto& actions = *drive->find("actions");
             if (driveIndex < actions.size()) {

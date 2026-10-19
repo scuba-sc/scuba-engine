@@ -64,7 +64,18 @@ Scene documents roundtrip through `scene.save` (exclusive-create
 and rebuild all-or-nothing; assets load asynchronously afterwards). VFS
 inspection uses `engine.vfs.get`; `vfs.mount` and `vfs.unmount` manage studio
 archive mounts (bounded path, priority -1000..1000; unmount reports `BAD_ARG`
-for malformed ids and `NOT_FOUND` for unknown ones).
+for malformed ids and `NOT_FOUND` for unknown ones). Product profiles reload
+through `product.load` (absolute directory containing `data/plugins`; queued
+and applied on the next frame so no lifecycle runs inside a command callout,
+then re-registers the studio commands) and export through `product.export`
+(existing bundle writer; absolute new destination directory outside the
+profile tree, refused with `BAD_ARG` when relative and by the writer when
+non-empty or existing; no profile loaded is refused). `engine.state.get` reports
+the applied `product_root`. Host-level commands (sco.mock.*, scene.*, vfs.*,
+product.*) register under a process-static owner token the runtime never
+releases; sco owners retired by app teardown refuse every later registration,
+so restart re-registration depends on this token (reproduced: BAD_ARG on
+sco.mock.admit after profile restart before the fix; reason logging added).
 Transform arguments are position XYZ in metres, yaw in radians and uniform
 scale. Material arguments are RGB, metallic and roughness. Both validate every
 component before changing the selected instance. State readback includes these

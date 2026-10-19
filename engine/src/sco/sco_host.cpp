@@ -12,6 +12,7 @@
 
 #include <cstring>
 #include <cstdio>
+#include <array>
 
 #ifndef SCUBA_SDK_VERSION_STRING
 #define SCUBA_SDK_VERSION_STRING "unknown"
@@ -34,6 +35,13 @@ void ForwardKernelLog(const char* line) {
 }
 
 }  // namespace
+
+// Owner for host-level control commands. Registration is name-unique and a released owner
+// address is retired for the life of the process, so each app session gets a fresh token:
+// ScoHost::Stop releases the current one (freeing the sco.mock.* names for re-registration)
+// and advances; addresses in the pool are never reused.
+static std::array<int, 64> kControlTokens{};
+static size_t kControlTokenIndex = 0;
 
 ScoHost::~ScoHost() { Stop(); }
 
@@ -76,7 +84,9 @@ Status ScoHost::Start(const ScoHostOptions& options) {
                               std::snprintf(reply, size, "%s", ok ? "Synthetic mission occurrence dispatched" : "Event unavailable or refused");
                               return ok ? sco::Result::Ok : sco::Result::Unavailable;
                           }, nullptr}}) {
-        if (sco::RegisterCommand(this, nullptr, command) != sco::Result::Ok) {
+        const auto reg = sco::RegisterCommand(&kControlTokens[kControlTokenIndex], nullptr, command);
+        if (reg != sco::Result::Ok) {
+            log::Error("control", std::string("command ") + command.name + " registration refused: " + sco::ResultName(reg));
             Stop();
             return Status::Fail("Native control command registration refused");
         }
@@ -97,6 +107,8 @@ void ScoHost::Tick(uint32_t nowMs) {
 void ScoHost::Stop() {
     if (!started_) return;
     TheKernel().Stop();
+    sco::Release(&kControlTokens[kControlTokenIndex]);   // frees sco.mock.* names for the next session
+    if (kControlTokenIndex + 1 < kControlTokens.size()) ++kControlTokenIndex;
     started_ = false;
 }
 
