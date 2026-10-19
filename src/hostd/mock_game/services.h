@@ -23,6 +23,10 @@ struct ServiceDef {
 };
 
 const ServiceDef& ActorsService();
+const ServiceDef& ActorStatsService();
+const ServiceDef& InventoryService();
+const ServiceDef& GameRulesService();
+const ServiceDef& DataCoreLiveService();
 const ServiceDef& AsopService();
 const ServiceDef& ContractsService();
 const ServiceDef& CreativeService();

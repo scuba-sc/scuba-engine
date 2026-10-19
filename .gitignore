@@ -6,3 +6,5 @@ studio/dist/
 *.log
 .DS_Store
 scuba-engine-layout.ini
+scuba-engine-workspace-v2.ini
+.graph/

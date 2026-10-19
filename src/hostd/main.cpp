@@ -79,6 +79,8 @@ int main(int argc, char** argv) {
             serverOptions.staticDir = argv[++i];
         } else if (!std::strcmp(a, "--plugins") && hasValue) {
             kernelOptions.pluginRoot = argv[++i];
+        } else if (!std::strcmp(a, "--product-profile") && hasValue) {
+            kernelOptions.productRoot = argv[++i];
         } else if (!std::strcmp(a, "--data") && hasValue) {
             kernelOptions.dataRoot = argv[++i];
         } else if (!std::strcmp(a, "--allow-origin") && hasValue) {
@@ -111,7 +113,8 @@ int main(int argc, char** argv) {
     host.kernel = &kernel;
     host.server = &server;
     host.broadcaster = &broadcaster;
-    host.pluginRoot = kernelOptions.pluginRoot.string();
+    host.pluginRoot = (kernelOptions.productRoot.empty() ? kernelOptions.pluginRoot
+        : kernelOptions.productRoot / "data" / "plugins").string();
     if (testShutdown) host.requestShutdown = [&stopRequested] { stopRequested = true; };
     RegisterAllModules(registry, host);
     net_sim::RegisterNetSim(registry, broadcaster, argv[0]);

@@ -12,6 +12,7 @@ set(SCUBA_ENGINE_INCLUDE "${PROJECT_SOURCE_DIR}/include")
 add_library(scuba_engine_core STATIC
   src/core/log.cpp
   src/core/job_system.cpp
+  src/core/png.cpp
   src/vfs/os_file.cpp
   src/vfs/common.cpp
   src/vfs/directory_fs.cpp
@@ -56,16 +57,23 @@ if(WIN32)
     src/platform/win32_window.cpp
     src/render/dx12/renderer_dx12.cpp
     src/ui/input_router.cpp
-    src/ui/ui_layer.cpp)
+    src/ui/ui_layer.cpp
+    src/ui/plugin_designer.cpp)
   target_include_directories(scuba_engine_runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
   target_link_libraries(scuba_engine_runtime
     PUBLIC scuba_engine_core scuba_engine_sco scuba_imgui sco_widgets_imgui
-    PRIVATE d3d12 dxgi d3dcompiler dxguid)
+    PRIVATE d3d12 dxgi d3dcompiler dxguid scuba_net_sim)
+  find_program(SCUBA_DESIGNER_BUN bun REQUIRED)
+  target_compile_definitions(scuba_engine_runtime PRIVATE
+    SCUBA_DESIGNER_BUN="${SCUBA_DESIGNER_BUN}"
+    SCUBA_DESIGNER_GENERATOR="${PROJECT_SOURCE_DIR}/tools/designer-codegen/native.mjs"
+    SCUBA_DESIGNER_SDK_ROOT="${SCUBA_SDK_SOURCE_DIR}"
+    SCUBA_DESIGNER_PYTHON="${Python3_EXECUTABLE}")
   target_compile_definitions(scuba_engine_runtime PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
   scuba_warnings(scuba_engine_runtime)
 
   add_executable(scuba-engine WIN32 app/main.cpp)
-  target_include_directories(scuba-engine PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_include_directories(scuba-engine PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/src")
   target_link_libraries(scuba-engine PRIVATE scuba_engine_runtime shell32)
   target_compile_definitions(scuba-engine PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE
     SCUBA_VERSION="${PROJECT_VERSION}" SCUBA_SDK_VERSION="${SCUBA_SDK_VERSION}"

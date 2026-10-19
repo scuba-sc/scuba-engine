@@ -80,7 +80,7 @@ bool Query(const char* name, uint32_t version, const Table*& out) {
     PROBE(ok);
     if (!ok) return false;
     out = static_cast<const Table*>(table);
-    PROBE(out->size == sizeof(Table));
+    PROBE(out->size >= sizeof(Table)); // compatible minor versions may append a tail
     return true;
 }
 

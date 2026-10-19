@@ -11,6 +11,7 @@ namespace scuba::hostd {
 
 struct KernelOptions {
     std::filesystem::path pluginRoot;   // empty: no plugin folders are discovered
+    std::filesystem::path productRoot;  // sc-offline distribution root containing data/plugins
     std::filesystem::path dataRoot;     // empty: no sco.storage
     bool lua = true;                    // false: lua plugins are refused "no script runtime"
     bool mockGame = true;
@@ -36,9 +37,11 @@ public:
     void Stop();
     bool started() const { return started_; }
     std::vector<KernelPluginInfo> plugins() const;
+    const std::string& profileError() const { return profileError_; }
 
 private:
     bool started_ = false;
+    std::string profileError_;
 };
 
 }  // namespace scuba::hostd

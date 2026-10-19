@@ -24,6 +24,7 @@ namespace scuba {
 
 struct ScoHostOptions {
     std::filesystem::path pluginRoot;   // empty: no plugin folders are discovered
+    std::filesystem::path productRoot;  // distribution root with data/plugins
     std::filesystem::path dataRoot;     // empty: no sco.storage
     bool mockGame = true;               // publish the synthetic game.* services
     bool lua = true;                    // false: lua plugins are refused
@@ -37,6 +38,16 @@ struct ScoPanel {
     std::string id, title, owner;
 };
 
+struct ScoCapability {
+    std::string name;
+    bool ready = false;
+};
+
+struct ScoStorageFile {
+    std::string owner;
+    uint64_t bytes = 0;
+};
+
 class ScoHost {
 public:
     ScoHost() = default;
@@ -46,6 +57,7 @@ public:
 
     Status Start(const ScoHostOptions& options);
     void Tick();
+    void Tick(uint32_t nowMs);
     void Stop();
     bool started() const noexcept { return started_; }
 
@@ -54,11 +66,22 @@ public:
     // Renders panel id through renderer; events the renderer appends are validated and
     // dispatched to the owning plugin by sco-core after it returns.
     Status RenderPanel(const std::string& id, sco::widgets::Renderer& renderer);
+    bool SetMockProfile(const std::string& profile);
+    Status InvokeControl(const std::string& name);
+    std::vector<ScoCapability> MockCapabilities() const;
+    Status ReadAsopSelection(std::string& out) const;
+    std::vector<ScoStorageFile> StorageFiles() const;
+    bool FireMockRespawnLoadout();
+    bool FireMockMissionChanged(uint64_t mission, uint32_t state);
+    uint64_t AddMockEntity(const std::string& name, bool actor);
+    size_t MockEntityCount() const;
+    Status ExportProduct(const std::filesystem::path& destination);
 
     static const char* SdkVersion();
 
 private:
     bool started_ = false;
+    std::filesystem::path productRoot_;
     std::chrono::steady_clock::time_point start_{};
 };
 

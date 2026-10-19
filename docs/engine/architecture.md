@@ -92,6 +92,69 @@ validation to the owning plugin. Engine subsystems talk to sco-core only through
 later engine-side service (asset intake, scene queries) is published as an SDK service, never
 reached by pointer.
 
+## Complete product profiles and scenarios
+
+Both native editor and headless host accept `--product-profile ROOT`, where
+`ROOT/data/plugins` contains the product's native, Lua and data plugin folders.
+Profile preflight refuses missing, empty, malformed or duplicate manifests before
+kernel startup. Disabled folders retain their existing policy. The native
+**Product Inspector & Scenario Runner** loads a profile, lists folder/panel counts,
+and exposes synthetic capability admission readback, respawn/mission events and
+bounded synthetic entity injection. These switches do not certify production G1
+admission or game behavior.
+
+The **ASOP next-start selection** section reads the selector's committed copied
+snapshot. It distinguishes no saved selection from an intentionally empty fleet;
+saving never synchronizes current live terminals. Retained product panels are
+available under **Plugin controls**, with wrapped help/status labels.
+The **Owner storage inventory** lists existing regular database files and sizes
+through the host's storage paths, excluding WAL sidecars. It does not open private
+keys or values; committed ASOP selection is exposed only through its named reader.
+
+**Export product bundle + SHA256SUMS** writes a new destination outside the source
+tree, copies declared plugin distribution files, and inventories SHA-256 hashes.
+Existing destinations, links, special files and bounded-size violations refuse.
+The resulting directory can be reopened with `--product-profile` in a fresh
+native process. Runtime storage databases are not distribution assets.
+
+Local validation uses the held SDK 2.4.0 candidate without changing the published
+SDK pin. Native WARP profile loading, export/reopen, committed-selection readback
+and smaller-window layout have been exercised; this remains **not run in game**.
+
+The first native control-plane slice is opt-in with `--control-port PORT` (`0`
+chooses an ephemeral port); `--no-control-port` disables it. It reuses the hostd
+loopback server and the same `plugins.commands`, `plugins.invoke` and retained
+widget handlers on the editor thread. Four native `sco.mock.*` command entries
+currently cover admit/revoke and the existing synthetic respawn/mission buttons.
+`engine.state.get` returns schema 1 dimensions, host readiness and copied mock
+capabilities; `system.shutdown` closes this explicitly enabled developer channel.
+The endpoint is not yet the complete E-15 action registry, generation-await or
+engine screenshot service. `native_control_integration` drives the real hidden
+WARP executable through discovery, refusal, readback and clean shutdown without
+desktop input.
+`engine.actions.list`, `engine.actions.get` and `engine.actions.invoke` are named
+adapters over that same registry, not a second action bus. Invocation validates
+the correlation ID before dispatch and returns the identical command reply.
+`scene.camera.set` takes typed yaw, pitch and distance values with finite bounds,
+and `engine.state.get.camera` copies the editor orbit state. This camera is
+independent of `mock_game.camera.move`; it changes actual rendered viewpoints.
+`--width` and `--height` select client extents from 640 through 4096 pixels;
+defaults remain 1600 by 900. Malformed extents and control ports refuse before
+window/control startup, so smaller-view scenarios need no desktop resize.
+
+The initial `--drive SCRIPT.json` transport accepts up to 256 wire-shaped requests
+under an `actions` array in a file of at most 64 KiB. Each entry uses the same
+`method` and `params` as the endpoint; one entry runs per host-supplied tick, with
+no socket or desktop input. It stops on the first refusal, logs each response,
+and exits nonzero for refused or incomplete scripts. This is the initial transport
+shape, not yet the complete action-ID/digest contract in E-15.
+
+Every control named above is a button today, and buttons are the least durable thing an
+agent can drive. The plan to express this surface as one addressable, versioned action
+table - rendered by ImGui, invoked over WebSocket/MCP, and runnable headless with
+`--drive`, with engine-side PNG capture - is
+[agent-control-plane.md](agent-control-plane.md).
+
 ## Virtual file system ([vfs.md](vfs.md))
 
 A priority-ordered stack of mounted backends (directory, zip, `.scpak`, memory) under mount

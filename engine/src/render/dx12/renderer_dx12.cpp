@@ -320,6 +320,51 @@ public:
         WaitGpu();
     }
 
+    Status CaptureRgba(std::vector<uint8_t>& pixels, uint32_t& width, uint32_t& height) override {
+        Flush();
+        if (failed_ || !haveFrame_ || !width_ || !height_ || width_ > 4096 || height_ > 4096)
+            return Status::Fail("No bounded completed frame available");
+        const auto source = backBuffers_[lastBackBuffer_].Get();
+        const auto desc = source->GetDesc();
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+        UINT64 bytes = 0;
+        device_->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nullptr, nullptr, &bytes);
+        const auto heap = Heap(D3D12_HEAP_TYPE_READBACK);
+        const auto buffer = BufferDesc(bytes);
+        ComPtr<ID3D12Resource> readback;
+        ComPtr<ID3D12CommandAllocator> allocator;
+        ComPtr<ID3D12GraphicsCommandList> commands;
+        if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+                D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback))) ||
+            FAILED(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator))) ||
+            FAILED(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commands))))
+            return Status::Fail("Capture readback allocation failed");
+        auto toCopy = Transition(source, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        commands->ResourceBarrier(1, &toCopy);
+        D3D12_TEXTURE_COPY_LOCATION destination{}; destination.pResource = readback.Get();
+        destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT; destination.PlacedFootprint = footprint;
+        D3D12_TEXTURE_COPY_LOCATION origin{}; origin.pResource = source;
+        origin.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        commands->CopyTextureRegion(&destination, 0, 0, 0, &origin, nullptr);
+        auto toPresent = Transition(source, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PRESENT);
+        commands->ResourceBarrier(1, &toPresent);
+        if (FAILED(commands->Close())) return Status::Fail("Capture command close failed");
+        ID3D12CommandList* lists[] = {commands.Get()};
+        queue_->ExecuteCommandLists(1, lists);
+        WaitGpu();
+        void* mapped = nullptr;
+        const D3D12_RANGE range{0, static_cast<SIZE_T>(bytes)};
+        if (FAILED(readback->Map(0, &range, &mapped))) return Status::Fail("Capture map failed");
+        std::vector<uint8_t> next(static_cast<size_t>(width_) * height_ * 4);
+        for (uint32_t y = 0; y < height_; ++y)
+            std::memcpy(next.data() + static_cast<size_t>(y) * width_ * 4,
+                static_cast<const uint8_t*>(mapped) + footprint.Offset + static_cast<size_t>(y) * footprint.Footprint.RowPitch,
+                static_cast<size_t>(width_) * 4);
+        const D3D12_RANGE none{0, 0}; readback->Unmap(0, &none);
+        pixels = std::move(next); width = width_; height = height_;
+        return Status::Ok();
+    }
+
     RendererStats Stats() const override {
         std::lock_guard<std::mutex> hold(mutex_);
         RendererStats s = stats_;
@@ -665,6 +710,7 @@ private:
         if (FAILED(pr)) log::Error("render", Hr("Present", pr));
         frame.fence = ++fenceValue_;
         queue_->Signal(fence_.Get(), frame.fence);
+        lastBackBuffer_ = bb; haveFrame_ = true;
 
         std::lock_guard<std::mutex> hold(mutex_);
         ++stats_.frames;
@@ -739,6 +785,8 @@ private:
     FrameContext frames_[kBackBuffers];
     UINT rtvStride_ = 0, srvStride_ = 0;
     uint32_t width_ = 0, height_ = 0;
+    UINT lastBackBuffer_ = 0;
+    bool haveFrame_ = false;
     bool tearing_ = false, warp_ = false, uiReady_ = false;
     std::string adapter_;
 

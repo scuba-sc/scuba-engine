@@ -101,8 +101,12 @@ void Tick() {
     Request& r = g_requests[g_active];
     const Scene& s = GetScene();
     const Entity* player = FindEntity(s.player);
-    if (!s.spawned || !player || !Ready(kCap)) {
+    if (!s.spawned || !player) {
         Finish(r, SC_RELOCATION_FAILED, SC_RELOCATION_REASON_SESSION);
+        return;
+    }
+    if (!Ready(kCap)) {
+        Finish(r, SC_RELOCATION_FAILED, SC_RELOCATION_REASON_SAFETY);
         return;
     }
     if (RootOf(player->zone) != r.root) {

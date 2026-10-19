@@ -14,6 +14,14 @@
 #include "sc_game_spatial.h"
 #include "sc_owned.h"
 #include "sc_relocation.h"
+#include "sc_actor_stats.h"
+#include "sc_inventory.h"
+#include "sc_gamerules.h"
+#include "sc_loadout.h"
+#include "sc_game_events.h"
+#include "sc_datacore_live.h"
+#include "sc_missions.h"
+#include "sc_quantum.h"
 
 #include <cstdio>
 #include <cstring>
@@ -58,7 +66,7 @@ bool Success(const Json& response) { return response.find("result") != nullptr; 
 
 void ToggleTests(const sco_api* api) {
     const auto caps = mg::Capabilities();
-    CHECK(caps.size() == 52);
+    CHECK(caps.size() == 60);
     for (const auto& cap : caps) {
         CHECK(mg::SetCapability(cap.name, false));
         CHECK(api->has(cap.name.c_str()) == 0);
@@ -103,8 +111,8 @@ void ToggleTests(const sco_api* api) {
     CHECK(api->query_service("game.asop", 0x10000u, &table) == SCO_OK && table);
     CHECK(api->query_service("game.contracts", 0x10000u, &table) == SCO_OK && table);
     CHECK(api->query_service("game.loadout", 0x10001u, &table) == SCO_OK && table);
-    CHECK(api->query_service("game.loadout", 0x10002u, &table) == SCO_UNAVAILABLE && !table);
-    CHECK(api->query_service("game.gamerules", 0x10000u, &table) == SCO_NOT_FOUND && !table);  // 2.4.0
+    CHECK(api->query_service("game.loadout", 0x10002u, &table) == SCO_OK && table);
+    CHECK(api->query_service("game.gamerules", 0x10000u, &table) == SCO_OK && table);  // 2.4.0
     CHECK(api->query_service("sco.ui.surfaces", 0x10000u, &table) == SCO_OK && table);  // the kit's own, 2.3.0
 }
 
@@ -167,6 +175,12 @@ void RelocationTests(sco_plugin* self) {
     CHECK(relocate->request(self, &req, &ticket) == SCO_OK);
     sco::app::Tick(60);
     CHECK(relocate->status(self, ticket, &status) == SCO_OK && status.reason == SC_RELOCATION_REASON_TIMEOUT);
+    req.timeout_ms = 1000;
+    CHECK(relocate->request(self, &req, &ticket) == SCO_OK);
+    CHECK(mg::SetCapability("game.relocation", false));
+    sco::app::Tick(61);
+    CHECK(relocate->status(self, ticket, &status) == SCO_OK && status.reason == SC_RELOCATION_REASON_SAFETY);
+    CHECK(mg::SetCapability("game.relocation", true));
 }
 
 void Quotas(sco_plugin* self) {
@@ -237,7 +251,7 @@ int main(int argc, char** argv) {
         const auto& plugin = sco::app::Plugins().back();
         CHECK(plugin.manifest.id == "mock_game_probe" && plugin.state == sco::plugins::State::Loaded);
         if (plugin.state != sco::plugins::State::Loaded) throw std::runtime_error(plugin.reason);
-        CHECK(mg::Services().size() == 24);
+        CHECK(mg::Services().size() == 28);
         for (const auto& service : mg::Services()) CHECK(service.published);
         const sco_api* api = sco::host::BuildApi({ platform.hostVersion });
         ToggleTests(api);
@@ -272,6 +286,102 @@ int main(int argc, char** argv) {
         CHECK(Query<sc_actors_v1>(SC_ACTORS_NAME)->spawn_npc(
             const_cast<sco_plugin*>(oldHandle), "MockNPC_Guard", 4, pos, &id) == SCO_BAD_ARG);
         BoundaryTests(reloaded.self);
+        const auto* quantum = Query<sc_quantum_v1>(SC_QUANTUM_SERVICE_NAME);
+        mg::GetScene().playerShip = 257;
+        CHECK(quantum->enable(reloaded.self, 1) == SCO_OK);
+        CHECK(quantum->hold(reloaded.self, 100) == SCO_OK);
+        CHECK(mg::SetCapability("game.quantum.control", false));
+        CHECK(quantum->release(reloaded.self) == SCO_OK);
+        CHECK(quantum->enable(reloaded.self, 0) == SCO_OK);
+        CHECK(mg::SetCapability("game.quantum.control", true));
+        mg::GetScene().playerShip = 0;
+        const auto* missionService = Query<sc_missions_v1>(SC_MISSIONS_SERVICE_NAME);
+        sc_mission_offer offer{}; offer.size = sizeof(offer);
+        CHECK(missionService->offer(reloaded.self, 0, &offer) == SCO_OK);
+        uint64_t mission = 0, replay = 0;
+        CHECK(missionService->accept(reloaded.self, &offer, 1, &mission) == SCO_OK && mission != 0);
+        CHECK(missionService->accept(reloaded.self, &offer, 1, &replay) == SCO_OK && replay == mission);
+        for (uint32_t phase = 0; phase < offer.phase_count; ++phase) {
+            CHECK(missionService->advance(reloaded.self, mission, phase) == SCO_FAILED);
+            for (uint32_t objective = 0; objective < offer.objectives_in_phase; ++objective)
+                CHECK(missionService->objective(reloaded.self, mission, phase, objective) == SCO_OK);
+            CHECK(missionService->advance(reloaded.self, mission, phase) == SCO_OK);
+        }
+        sc_mission_status completed{}; completed.size = sizeof(completed);
+        CHECK(missionService->status(reloaded.self, mission, &completed) == SCO_OK && completed.state == SC_MISSION_COMPLETED);
+        CHECK(mg::SetCapability("game.missions.read", false));
+        CHECK(missionService->status(reloaded.self, mission, &completed) == SCO_UNAVAILABLE && completed.state == SC_MISSION_COMPLETED);
+        CHECK(mg::SetCapability("game.missions.read", true));
+        float oxygen = -1;
+        CHECK(Query<sc_actor_stats_v1>(SC_ACTOR_STATS_NAME)->read(
+            mg::GetScene().player, SC_ACTOR_STAT_OXYGEN, &oxygen) == SCO_OK && oxygen == 100.0f);
+        CHECK(mg::SetCapability("game.actor_stats.read", false));
+        CHECK(Query<sc_actor_stats_v1>(SC_ACTOR_STATS_NAME)->read(
+            mg::GetScene().player, SC_ACTOR_STAT_OXYGEN, &oxygen) == SCO_UNAVAILABLE && oxygen == 0);
+        CHECK(mg::SetCapability("game.actor_stats.read", true));
+        sc_inventory_snapshot inventory{}; inventory.size = sizeof(inventory); inventory.count = SC_INVENTORY_MAX_PORTS;
+        CHECK(Query<sc_inventory_v1>(SC_INVENTORY_SERVICE_NAME)->snapshot(reloaded.self, &inventory) == SCO_OK);
+        CHECK(inventory.count <= SC_INVENTORY_MAX_PORTS && inventory.total_seen >= inventory.count);
+        inventory.count = 0;
+        inventory.ports[0].entity_id = 0x12345678;
+        CHECK(Query<sc_inventory_v1>(SC_INVENTORY_SERVICE_NAME)->snapshot(reloaded.self, &inventory) == SCO_OK);
+        CHECK(inventory.count == 0 && inventory.ports[0].entity_id == 0x12345678);
+        sc_gamerules_state rules{}; rules.size = sizeof(rules);
+        CHECK(Query<sc_gamerules_v1>(SC_GAMERULES_SERVICE_NAME)->read(reloaded.self, &rules) == SCO_OK && rules.valid == 1);
+        const auto* gameRules = Query<sc_gamerules_v1>(SC_GAMERULES_SERVICE_NAME);
+        uint32_t parameterCount = 99, parameterTotal = 0;
+        CHECK(gameRules->list_params(reloaded.self, 0, nullptr, 0, 0, &parameterCount, &parameterTotal) == SCO_OK && parameterCount == 0 && parameterTotal == 17);
+        sc_gamerules_param_info parameter{}; parameter.size = sizeof(parameter);
+        CHECK(gameRules->list_params(reloaded.self, 3, &parameter, sizeof(parameter), 1, &parameterCount, &parameterTotal) == SCO_OK);
+        CHECK(std::strcmp(parameter.name, "terminalsDisabledTime") == 0 && parameter.type == SC_GAMERULES_PARAM_FLOAT);
+        CHECK(gameRules->list_params(reloaded.self, 18, &parameter, sizeof(parameter), 1, &parameterCount, &parameterTotal) == SCO_BAD_ARG);
+        const auto* live = Query<sc_datacore_live_v1>(SC_DATACORE_LIVE_SERVICE_NAME);
+        uint32_t written = 0x12345678, copiedValue = 0; size_t copied = 0;
+        CHECK(live->write_pool(reloaded.self, SC_DC_POOL_UINT32, 8, &written, sizeof(written), &copied) == SCO_OK && copied == sizeof(written));
+        CHECK(live->read_pool(reloaded.self, SC_DC_POOL_UINT32, 8, &copiedValue, sizeof(copiedValue), &copied) == SCO_OK && copiedValue == written);
+        CHECK(live->read_pool(reloaded.self, SC_DC_POOL_UINT32, UINT64_MAX, &copiedValue, sizeof(copiedValue), &copied) == SCO_BAD_ARG);
+        CHECK(mg::SetCapability("game.datacore_live.write", false));
+        CHECK(live->write_pool(reloaded.self, SC_DC_POOL_UINT32, 8, &written, sizeof(written), &copied) == SCO_UNAVAILABLE);
+        CHECK(mg::SetCapability("game.datacore_live.write", true));
+        const auto* async = Query<sc_loadout_v1_2>(SC_LOADOUT_SERVICE_NAME, SC_LOADOUT_VERSION_1_2);
+        sc_loadout_item item{SC_LOADOUT_SLOT_PRIMARY_OPTIC, 0, "MockOptic_Holo"};
+        sc_loadout_request request{sizeof(request), 1, sizeof(item), 0, &item};
+        uint64_t job = 0;
+        CHECK(async->submit(reloaded.self, &request, &job) == SCO_OK && job != 0);
+        sc_loadout_job_report report{}; report.size = sizeof(report);
+        CHECK(async->status(reloaded.self, job, &report) == SCO_OK && report.state == SC_LOADOUT_JOB_PENDING);
+        sco::app::Tick(80);
+        CHECK(async->status(reloaded.self, job, &report) == SCO_OK && report.state == SC_LOADOUT_JOB_COMPLETE && report.report.applied == 1);
+        CHECK(mg::EquippedItems()[SC_LOADOUT_SLOT_PRIMARY_OPTIC] == "MockOptic_Holo");
+        CHECK(async->cancel(reloaded.self, job) == SCO_OK);
+        unsigned respawns = 0, missions = 0;
+        CHECK(api->subscribe(reloaded.self, SC_GAME_EVENT_LOADOUT_RESPAWN_COMPLETED,
+            [](const char*, const void* data, void* context) {
+                const auto* event = static_cast<const sc_game_loadout_respawn_completed*>(data);
+                CHECK(event && event->size == sizeof(*event));
+                ++*static_cast<unsigned*>(context);
+            }, &respawns) == SCO_OK);
+        CHECK(api->subscribe(reloaded.self, SC_GAME_EVENT_MISSION_CHANGED,
+            [](const char*, const void* data, void* context) {
+                const auto* event = static_cast<const sc_game_mission_changed*>(data);
+                CHECK(event && event->mission_id == 7 && event->new_state == 1);
+                ++*static_cast<unsigned*>(context);
+            }, &missions) == SCO_OK);
+        CHECK(mg::FireRespawnLoadoutCompleted() && respawns == 1);
+        CHECK(mg::FireMissionChanged(7, 1, 0, 0) && missions == 1);
+        CHECK(mg::SetCapability("game.events.loadout_respawn_completed", false));
+        CHECK(!mg::FireRespawnLoadoutCompleted() && respawns == 1);
+        CHECK(mg::SetCapability("game.events.loadout_respawn_completed", true));
+        CHECK(async->submit(reloaded.self, &request, &job) == SCO_OK);
+        CHECK(mg::SetCapability("game.loadout.async", false));
+        sco::app::Tick(81);
+        CHECK(async->status(reloaded.self, job, &report) == SCO_OK && report.state == SC_LOADOUT_JOB_FAILED);
+        CHECK(async->cancel(reloaded.self, job) == SCO_OK);
+        CHECK(mg::SetCapability("game.loadout.async", true));
+        CHECK(async->submit(reloaded.self, &request, &job) == SCO_OK);
+        sco::app::Tick(81 + SC_LOADOUT_TIMEOUT_MS);
+        CHECK(async->status(reloaded.self, job, &report) == SCO_OK && report.state == SC_LOADOUT_JOB_FAILED);
+        CHECK(async->cancel(reloaded.self, job) == SCO_OK);
         mg::ResetAll();
         Quotas(reloaded.self);
     } catch (const std::exception& e) {

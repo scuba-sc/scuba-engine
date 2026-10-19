@@ -17,6 +17,8 @@ namespace {
 using ServiceFn = const ServiceDef& (*)();
 
 constexpr ServiceFn kServices[] = {
+    ActorStatsService, InventoryService, GameRulesService,
+    DataCoreLiveService,
     ActorsService,     AsopService,         ContractsService,  CreativeService,    CvarsService,
     CvarsWriteService, EconomyService,      EntitiesService,   GameSpatialService, HangarService,
     LoadoutService,    MiningService,       MissionsService,   OwnedService,       PrefabsService,
@@ -32,6 +34,11 @@ struct CapDef {
 
 // gamePack: false where the kit's header says the game pack holds the capability off.
 constexpr CapDef kCaps[] = {
+    { "game.actor_stats.read", "game.actor_stats", false },
+    { "game.inventory.read", "game.inventory", false },
+    { "game.gamerules.read", "game.gamerules", false },
+    { "game.datacore_live", "game.datacore_live", false },
+    { "game.datacore_live.write", "game.datacore_live", false },
     { "game.actors.local_player", "game.actors", true },
     { "game.actors.spawn_npc", "game.actors", true },
     { "game.actors.despawn", "game.actors", true },
@@ -58,6 +65,7 @@ constexpr CapDef kCaps[] = {
     { "game.hangar.lift", "game.hangar", false },
     { "game.hangar.atc_cancel", "game.hangar", false },
     { "game.loadout.apply", "game.loadout", true },
+    { "game.loadout.async", "game.loadout", false },
     { "game.loadout.weapons", "game.loadout", false },
     { "game.mining", "game.mining", false },
     { "game.missions.read", "game.missions", true },
@@ -80,6 +88,8 @@ constexpr CapDef kCaps[] = {
     { "spawn.ship", "spawn.entities", true },
     { "teleport", "teleport.spatial", true },
     { "game.events.player_spawned", "game.* events", true },
+    { "game.events.loadout_respawn_completed", "game.* events", false },
+    { "game.events.mission_changed", "game.* events", false },
     { "game.events.player_died", "game.* events", true },
     { "game.events.actor_died", "game.* events", true },
     { "game.events.zone_changed", "game.* events", true },

@@ -14,6 +14,7 @@ tooling parity over the out-of-game sandbox and studio runtime.
 | Tool Name | Parameters | Behavior | Wire Backend |
 |---|---|---|---|
 | `host_status` | none | Inspect running hostd state, loaded plugins, kernel uptime | `system.status` |
+| `plugin_commands` | none | Discover live command arguments and capability readiness | `plugins.commands` |
 | `invoke_command` | `name: string, args: array` | Call any registered plugin command on game thread | `plugins.invoke` |
 | `get_widget_panel` | `panel_id: string` | Read complete widget tree and current state | `widgets.get` |
 | `send_widget_event` | `panel_id: string, node_id: int, kind: string, text?: string` | Dispatch UI button click, text input, or tab select | `widgets.event` |
@@ -30,7 +31,7 @@ tooling parity over the out-of-game sandbox and studio runtime.
 `tools/scuba-engine-mcp/server.mjs` implements these tools with Node.js 22.12+
 or Bun, without dependencies. The explicit endpoint accepts numeric IPv4 loopback
 only. MCP initialization and the initialized notification precede tool calls.
-The server forwards only the seven named methods, validates arguments and does
+The server forwards only the eight named methods, validates arguments and does
 not retry mutating calls after a timeout or disconnect. EOF closes its bridge;
 hostd remains independently owned.
 
@@ -43,3 +44,16 @@ or create output files. This is sandbox access, not game certification.
 Run the tool directory's Bun tests and `integration.mjs HOSTD PLUGIN_ROOT` for
 real stdio-to-native verification. See its README for client launch details and
 failure semantics.
+
+## 5. Proposed next step: the agent control plane (E-15)
+
+The eight tools above drive plugin panels, command discovery and synthetic game primitives. The studio's
+own 26 controls (product profile, export, ASOP readback, capability admit/revoke, entity
+injection, scene and inspector actions) are reachable only by OS pointer input today, which
+makes native UI evidence the least durable kind we produce. The design for closing that -
+one addressable action table that the ImGui UI renders from, built on the existing
+`sco::Command` registry, exposed over WebSocket/MCP, `--drive` headless scripts and engine-side PNG
+capture - is [agent-control-plane.md](agent-control-plane.md). It is additive (a read-only
+`plugins.commands` discovery method plus five `engine.*` methods; 7 -> 13 bridge tools) and keeps
+the loopback endpoint, argument-validation and no-retry-mutation rules unchanged. It adds no game
+capability and requests no raw-ABI widening; the SDK asks it does make are listed in its section 8.

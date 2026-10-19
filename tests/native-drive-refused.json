@@ -1,0 +1,1 @@
+{"actions":[{"method":"plugins.invoke","params":{"name":"missing.command","args":[]}},{"method":"plugins.invoke","params":{"name":"sco.mock.admit","args":[]}}]}

@@ -66,6 +66,8 @@ add_library(scuba_mock_game STATIC
   src/hostd/mock_game/common.cpp
   src/hostd/mock_game/mock_game.cpp
   src/hostd/mock_game/actors.cpp
+  src/hostd/mock_game/product_readmodels.cpp
+  src/hostd/mock_game/datacore_live.cpp
   src/hostd/mock_game/asop.cpp
   src/hostd/mock_game/contracts.cpp
   src/hostd/mock_game/creative.cpp
@@ -114,7 +116,8 @@ target_link_libraries(scuba_net_sim PUBLIC scuba_bridge)
 scuba_warnings(scuba_net_sim)
 
 # The sco-core kernel booted in-process with the mock game: shared by scuba-hostd and the engine.
-add_library(scuba_kernel STATIC src/hostd/kernel.cpp)
+add_library(scuba_kernel STATIC src/hostd/kernel.cpp src/hostd/product_bundle.cpp
+  src/hostd/plugins_handlers.cpp src/hostd/widgets_bridge.cpp src/hostd/widgets_handlers.cpp)
 target_link_libraries(scuba_kernel PUBLIC scuba_mock_game sco_lua_game)
 target_compile_definitions(scuba_kernel PRIVATE SCUBA_VERSION="${PROJECT_VERSION}")
 scuba_warnings(scuba_kernel)
@@ -123,9 +126,6 @@ add_executable(scuba-hostd
   src/hostd/main.cpp
   src/hostd/modules.cpp
   src/hostd/system_handlers.cpp
-  src/hostd/plugins_handlers.cpp
-  src/hostd/widgets_bridge.cpp
-  src/hostd/widgets_handlers.cpp
   src/hostd/net_sim/peer.cpp
   src/hostd/net_sim/probe_plugin.cpp)
 # sco_app is the host kit; it links the kernel libraries transitively (sco_host, sco_runtime,

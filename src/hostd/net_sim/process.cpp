@@ -132,8 +132,14 @@ Process::Process(const std::filesystem::path& executable, const std::vector<std:
     std::wstring command = Quote(executable.wstring());
     for (const auto& arg : args) command += L" " + Quote(std::filesystem::path(std::u8string(arg.begin(), arg.end())).wstring());
     HANDLE childError = nullptr;
-    if (!DuplicateHandle(GetCurrentProcess(), GetStdHandle(STD_ERROR_HANDLE), GetCurrentProcess(),
-                         &childError, 0, TRUE, DUPLICATE_SAME_ACCESS)) {
+    const HANDLE stderrHandle = GetStdHandle(STD_ERROR_HANDLE);
+    const bool hasStderr = stderrHandle && stderrHandle != INVALID_HANDLE_VALUE &&
+                           GetFileType(stderrHandle) != FILE_TYPE_UNKNOWN;
+    if (!hasStderr) childError = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                            &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if ((hasStderr && !DuplicateHandle(GetCurrentProcess(), stderrHandle, GetCurrentProcess(),
+                                      &childError, 0, TRUE, DUPLICATE_SAME_ACCESS)) ||
+        (!hasStderr && childError == INVALID_HANDLE_VALUE)) {
         CloseHandle(childInput); CloseHandle(childOutput);
         throw std::runtime_error("peer stderr handle failed");
     }

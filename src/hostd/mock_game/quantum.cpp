@@ -35,9 +35,18 @@ void Idle() {
 }
 
 sco_result Enable(sco_plugin* self, uint32_t on) {
+    if (!OnGame()) return SCO_WRONG_THREAD;
+    if (!LivePlugin(self)) return SCO_BAD_ARG;
+    if (on > 1u) return SCO_BAD_ARG;
+    if (!on) {
+        if (g_owner && g_owner != self) return SCO_FAILED;
+        g_enabled = false;
+        g_owner = nullptr;
+        Idle();
+        return SCO_OK;
+    }
     sco_result r = SCO_OK;
     if (!Admit(self, r)) return r;
-    if (on > 1u) return SCO_BAD_ARG;
     if (on && GetScene().playerShip == 0) return SCO_FAILED;
     g_enabled = on == 1u;
     g_owner = g_enabled ? self : nullptr;
@@ -56,8 +65,9 @@ sco_result Hold(sco_plugin* self, uint32_t ms) {
 }
 
 sco_result ReleaseHold(sco_plugin* self) {
-    sco_result r = SCO_OK;
-    if (!Admit(self, r)) return r;
+    if (!OnGame()) return SCO_WRONG_THREAD;
+    if (!LivePlugin(self)) return SCO_BAD_ARG;
+    if (g_owner != self) return SCO_NOT_FOUND;
     if (g_phase == SC_QUANTUM_CHARGING) Idle();
     g_holdUntil = 0;
     return SCO_OK;

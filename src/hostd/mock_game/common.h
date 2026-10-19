@@ -105,6 +105,8 @@ bool OnGame();
 bool LivePlugin(const sco_plugin* self);
 void MarkReleased(const void* owner);
 bool Ready(const char* capability);
+bool FireRespawnLoadoutCompleted();
+bool FireMissionChanged(uint64_t mission, uint32_t state, uint32_t phase, uint32_t objective);
 
 // ---- last_error ---------------------------------------------------------------------------------
 

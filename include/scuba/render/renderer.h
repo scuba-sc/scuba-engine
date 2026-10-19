@@ -96,6 +96,8 @@ public:
     virtual void Resize(uint32_t width, uint32_t height) = 0;
     // Waits for the render thread and the GPU to go idle.
     virtual void Flush() = 0;
+    // Main thread, between submissions. Flushes the last completed client frame.
+    virtual Status CaptureRgba(std::vector<uint8_t>& pixels, uint32_t& width, uint32_t& height) = 0;
     virtual RendererStats Stats() const = 0;
 };
 

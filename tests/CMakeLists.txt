@@ -6,6 +6,12 @@ foreach(test_name test_websocket test_http_json test_handlers)
   set_tests_properties(${test_name} PROPERTIES TIMEOUT 60)
 endforeach()
 
+add_executable(test_product_profile test_product_profile.cpp)
+target_link_libraries(test_product_profile PRIVATE scuba_kernel)
+scuba_warnings(test_product_profile)
+add_test(NAME product_profile COMMAND test_product_profile "${CMAKE_CURRENT_BINARY_DIR}/product-profile-fixture")
+set_tests_properties(product_profile PROPERTIES TIMEOUT 60)
+
 add_executable(test_e2e test_e2e.cpp)
 target_link_libraries(test_e2e PRIVATE scuba_bridge)
 scuba_warnings(test_e2e)
@@ -99,6 +105,21 @@ add_test(NAME netsim_eight_peer_bounds COMMAND test_net_sim $<TARGET_FILE:scuba-
 set_tests_properties(netsim_two_peer_delivery netsim_four_peer_join_leave netsim_eight_peer_bounds PROPERTIES TIMEOUT 120)
 
 find_program(SCUBA_NODE_EXECUTABLE node REQUIRED)
+if(TARGET scuba-engine)
+  add_test(NAME native_argument_bounds COMMAND "${SCUBA_NODE_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/native-args.mjs" "$<TARGET_FILE:scuba-engine>")
+  set_tests_properties(native_argument_bounds PROPERTIES TIMEOUT 60)
+  add_test(NAME native_drive COMMAND "${SCUBA_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/native-drive.mjs"
+    "$<TARGET_FILE:scuba-engine>" "${CMAKE_CURRENT_SOURCE_DIR}/native-drive.json" success)
+  add_test(NAME native_drive_refused COMMAND "${SCUBA_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/native-drive.mjs"
+    "$<TARGET_FILE:scuba-engine>" "${CMAKE_CURRENT_SOURCE_DIR}/native-drive-refused.json" refused)
+  add_test(NAME native_drive_invalid COMMAND "${SCUBA_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/native-drive.mjs"
+    "$<TARGET_FILE:scuba-engine>" "${CMAKE_CURRENT_SOURCE_DIR}/native-drive-invalid.json" invalid)
+  set_tests_properties(native_drive native_drive_refused native_drive_invalid PROPERTIES TIMEOUT 30)
+  add_test(NAME native_control_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/native-control.mjs" "$<TARGET_FILE:scuba-engine>")
+  set_tests_properties(native_control_integration PROPERTIES TIMEOUT 45)
+endif()
 add_test(NAME studio_mcp_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../tools/scuba-engine-mcp/integration.mjs"
   "$<TARGET_FILE:scuba-hostd>" "${CMAKE_BINARY_DIR}/plugins/runtime")
@@ -114,6 +135,11 @@ add_test(NAME glb_fixtures COMMAND test_glb_fixtures "${CMAKE_CURRENT_BINARY_DIR
 set_tests_properties(glb_fixtures PROPERTIES DEPENDS test_assets TIMEOUT 60)
 
 if(TARGET scuba_engine_core)
+  add_executable(test_sco_host test_sco_host.cpp)
+  target_link_libraries(test_sco_host PRIVATE scuba_engine_sco scuba_kernel)
+  scuba_warnings(test_sco_host)
+  add_test(NAME native_product_readback COMMAND test_sco_host)
+  set_tests_properties(native_product_readback PROPERTIES TIMEOUT 60)
   add_executable(test_engine_core test_engine_core.cpp)
   target_link_libraries(test_engine_core PRIVATE scuba_engine_core scuba_assets scuba_miniz)
   scuba_warnings(test_engine_core)

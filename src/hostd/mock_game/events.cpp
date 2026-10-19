@@ -22,6 +22,8 @@ constexpr EventCap kEventCaps[] = {
     { SC_GAME_EVENT_ZONE_CHANGED, "game.events.zone_changed" },
     { SC_GAME_EVENT_VEHICLE_BOARDED, "game.events.vehicle_seat" },
     { SC_GAME_EVENT_VEHICLE_EXITED, "game.events.vehicle_seat" },
+    { SC_GAME_EVENT_LOADOUT_RESPAWN_COMPLETED, "game.events.loadout_respawn_completed" },
+    { SC_GAME_EVENT_MISSION_CHANGED, "game.events.mission_changed" },
 };
 
 bool Fire(const char* event, const void* data) {
@@ -103,6 +105,19 @@ bool FireVehicleSeat(bool boarded, uint64_t ship, int32_t seatIndex) {
     ev.seat_index = seatIndex;
     ev.vehicle_entity_id = ship;
     return Fire(boarded ? SC_GAME_EVENT_VEHICLE_BOARDED : SC_GAME_EVENT_VEHICLE_EXITED, &ev);
+}
+
+bool FireRespawnLoadoutCompleted() {
+    const sc_game_loadout_respawn_completed event{sizeof(event), 0};
+    return Fire(SC_GAME_EVENT_LOADOUT_RESPAWN_COMPLETED, &event);
+}
+bool FireMissionChanged(uint64_t mission, uint32_t state, uint32_t phase, uint32_t objective) {
+    if (!mission) return false;
+    sc_game_mission_changed event{};
+    event.size = sizeof(event); event.mission_id = mission;
+    event.old_state = state; event.new_state = state; event.new_phase = phase;
+    event.new_objective = objective; event.session = GetScene().session;
+    return Fire(SC_GAME_EVENT_MISSION_CHANGED, &event);
 }
 
 }  // namespace scuba::hostd::mock_game

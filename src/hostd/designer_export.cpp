@@ -64,12 +64,18 @@ std::string RunScaffold(const DesignerExportOptions& options, const std::filesys
     }
     STARTUPINFOW startup{};
     startup.cb = static_cast<DWORD>(sizeof(startup));
-    startup.dwFlags = STARTF_USESTDHANDLES;
     startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    const bool redirected = startup.hStdInput && startup.hStdInput != INVALID_HANDLE_VALUE &&
+        startup.hStdOutput && startup.hStdOutput != INVALID_HANDLE_VALUE &&
+        startup.hStdError && startup.hStdError != INVALID_HANDLE_VALUE &&
+        GetFileType(startup.hStdInput) != FILE_TYPE_UNKNOWN &&
+        GetFileType(startup.hStdOutput) != FILE_TYPE_UNKNOWN &&
+        GetFileType(startup.hStdError) != FILE_TYPE_UNKNOWN;
+    if (redirected) startup.dwFlags = STARTF_USESTDHANDLES;
     PROCESS_INFORMATION process{};
-    if (!CreateProcessW(options.python.c_str(), command.data(), nullptr, nullptr, TRUE,
+    if (!CreateProcessW(options.python.c_str(), command.data(), nullptr, nullptr, redirected ? TRUE : FALSE,
                         CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process))
         return "could not start " + options.python.string() + " (Windows error " + std::to_string(GetLastError()) + ")";
     const DWORD waited = WaitForSingleObject(process.hProcess, INFINITE);

@@ -32,6 +32,7 @@ public:
     void Shutdown();
 
     void BeginFrame();
+    void ResetWorkspace() { resetWorkspace_ = true; }
     render::UiFramePtr EndFrame();
 
     // The dockspace's central node: where the 3D viewport is drawn, in client pixels.
@@ -45,6 +46,7 @@ private:
     render::Renderer* renderer_ = nullptr;
     render::Rect viewport_;
     bool ready_ = false;
+    bool resetWorkspace_ = false;
 };
 
 }  // namespace scuba::ui

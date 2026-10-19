@@ -4,6 +4,11 @@ A cross-platform (Windows, macOS, Linux) studio for building and testing [sco-co
 
 Status: integrated out-of-game sandbox. Licence: GPL-3.0-only ([LICENSE](LICENSE)). This project ships no game files, and **nothing here has been verified inside Star Citizen**.
 
+[Independent plugin workflow](docs/plugin-developer-workflow.md): discover the
+SDK through MCP, scaffold, build/check against a published archive, then inspect
+the module in native hostd and the editor. Optional bounded build/check/test MCP
+tools keep commands in operator-owned configuration.
+
 ## Feature tour
 
 - **Widgets** renders loaded plugins through the SDK's retained widgets 1.1 service. Input travels back through hostd, including paging, tooltips and severity.
@@ -17,11 +22,29 @@ There is **no live game link**: ENG-8 could not implement spatial streaming thro
 
 ## Native engine (phase 1, Windows)
 
+The native workspace uses docked Scene/Assets, Inspector/Plugin controls and
+Console/diagnostics groups around a clear viewport. `View > Reset workspace`
+restores the default arrangement without clearing the scene. Workspace layout
+is saved separately from the earlier floating-panel layout. Controls use the
+same theme and retained SDK plugin rendering; the footer identifies the mock
+sandbox. See [native design contract](DESIGN.md).
+
+The native **Designer** tab edits up to 64 Label, Button, Toggle, Slider and
+TextInput widgets in a Column. Select a widget to edit its label, disabled state
+and initial values; remove or reorder it, then inspect the preview. **Export C
+plugin** runs the existing headless generator and published SDK scaffold in a
+worker, creates `exports/<id>` without overwriting an existing folder, and reports
+the result in the panel. Build the exported `check` target before loading it.
+Bun and Python are required for export. This first native editing subset does
+not replace the headless generator's broader tree/language support.
+
 `scuba-engine.exe` is the native editor that will replace the browser studio: C++20, D3D12, a
 docking ImGui shell, the sco-core kernel in process (plugins and their `sco.widgets` panels), an
 asynchronous OBJ/glTF/CGF model loader on a job pool, and a virtual file system that mounts
 directories, zip archives and `.scpak` packs with sco-core's overrides on top. Design:
-[docs/engine/architecture.md](docs/engine/architecture.md); VFS: [docs/engine/vfs.md](docs/engine/vfs.md).
+[docs/engine/architecture.md](docs/engine/architecture.md); VFS: [docs/engine/vfs.md](docs/engine/vfs.md);
+agent control plane (drive the editor over MCP, no OS input):
+[docs/engine/agent-control-plane.md](docs/engine/agent-control-plane.md).
 
 ```sh
 cmake -S . -B build -A x64 && cmake --build build --config Release
