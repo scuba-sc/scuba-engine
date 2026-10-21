@@ -116,8 +116,9 @@ void Release(const void* owner) {
     if (g_leaseOwner == owner) Restore();
 }
 
+// The 1.1 tail (raycast_filtered_many) is not mocked yet: null, so callers get UNAVAILABLE.
 const sc_world_control_v1 kTable = { sizeof(sc_world_control_v1), 0, RaycastFiltered, CameraAcquire, CameraStep,
-                                     CameraRelease };
+                                     CameraRelease, nullptr };
 
 }  // namespace
 

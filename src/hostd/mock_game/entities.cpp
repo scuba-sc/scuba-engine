@@ -270,8 +270,11 @@ void Release(const void* owner) {
     }
 }
 
+// The 1.2 tail (list_classes, find_class, find_by_name, component) is not mocked yet: null, so callers get
+// UNAVAILABLE.
 const sc_entities_v1 kTable = { sizeof(sc_entities_v1), 0, Alive, ClassOf, GetTransform, SetTransform, Spawn,
-                                Despawn, WatchFn, Unwatch, QueryRadius, LastError, Keep };
+                                Despawn, WatchFn, Unwatch, QueryRadius, LastError, Keep,
+                                nullptr, nullptr, nullptr, nullptr };
 
 }  // namespace
 

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 project(scuba_engine VERSION 0.1.0 LANGUAGES C CXX)
 
-#   cmake -S . -B build [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.3.0 assets>]
+#   cmake -S . -B build [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0-rc.1 assets>]
 #   cmake --build build && ctest --test-dir build --output-on-failure
 # Multi-config generators (Visual Studio): add --config <cfg> to the build and -C <cfg> to ctest.
 

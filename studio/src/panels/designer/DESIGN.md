@@ -47,5 +47,5 @@ widget implementation. Node selection retains the existing tonal wash.
 
 ## 8. Accepted limits
 This preview renders retained widget semantics, not an in-game renderer.
-C# and Lua builders in SDK 2.2.0 expose only five node kinds and no 1.1 tail.
+C# and Lua builders (unchanged from SDK 2.2.0 through 2.4.0) expose only five node kinds and no 1.1 tail.
 Unsupported designs show capability errors, never approximate source.
