@@ -110,7 +110,8 @@ std::unique_ptr<FileSystem> OpenZip(const std::filesystem::path& archive, Status
     for (uint16_t i = 0; i < count; ++i) {
         if (p + 46 > cd.size() || U32(&cd[p]) != kCentralSig) return fail("bad central directory entry " + std::to_string(i));
         const uint16_t nameLen = U16(&cd[p + 28]), extraLen = U16(&cd[p + 30]), commentLen = U16(&cd[p + 32]);
-        if (p + 46 + nameLen + extraLen + commentLen > cd.size()) return fail("truncated central directory");
+        const size_t entryLen = size_t{46} + nameLen + extraLen + commentLen;
+        if (p + entryLen > cd.size()) return fail("truncated central directory");
         ZipEntry e;
         e.flags = U16(&cd[p + 8]);
         e.method = U16(&cd[p + 10]);
@@ -120,7 +121,7 @@ std::unique_ptr<FileSystem> OpenZip(const std::filesystem::path& archive, Status
         e.localHeader = U32(&cd[p + 42]);
         if (e.packed == 0xFFFFFFFFu || e.size == 0xFFFFFFFFu || e.localHeader == 0xFFFFFFFFu) return fail("zip64 entry not supported");
         const std::string_view name(reinterpret_cast<const char*>(&cd[p + 46]), nameLen);
-        p += 46 + nameLen + extraLen + commentLen;
+        p += entryLen;
         if (name.empty() || name.back() == '/') continue;   // directory record
         const std::string norm = NormalizePath(name);
         if (norm.empty()) return fail("entry with an unsafe path: " + std::string(name));

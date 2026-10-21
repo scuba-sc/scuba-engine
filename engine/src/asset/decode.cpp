@@ -337,7 +337,7 @@ void FinishMesh(MeshData& mesh) {
             const float e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
             const float cross[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
             for (uint32_t k : i)
-                for (int d = 0; d < 3; ++d) mesh.normals[k * 3 + d] += cross[d];   // area-weighted
+                for (size_t d = 0; d < 3; ++d) mesh.normals[size_t{k} * 3 + d] += cross[d];   // area-weighted
         }
         for (size_t v = 0; v < n; ++v) {
             float* nv = &mesh.normals[v * 3];
@@ -350,7 +350,7 @@ void FinishMesh(MeshData& mesh) {
     mesh.boundsMin = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
     mesh.boundsMax = {-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
     for (size_t v = 0; v < n; ++v)
-        for (int d = 0; d < 3; ++d) {
+        for (size_t d = 0; d < 3; ++d) {
             mesh.boundsMin[d] = std::min(mesh.boundsMin[d], mesh.positions[v * 3 + d]);
             mesh.boundsMax[d] = std::max(mesh.boundsMax[d], mesh.positions[v * 3 + d]);
         }
@@ -407,7 +407,7 @@ Status DecodeModel(std::string_view path, std::span<const uint8_t> bytes, const 
     out.boundsMax = {-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
     for (auto& m : out.meshes) {
         FinishMesh(m);
-        for (int d = 0; d < 3; ++d) {
+        for (size_t d = 0; d < 3; ++d) {
             out.boundsMin[d] = std::min(out.boundsMin[d], m.boundsMin[d]);
             out.boundsMax[d] = std::max(out.boundsMax[d], m.boundsMax[d]);
         }
