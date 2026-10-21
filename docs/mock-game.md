@@ -37,6 +37,28 @@ reload cleanup, spatial pages/epoch expiry/unknown tails, and quotas. No sleeps
 or timing-luck waits are used. The existing hostd WebSocket e2e test also moves
 the player, toggles a capability, and fires death/respawn through `/ws`.
 
+## game.actor_stats and game.actor_stats_write (pre-release, off until the kit ships them)
+
+Both tables are on sco-core main but **not** in the published sdk-v2.3.0 kit, and this repository
+consumes published, hash-verified archives only. The mock (`src/hostd/mock_game/actor_stats.cpp`) is
+therefore compiled only when the pinned kit contains `sc_actor_stats.h` and
+`sc_actor_stats_write.h` (`cmake/ScubaActorStats.cmake`). It switches itself on when the pin moves to
+sdk-v2.4.0 or later; until then the default build has 24 services and 52 capabilities, unchanged.
+
+To exercise it earlier, locally and never in CI, point `-DSCUBA_ACTOR_STATS_SDK_DIR=<sco-core checkout>`
+at a checkout of sco-core main: only the two headers are staged into the build tree, and the kit's
+`actor_stats_probe` example is built from that checkout. CMake warns that the build is pre-release.
+
+The mock follows `docs/game/actor-stats.md` on sco-core main. Reads cover the nine named stats of
+the player and NPCs, and a stat with no record answers `SCO_NOT_FOUND`. `game.actor_stats.write`
+is **off** in every profile until switched on; a write then needs fresh offline admission, your own
+player, a mode the game would apply (`DISCARDED` answers `SCO_UNAVAILABLE`), a finite step within
+`SC_ACTOR_STATS_WRITE_MAX_STEP`, and returns the value read back after the write. Values are
+deterministic and synthetic (units and ranges are not known from the game); `SCUBA_ACTOR_STATS_DRIFT=1`
+adds a seeded, bounded drift on each tick for logging. `ActorStats()` in `actor_stats.h` holds the
+test knobs (admission, per-stat mode, missing records, the hunger/thirst switch). The mock pass is
+**not run in game** and never counts as verification.
+
 ## Implementation and lifecycle
 
 `src/hostd/mock_game/mock_game.h` exposes `Configure(Platform&)`, `Publish`,

@@ -16,6 +16,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   option(SCUBA_BUILD_TESTS "Build the plugin tests and register them with CTest" ON)
   find_package(Threads REQUIRED)
   include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ScubaSdk.cmake")
+  include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ScubaActorStats.cmake")
   if(SCUBA_BUILD_TESTS)
     enable_testing()
   endif()
@@ -43,6 +44,25 @@ add_subdirectory(org_social)
 add_subdirectory(diegetic_asop)
 add_subdirectory(diegetic_shop_inv)
 
+# The kit's actor_stats_probe example, built only when the actor stats headers are available
+# (cmake/ScubaActorStats.cmake). Its sources stay in the kit; nothing is copied here.
+set(SCUBA_EXTRA_PLUGINS "")
+if(SCUBA_HAVE_ACTOR_STATS AND SCUBA_ACTOR_STATS_PROBE_DIR)
+  sco_add_plugin(actor_stats_probe SOURCES "${SCUBA_ACTOR_STATS_PROBE_DIR}/actor_stats_probe.c"
+                 INI "${SCUBA_ACTOR_STATS_PROBE_DIR}/plugin.ini")
+  if(SCUBA_ACTOR_STATS_INCLUDE_DIR)
+    target_include_directories(actor_stats_probe PRIVATE "${SCUBA_ACTOR_STATS_INCLUDE_DIR}")
+  endif()
+  set_target_properties(actor_stats_probe PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "$<1:${CMAKE_CURRENT_BINARY_DIR}/actor_stats_probe_root/actor_stats_probe>")
+  add_custom_command(TARGET actor_stats_probe POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${SCUBA_ACTOR_STATS_PROBE_DIR}/plugin.ini"
+            "${CMAKE_CURRENT_BINARY_DIR}/actor_stats_probe_root/actor_stats_probe/plugin.ini")
+  set(SCUBA_ACTOR_STATS_PROBE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/actor_stats_probe_root"
+      CACHE INTERNAL "plugin root holding the built actor_stats_probe")
+  set(SCUBA_EXTRA_PLUGINS actor_stats_probe)
+endif()
+
 set(SCUBA_PLUGIN_ROOT "${CMAKE_CURRENT_BINARY_DIR}/runtime")
 add_custom_target(scuba_plugins ALL)
 foreach(plugin mp_chat org_social diegetic_asop diegetic_shop_inv)
@@ -53,6 +73,15 @@ foreach(plugin mp_chat org_social diegetic_asop diegetic_shop_inv)
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
       "${CMAKE_CURRENT_SOURCE_DIR}/${plugin}/plugin.ini"
       "${SCUBA_PLUGIN_ROOT}/${plugin}/plugin.ini")
+  add_dependencies(scuba_plugins ${plugin})
+endforeach()
+foreach(plugin ${SCUBA_EXTRA_PLUGINS})
+  add_custom_command(TARGET scuba_plugins POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${SCUBA_PLUGIN_ROOT}/${plugin}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+      "$<TARGET_FILE:${plugin}>" "${SCUBA_PLUGIN_ROOT}/${plugin}/"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+      "${SCUBA_ACTOR_STATS_PROBE_DIR}/plugin.ini" "${SCUBA_PLUGIN_ROOT}/${plugin}/plugin.ini")
   add_dependencies(scuba_plugins ${plugin})
 endforeach()
 if(TARGET scuba-hostd)
