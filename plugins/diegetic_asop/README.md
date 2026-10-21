@@ -34,7 +34,7 @@ reports the result plus `last_error`'s text.
 
 ## game.asop
 
-The `game.asop` 1.0 service (`include/sc_asop.h`, sco-core 2.3.0) is read only. Its calls go through
+The `game.asop` 1.0 service (`include/sc_asop.h`, added in sco-core 2.3.0, unchanged in 2.4.0) is read only. Its calls go through
 the same four gates as the hangar calls.
 
 | Panel control / command | game.asop call | Gate |

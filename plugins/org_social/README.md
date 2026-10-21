@@ -10,13 +10,13 @@ Nothing here has run in Star Citizen. Every test is headless, against the sco-co
 ## Build
 
 ```sh
-cmake -S plugins/org_social -B build -DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.3.0 assets>
+cmake -S plugins/org_social -B build -DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0-rc.1 assets>
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Leave out `SCUBA_SDK_ARCHIVE_DIR` and the build downloads `sco-sdk-host-source-sc-2.3.0.zip`
-from the sco-core release (`cmake/ScubaSdk.cmake`). The archive's SHA-256 is checked either way.
+Leave out `SCUBA_SDK_ARCHIVE_DIR` and the build downloads `sco-sdk-host-source-sc-2.4.0.zip`
+from the sco-core `sdk-v2.4.0-rc.1` pre-release (`cmake/ScubaSdk.cmake`). The archive's SHA-256 is checked either way.
 The plugin is built with `sco_add_plugin` from the kit's `sdk/cmake/sco-plugin.cmake` and staged
 as `build/stage/org_social/{org_social.dll,plugin.ini}`. The file is named `.dll` on every OS, as
 the kit does it. `plugins/CMakeLists.txt` adds this directory when included by the root build.

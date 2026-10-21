@@ -84,7 +84,7 @@ export function assertBuilderSupport(d: Design, language: 'csharp' | 'lua'): voi
   for (const { node: n } of flatten(d.nodes)) {
     if (!['Column', 'Row', 'Button', 'Toggle', 'Slider'].includes(n.kind) ||
       n.tooltip || n.severity || n.firstRow || n.visibleRows || n.password)
-      throw new Error(`SDK 2.2.0 ${language} PanelBuilder cannot represent ${n.kind} or its 1.1 attributes. Use C++ or C.`);
+      throw new Error(`SDK 2.4.0 ${language} PanelBuilder cannot represent ${n.kind} or its 1.1 attributes. Use C++ or C.`);
   }
 }
 export function sampleDesigns(): Design[] {

@@ -274,11 +274,15 @@ void Exercise(uint16_t port) {
     CHECK(result && result->find("started") && result->find("started")->as_bool());
     CHECK(result && result->find("capabilities") && result->find("capabilities")->find("version")->as_string() == "1.1");
     const Json* panels = result ? result->find("panels") : nullptr;
-    CHECK(panels && panels->size() == 2);
+    // The 2.4.0 kit's widgets example adds a one-node "widgets.named" panel (a stable-tag anchor) when
+    // the host offers widgets 1.2 stable tags, as the kit's own host does.
+    CHECK(panels && panels->size() == 3);
     if (!panels) return;
     const Json* native = FindPanel(*panels, "widgets.main");
     const Json* lua = FindPanel(*panels, "widgets_lua.main");
-    CHECK(native && lua);
+    const Json* named = FindPanel(*panels, "widgets.named");
+    CHECK(native && lua && named);
+    CHECK(named && named->find("owner")->as_string() == "widgets" && named->find("nodes")->size() == 1);
     if (!native || !lua) return;
     std::printf("widgets.main: %s\n", native->dump().c_str());
     CHECK(native->find("nodes")->size() == 10);

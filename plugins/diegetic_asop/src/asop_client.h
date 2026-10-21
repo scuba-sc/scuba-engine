@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// diegetic_asop: game.asop 1.0 client (sc_asop.h, sco-core 2.3.0). The same gates as the hangar
+// diegetic_asop: game.asop 1.0 client (sc_asop.h, added in sco-core 2.3.0). The same gates as the hangar
 // client, in the same order: sco_api covers query_service, game.asop 1.0 is published,
 // has(<capability>) answers 1, and the provider's table size covers the function. A gate that
 // fails returns SCO_UNAVAILABLE with the reason and never touches the game. Both capabilities are

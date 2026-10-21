@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 # org_social builds inside the scuba-engine tree (plugins/CMakeLists.txt) or on its own:
-#   cmake -S plugins/org_social -B build [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.3.0 assets>]
+#   cmake -S plugins/org_social -B build [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0-rc.1 assets>]
 #   cmake --build build && ctest --test-dir build --output-on-failure
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   project(org_social VERSION 0.1.0 LANGUAGES C CXX)

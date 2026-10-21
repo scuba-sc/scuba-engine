@@ -5,8 +5,15 @@ There is no game image, signature scan, proprietary fixture, engine call, or
 network session behind these tables. Nothing here has been run in Star Citizen.
 Use `--no-mock-game` to omit the synthetic provider.
 
-The ABI is the published sdk-v2.3.0 host-source kit's `include/sc_*.h`.
-Every member of every game service table in that kit has an implementation.
+The ABI is the published host-source kit's `include/sc_*.h`: SDK 2.4.0 release
+candidate 1 (tag `sdk-v2.4.0-rc.1`).
+Every member of every game service table that the 2.3.0 kit defined has an
+implementation, at the table version 2.3.0 defined. The 2.4.0 additions are not
+mocked yet: `game.actor_stats`, `game.actor_stats_write`, `game.audio`,
+`game.build`, `game.datacore_live`, `game.gamerules`, `game.input`,
+`game.inventory` and `game.inventory.contents` are not published (a query
+returns `SCO_NOT_FOUND`), and `game.entities` and `game.loadout` are published
+at 1.1, without their 1.2 tails.
 `sc_game_events.h` defines bus payloads, **not** a `game.events` service table.
 `game.asop` and `game.contracts` (new in 2.3.0) are read-only tables with fixed
 synthetic values. Neither value comes from the game.
