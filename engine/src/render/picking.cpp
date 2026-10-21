@@ -25,7 +25,7 @@ Ray ToLocal(const Ray& r, const Transform& t, float& scaleOut) {
 bool HitsBox(const Ray& r, const std::array<float, 3>& mn, const std::array<float, 3>& mx, float maxT) {
     float t0 = 0, t1 = maxT;
     const float o[3] = {r.origin.x, r.origin.y, r.origin.z}, d[3] = {r.dir.x, r.dir.y, r.dir.z};
-    for (int i = 0; i < 3; ++i) {
+    for (size_t i = 0; i < 3; ++i) {
         if (std::fabs(d[i]) < 1e-12f) {
             if (o[i] < mn[i] || o[i] > mx[i]) return false;
             continue;
