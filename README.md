@@ -1,6 +1,6 @@
 # scuba-engine
 
-A cross-platform (Windows, macOS, Linux) studio for building and testing [sco-core](https://github.com/scubamount/sco-core) plugins and UI without running the game: a native sandbox host (`scuba-hostd`) built from the published sco-core SDK, and a browser studio for widget design, 3D in-world panel projection, DataCore and asset inspection, and multi-peer networking tests.
+A cross-platform (Windows, macOS, Linux) studio for building and testing [sco-core](https://github.com/scuba-sc/sco-core) plugins and UI without running the game: a native sandbox host (`scuba-hostd`) built from the published sco-core SDK, and a browser studio for widget design, 3D in-world panel projection, DataCore and asset inspection, and multi-peer networking tests.
 
 Status: integrated out-of-game sandbox. Licence: GPL-3.0-only ([LICENSE](LICENSE)). This project ships no game files, and **nothing here has been verified inside Star Citizen**.
 
@@ -50,7 +50,7 @@ ctest --test-dir build --output-on-failure
 
 Build and CTest before running studio tests: Asset Lab's loader tests consume synthetic files generated at `build/tests/assets-fixtures`. If using another build directory, generate its fixtures and copy them to that location before `npm test`.
 
-Configure downloads `sco-sdk-host-source-sc-2.4.0.zip` from the sco-core [`sdk-v2.4.0-rc.1`](https://github.com/scubamount/sco-core/releases/tag/sdk-v2.4.0-rc.1) pre-release (SDK 2.4.0, release candidate 1), checks its SHA-256 (`5ca76ff9…406dfc6`, the value in the release's `SHA256SUMS`) and builds it under `build/_sdk/`. A mismatched archive stops the configure. A build tree configured before the pin moved keeps its cached `SCUBA_SDK_*` values: configure a fresh tree, or add `-U "SCUBA_SDK_*"` once. To build offline from a local copy of the release assets:
+Configure downloads `sco-sdk-host-source-sc-2.4.0.zip` from the sco-core [`sdk-v2.4.0-rc.1`](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0-rc.1) pre-release (SDK 2.4.0, release candidate 1), checks its SHA-256 (`5ca76ff9…406dfc6`, the value in the release's `SHA256SUMS`) and builds it under `build/_sdk/`. A mismatched archive stops the configure. A build tree configured before the pin moved keeps its cached `SCUBA_SDK_*` values: configure a fresh tree, or add `-U "SCUBA_SDK_*"` once. To build offline from a local copy of the release assets:
 
 ```sh
 cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.4.0-rc.1-assets
