@@ -2,7 +2,7 @@
 #
 #   SCUBA_SDK_VERSION       kit version (default 2.4.0)
 #   SCUBA_SDK_RELEASE_TAG   sco-core release tag the kit is downloaded from (default
-#                           sdk-v2.4.0-rc.2, the SDK 2.4.0 release candidate 2 pre-release)
+#                           sdk-v2.4.0-rc.2, SDK 2.4.0 release candidate 2)
 #   SCUBA_SDK_ARCHIVE_DIR   directory holding a local copy of the release assets; when set, the
 #                           archive is taken from there instead of downloaded. Either way the
 #                           archive must match SCUBA_SDK_HOST_SOURCE_SHA256 or configure fails.
