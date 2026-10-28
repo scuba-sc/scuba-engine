@@ -72,8 +72,9 @@ bool LoadProfile(const std::string& path, scuba::hostd::KernelOptions& options, 
             }
             const auto& name = item.as_string();
             if (!seen.insert(name).second) { error = std::string("duplicate ") + key + " entry: " + name; return false; }
-            if (std::string(key) == "plugins") { error = "selective plugin loading is not supported: " + name; return false; }
-            if (std::string(key) == "mocks") {
+            if (std::string(key) == "plugins") {
+                options.profilePlugins.push_back(name);
+            } else if (std::string(key) == "mocks") {
                 if (name != "game.events") { error = "unknown mock: " + name; return false; }
                 options.mockEvents = true;
             } else {
@@ -86,7 +87,6 @@ bool LoadProfile(const std::string& path, scuba::hostd::KernelOptions& options, 
         }
     }
     options.selectiveProfile = true;
-    options.pluginRoot.clear();
     options.mockGame = true;
     return true;
 }
@@ -99,7 +99,7 @@ int Usage() {
                  "  --bind ADDR          IPv4 address to bind (default 127.0.0.1)\n"
                  "  --studio DIR         built studio to serve (default: the source tree's studio/dist)\n"
                  "  --scenario FILE      run bounded synthetic scene controls before listening\n"
-                 "  --profile FILE       select services and mocks from a JSON profile\n"
+                 "  --profile FILE       select plugins, services and mocks (see docs/engine/profiles.md)\n"
                  "  --plugins DIR        plugin root (default: build-tree APP plugins)\n"
                  "  --data DIR           data root (sco.storage databases)\n"
                  "  --allow-origin O     also accept WebSocket connections from origin O (e.g. http://localhost:5173)\n"
@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
     std::string profilePath;
     std::string scenarioPath;
     Json scenario;
-    bool conflictingProfileOption = false;
+    bool noMockGame = false;
 
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -144,7 +144,6 @@ int main(int argc, char** argv) {
             if (!profilePath.empty()) return Usage();
             profilePath = argv[++i];
         } else if (!std::strcmp(a, "--plugins") && hasValue) {
-            conflictingProfileOption = true;
             kernelOptions.pluginRoot = argv[++i];
         } else if (!std::strcmp(a, "--data") && hasValue) {
             kernelOptions.dataRoot = argv[++i];
@@ -154,7 +153,7 @@ int main(int argc, char** argv) {
             kernelOptions.lua = false;
         } else if (!std::strcmp(a, "--no-mock-game")) {
             kernelOptions.mockGame = false;
-            conflictingProfileOption = true;
+            noMockGame = true;
         } else if (!std::strcmp(a, "--test-shutdown")) {
             testShutdown = true;
         } else {
@@ -163,7 +162,7 @@ int main(int argc, char** argv) {
     }
 
     if (!profilePath.empty()) {
-        if (conflictingProfileOption) { std::fprintf(stderr, "scuba-hostd: --profile conflicts with --plugins and --no-mock-game\n"); return 1; }
+        if (noMockGame) { std::fprintf(stderr, "scuba-hostd: --profile conflicts with --no-mock-game\n"); return 1; }
         std::string error;
         if (!LoadProfile(profilePath, kernelOptions, error)) { std::fprintf(stderr, "scuba-hostd: profile: %s\n", error.c_str()); return 1; }
     }
@@ -196,7 +195,8 @@ int main(int argc, char** argv) {
     net_sim::RegisterNetSim(registry, broadcaster, argv[0]);
 
     if (!kernel.Start(kernelOptions, KernelLog)) {
-        std::fprintf(stderr, "scuba-hostd: the sco-core host kernel did not start\n");
+        std::fprintf(stderr, "scuba-hostd: the sco-core host kernel did not start%s%s\n",
+                     kernel.profileError().empty() ? "" : ": ", kernel.profileError().c_str());
         return 1;
     }
 

@@ -112,7 +112,38 @@ add_test(NAME product_profile_lifecycle COMMAND test_product_profile
   "${CMAKE_CURRENT_BINARY_DIR}/product-profile-fixture" $<TARGET_FILE:mock_game_probe>)
 set_tests_properties(product_profile_lifecycle PROPERTIES TIMEOUT 60)
 
-foreach(profile_case valid_empty valid_service valid_audio default malformed unknown_service unknown_field oversize depth missing)
+add_executable(test_selected_profile test_selected_profile.cpp ${CMAKE_SOURCE_DIR}/src/hostd/scenario_runner.cpp)
+target_link_libraries(test_selected_profile PRIVATE scuba_kernel)
+add_dependencies(test_selected_profile mock_game_probe)
+scuba_warnings(test_selected_profile)
+add_test(NAME selected_profile_lifecycle COMMAND test_selected_profile
+  "${CMAKE_CURRENT_BINARY_DIR}/selected-profile-fixture" $<TARGET_FILE:mock_game_probe>
+  "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/valid.json")
+set_tests_properties(selected_profile_lifecycle PROPERTIES TIMEOUT 60)
+
+# Record actual query/load/exit/unload callouts across an ABI refusal.
+foreach(profile_id a_good b_bad c_unselected)
+  add_library(profile_${profile_id} MODULE plugins/profile_lifecycle/plugin.cpp)
+  target_include_directories(profile_${profile_id} PRIVATE "${SCUBA_SDK_SOURCE_DIR}/include")
+  if(profile_id STREQUAL "b_bad")
+    set(profile_api_major 99)
+  else()
+    set(profile_api_major 1)
+  endif()
+  target_compile_definitions(profile_${profile_id} PRIVATE PROFILE_PLUGIN_ID="${profile_id}" PROFILE_API_MAJOR=${profile_api_major})
+  set_target_properties(profile_${profile_id} PROPERTIES PREFIX "" SUFFIX ".dll")
+  scuba_warnings(profile_${profile_id})
+endforeach()
+add_executable(test_profile_failure test_profile_failure.cpp)
+target_link_libraries(test_profile_failure PRIVATE scuba_kernel)
+add_dependencies(test_profile_failure profile_a_good profile_b_bad profile_c_unselected)
+scuba_warnings(test_profile_failure)
+add_test(NAME profile_failed_start_cleanup COMMAND test_profile_failure
+  "${CMAKE_CURRENT_BINARY_DIR}/profile-failure-fixture" $<TARGET_FILE:profile_a_good>
+  $<TARGET_FILE:profile_b_bad> $<TARGET_FILE:profile_c_unselected>)
+set_tests_properties(profile_failed_start_cleanup PROPERTIES TIMEOUT 60)
+
+foreach(profile_case valid_empty valid_service valid_audio valid_plugin default malformed unknown_service unknown_field oversize depth missing)
   add_test(NAME profile_${profile_case} COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_profile_cli.py" "$<TARGET_FILE:scuba-hostd>"
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/${profile_case}.json" "${profile_case}"
@@ -120,11 +151,11 @@ foreach(profile_case valid_empty valid_service valid_audio default malformed unk
   set_tests_properties(profile_${profile_case} PROPERTIES TIMEOUT 30)
 endforeach()
 
-foreach(scenario_case valid default unknown_field oversize)
+foreach(scenario_case valid profile default unknown_field oversize)
   add_test(NAME scenario_${scenario_case} COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_scenario_cli.py" "$<TARGET_FILE:scuba-hostd>"
     "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/${scenario_case}.json" "${scenario_case}"
-    "${CMAKE_CURRENT_BINARY_DIR}/scenario-${scenario_case}")
+    "${CMAKE_CURRENT_BINARY_DIR}/scenario-${scenario_case}" "${CMAKE_CURRENT_SOURCE_DIR}/profiles/valid_plugin.json")
   set_tests_properties(scenario_${scenario_case} PROPERTIES TIMEOUT 30)
 endforeach()
 
@@ -185,6 +216,11 @@ add_test(NAME studio_mcp_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../tools/scuba-engine-mcp/integration.mjs"
   "$<TARGET_FILE:scuba-hostd>" "${CMAKE_BINARY_DIR}/plugins/runtime")
 set_tests_properties(studio_mcp_integration PROPERTIES TIMEOUT 60)
+add_test(NAME profile_mcp_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/profile_mcp.mjs" "$<TARGET_FILE:scuba-hostd>"
+  "${CMAKE_BINARY_DIR}/plugins/runtime" "${CMAKE_CURRENT_SOURCE_DIR}/profiles/valid_plugin.json"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../tools/scuba-engine-mcp/server.mjs")
+set_tests_properties(profile_mcp_integration PROPERTIES TIMEOUT 60)
 add_test(NAME engine_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/integration-smoke.mjs" "$<TARGET_FILE:scuba-hostd>"
   "${CMAKE_CURRENT_BINARY_DIR}/assets-fixtures" "${CMAKE_CURRENT_BINARY_DIR}/")
