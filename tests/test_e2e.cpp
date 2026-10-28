@@ -252,7 +252,21 @@ int main(int argc, char** argv) {
         const Json scene = Rpc(ws, reader, R"({"id":10,"method":"mock_game.state"})");
         CHECK(scene.find("result") && scene.find("result")->find("player")->find("spawned")->as_bool());
         const Json caps = Rpc(ws, reader, R"({"id":11,"method":"mock_game.caps.set","params":{"name":"game.actors.state","ready":false}})");
-        CHECK(caps.find("result") && caps.find("result")->size() == 52);
+        const Json* capList = caps.find("result");
+        CHECK(capList && capList->is_array());
+        bool foundActorState = false;
+        if (capList && capList->is_array()) {
+            for (size_t i = 0; i < capList->size(); ++i) {
+                const Json& cap = capList->at(i);
+                const Json* name = cap.find("name");
+                if (name && name->as_string() == "game.actors.state") {
+                    const Json* ready = cap.find("ready");
+                    CHECK(ready && ready->is_bool() && !ready->as_bool());
+                    foundActorState = true;
+                }
+            }
+        }
+        CHECK(foundActorState);
         const Json moved = Rpc(ws, reader, R"({"id":12,"method":"mock_game.player.move","params":{"zone":4,"pos":[7,8,9],"camera":true}})");
         CHECK(moved.find("result"));
         const Json changed = Rpc(ws, reader, R"({"id":13,"method":"mock_game.state"})");

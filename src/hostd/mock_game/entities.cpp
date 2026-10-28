@@ -270,11 +270,84 @@ void Release(const void* owner) {
     }
 }
 
-// The 1.2 tail (list_classes, find_class, find_by_name, component) is not mocked yet: null, so callers get
-// UNAVAILABLE.
+uint64_t g_epoch = 0;
+uint64_t g_nextClassId = 1;
+uint64_t g_snapshotTick = 0, g_snapshotSession = 0;
+std::set<std::string> g_snapshotClasses;
+std::map<std::string, uint64_t> g_classIds;
+
+bool Snapshot() {
+    const Scene& s = GetScene();
+    for (const auto& name : s.classes) {
+        if (name.empty() || name.size() > 95) return false;
+        for (char c : name) if (c < 0x20 || c > 0x7e) return false;
+    }
+    if (s.classes.size() > SC_ENTITIES_MAX_CLASSES) return false;
+    if (!g_epoch || g_snapshotTick != s.tick || g_snapshotSession != s.session || g_snapshotClasses != s.classes) {
+        ++g_epoch;
+        g_snapshotTick = s.tick; g_snapshotSession = s.session; g_snapshotClasses = s.classes;
+        for (const auto& name : s.classes) if (!g_classIds.count(name)) g_classIds[name] = g_nextClassId++;
+    }
+    return true;
+}
+
+void ClassRecord(const std::string& name, sc_entity_class_record& out) {
+    out = {}; out.size = sizeof(out); out.epoch = g_epoch; out.class_id = g_classIds[name];
+    std::memcpy(out.name, name.c_str(), name.size() + 1);
+}
+
+sco_result ListClasses(uint64_t epoch, uint32_t offset, sc_entity_class_page* out) {
+    if (!OnGame()) return WrongThread(g_err);
+    if (!out || out->size < sizeof(*out) || out->count > SC_ENTITIES_MAX_CLASSES) return SCO_BAD_ARG;
+    const uint32_t capacity = out->count, size = out->size;
+    std::memset(out, 0, sizeof(*out)); out->size = size;
+    if (!Snapshot()) return GetScene().classes.size() > SC_ENTITIES_MAX_CLASSES ? SCO_TOO_MANY : SCO_FAILED;
+    if (epoch && epoch != g_epoch) return SCO_NOT_FOUND;
+    std::vector<std::pair<uint64_t, std::string>> sorted;
+    for (const auto& name : g_snapshotClasses) sorted.emplace_back(g_classIds[name], name);
+    std::sort(sorted.begin(), sorted.end());
+    out->epoch = g_epoch;
+    const size_t start = std::min(static_cast<size_t>(offset), sorted.size());
+    const size_t count = std::min(static_cast<size_t>(capacity), sorted.size() - start);
+    for (size_t i = 0; i < count; ++i) ClassRecord(sorted[start + i].second, out->records[i]);
+    out->count = static_cast<uint32_t>(count); out->more = static_cast<uint32_t>(sorted.size() - start - count);
+    return SCO_OK;
+}
+
+sco_result FindClass(const char* name, sc_entity_class_record* out) {
+    if (!OnGame()) return WrongThread(g_err);
+    if (!out || out->size < sizeof(*out)) return SCO_BAD_ARG;
+    const uint32_t size = out->size; std::memset(out, 0, sizeof(*out)); out->size = size;
+    if (!name || !*name) return SCO_BAD_ARG;
+    if (!Snapshot()) return GetScene().classes.size() > SC_ENTITIES_MAX_CLASSES ? SCO_TOO_MANY : SCO_FAILED;
+    if (!g_snapshotClasses.count(name)) return SCO_NOT_FOUND;
+    ClassRecord(name, *out); out->size = size; return SCO_OK;
+}
+
+sco_result FindByName(const char* name, uint64_t* out) {
+    if (out) *out = 0;
+    if (!OnGame()) return WrongThread(g_err);
+    if (!name || !*name || !out) return SCO_BAD_ARG;
+    // The scene has no instance names; class names are not instance identities.
+    return SCO_UNAVAILABLE;
+}
+
+sco_result Component(uint64_t id, uint32_t kind, sc_entity_component_record* out) {
+    if (!OnGame()) return WrongThread(g_err);
+    if (!out || out->size < sizeof(*out)) return SCO_BAD_ARG;
+    const uint32_t size = out->size; std::memset(out, 0, sizeof(*out)); out->size = size;
+    if (!id || (kind != SC_ENTITY_COMPONENT_ACTOR && kind != SC_ENTITY_COMPONENT_INVENTORY)) return SCO_BAD_ARG;
+    const Entity* e = StreamedEntity(id);
+    if (!e || (kind == SC_ENTITY_COMPONENT_ACTOR && !e->actor) ||
+        (kind == SC_ENTITY_COMPONENT_INVENTORY && id != GetScene().player)) return SCO_NOT_FOUND;
+    out->kind = kind; out->entity_id = id;
+    out->generation = GetScene().tick + 1;
+    return SCO_OK;
+}
+
 const sc_entities_v1 kTable = { sizeof(sc_entities_v1), 0, Alive, ClassOf, GetTransform, SetTransform, Spawn,
                                 Despawn, WatchFn, Unwatch, QueryRadius, LastError, Keep,
-                                nullptr, nullptr, nullptr, nullptr };
+                                ListClasses, FindClass, FindByName, Component };
 
 }  // namespace
 
@@ -289,7 +362,7 @@ void NotifyStream(uint32_t what, uint64_t id, const std::string& cls) {
 }
 
 const ServiceDef& EntitiesService() {
-    static const ServiceDef def{ SC_ENTITIES_NAME, SC_ENTITIES_VERSION_1_1, &kTable, Reset, Release, nullptr };
+    static const ServiceDef def{ SC_ENTITIES_NAME, SC_ENTITIES_VERSION_1_2, &kTable, Reset, Release, nullptr };
     return def;
 }
 

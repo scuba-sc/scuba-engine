@@ -8,10 +8,17 @@
 #include "sco/host.h"
 #include "sco/log.h"
 #include "sc_actors.h"
+#ifdef SCUBA_HAVE_ACTOR_STATS
+#include "sc_actor_stats.h"
+#endif
 #include "sc_creative.h"
 #include "sc_cvars.h"
 #include "sc_entities.h"
 #include "sc_game_spatial.h"
+#include "sc_game_build.h"
+#include "sc_inventory.h"
+#include "sc_gamerules.h"
+#include "sc_input.h"
 #include "sc_owned.h"
 #include "sc_relocation.h"
 
@@ -27,6 +34,12 @@ namespace mg = scuba::hostd::mock_game;
 namespace {
 
 void Log(const char* line) { std::puts(line); }
+
+#ifdef SCUBA_HAVE_ACTOR_STATS
+constexpr size_t kActorStatsExtra = 2;
+#else
+constexpr size_t kActorStatsExtra = 0;
+#endif
 
 template<class T>
 const T* Query(const char* name, uint32_t version = 0x10000u) {
@@ -58,7 +71,7 @@ bool Success(const Json& response) { return response.find("result") != nullptr; 
 
 void ToggleTests(const sco_api* api) {
     const auto caps = mg::Capabilities();
-    CHECK(caps.size() == 52);
+    CHECK(caps.size() == 62 + kActorStatsExtra);
     for (const auto& cap : caps) {
         CHECK(mg::SetCapability(cap.name, false));
         CHECK(api->has(cap.name.c_str()) == 0);
@@ -102,10 +115,198 @@ void ToggleTests(const sco_api* api) {
     CHECK(api->query_service("game.actors", 0x10002u, &table) == SCO_UNAVAILABLE && !table);
     CHECK(api->query_service("game.asop", 0x10000u, &table) == SCO_OK && table);
     CHECK(api->query_service("game.contracts", 0x10000u, &table) == SCO_OK && table);
+    CHECK(api->query_service(SC_INVENTORY_SERVICE_NAME, SC_INVENTORY_SERVICE_VERSION, &table) == SCO_OK && table);
+    CHECK(api->query_service(SC_INVENTORY_SERVICE_NAME, SC_INVENTORY_SERVICE_VERSION_1_2, &table) == SCO_OK && table);
+    const auto* layout = static_cast<const sc_inventory_v1_2*>(table);
+    CHECK(layout->base.size == sizeof(sc_inventory_v1_2) && layout->snapshot_layout);
+    sc_inventory_layout_snapshot layoutOut{};
+    layoutOut.size = sizeof(layoutOut);
+    sc_inventory_layout_entry entry{};
+    entry.size = sizeof(entry);
+    CHECK(sc_inventory_snapshot_layout(layout, nullptr, &layoutOut, &entry, sizeof(entry), 1) == SCO_UNAVAILABLE);
+    CHECK(layoutOut.size == sizeof(layoutOut) && entry.size == sizeof(entry));
+    CHECK(sc_inventory_snapshot_layout(layout, nullptr, &layoutOut, &entry, sizeof(entry), 0) == SCO_BAD_ARG);
+    CHECK(api->query_service(SC_INVENTORY_SERVICE_NAME, 0x10003u, &table) == SCO_UNAVAILABLE && !table);
+#ifdef SCUBA_HAVE_ACTOR_STATS
+    CHECK(api->query_service(SC_ACTOR_STATS_NAME, SC_ACTOR_STATS_VERSION_1_1, &table) == SCO_OK && table);
+    const auto* stats = static_cast<const sc_actor_stats_v1*>(table);
+    float value = -1.0f;
+    CHECK(stats->read(mg::GetScene().player, SC_ACTOR_STAT_HYGIENE, &value) == SCO_OK);
+    CHECK(stats->read(mg::GetScene().player, SC_ACTOR_STAT_LAST_1_1 + 1, &value) == SCO_BAD_ARG);
+    CHECK(api->query_service(SC_ACTOR_STATS_NAME, 0x10002u, &table) == SCO_UNAVAILABLE && !table);
+#endif
+    CHECK(api->query_service(SC_GAMERULES_SERVICE_NAME, SC_GAMERULES_VERSION_1_0, &table) == SCO_OK && table);
+    CHECK(api->query_service(SC_GAMERULES_SERVICE_NAME, SC_GAMERULES_VERSION_1_1, &table) == SCO_OK && table);
     CHECK(api->query_service("game.loadout", 0x10001u, &table) == SCO_OK && table);
-    CHECK(api->query_service("game.loadout", 0x10002u, &table) == SCO_UNAVAILABLE && !table);
-    CHECK(api->query_service("game.gamerules", 0x10000u, &table) == SCO_NOT_FOUND && !table);  // 2.4.0
+    CHECK(api->query_service("game.loadout", 0x10002u, &table) == SCO_OK && table);
+    CHECK(api->query_service("game.loadout", 0x10003u, &table) == SCO_UNAVAILABLE && !table);
+    CHECK(api->query_service(SC_GAMERULES_SERVICE_NAME, SC_GAMERULES_VERSION_1_0, &table) == SCO_OK && table);
+    CHECK(api->query_service(SC_GAMERULES_SERVICE_NAME, SC_GAMERULES_VERSION_1_1, &table) == SCO_OK && table);
     CHECK(api->query_service("sco.ui.surfaces", 0x10000u, &table) == SCO_OK && table);  // the kit's own, 2.3.0
+}
+
+void InventoryAndGameRulesTests() {
+    const auto* inventory = Query<sc_inventory_v1>(SC_INVENTORY_SERVICE_NAME, SC_INVENTORY_SERVICE_VERSION);
+    sc_inventory_snapshot snapshot{};
+    snapshot.size = sizeof(snapshot);
+    snapshot.count = 1;
+    CHECK(sc_inventory_snapshot_ports(inventory, nullptr, &snapshot) == SCO_OK);
+    CHECK(snapshot.count == 1 && snapshot.total_seen == 3 && snapshot.flags == SC_INVENTORY_FLAG_TRUNCATED);
+    CHECK(snapshot.generation == mg::GetScene().inventoryGeneration);
+    CHECK(snapshot.ports[0].valid && snapshot.ports[0].item_class_id == 0x1234);
+    CHECK(snapshot.ports[1].valid == 0);
+
+    mg::GetScene().inventoryPorts.push_back(sc_inventory_port{ sizeof(sc_inventory_port), 0, 0, 0 });
+    ++mg::GetScene().inventoryGeneration;
+    snapshot.count = SC_INVENTORY_MAX_PORTS + 1;
+    CHECK(inventory->snapshot(nullptr, &snapshot) == SCO_OK);
+    CHECK(snapshot.count == 4 && snapshot.total_seen == 4 && snapshot.flags == 0);
+    CHECK(snapshot.generation == 2 && snapshot.ports[2].valid == 1 && snapshot.ports[3].valid == 0);
+    snapshot.size = SC_INVENTORY_SNAPSHOT_SIZE_1_0;
+    snapshot.count = 0;
+    CHECK(inventory->snapshot(nullptr, &snapshot) == SCO_OK && snapshot.count == 0);
+    snapshot.size = SC_INVENTORY_SNAPSHOT_SIZE_1_0 - 1;
+    CHECK(inventory->snapshot(nullptr, &snapshot) == SCO_BAD_ARG);
+    snapshot.size = sizeof(snapshot);
+    snapshot.count = 0;
+    mg::GetScene().inventoryAvailable = false;
+    CHECK(inventory->snapshot(nullptr, &snapshot) == SCO_UNAVAILABLE);
+    mg::GetScene().inventoryAvailable = true;
+    mg::GetScene().spawned = false;
+    CHECK(inventory->snapshot(nullptr, &snapshot) == SCO_UNAVAILABLE);
+    mg::GetScene().spawned = true;
+    CHECK(mg::SetCapability("game.inventory.read", false));
+    CHECK(inventory->snapshot(nullptr, &snapshot) == SCO_UNAVAILABLE);
+    CHECK(mg::SetCapability("game.inventory.read", true));
+
+    const auto* gamerules = Query<sc_gamerules_v1>(SC_GAMERULES_SERVICE_NAME, SC_GAMERULES_VERSION_1_0);
+    sc_gamerules_state state{};
+    state.size = sizeof(state);
+    CHECK(sc_gamerules_read(gamerules, nullptr, &state) == SCO_OK);
+    CHECK(state.valid == 1 && state.generation == 1 && state.enforce_group_qt == 1);
+    CHECK(state.quantum_travel_allowed == 1 && state.quantum_boost_allowed == 0);
+    CHECK(state.travel_target_threshold_angle == 12.5f && state.boost_group_distance_threshold == 2500.0f);
+    mg::GetScene().gamerules.quantum_boost_allowed = 1;
+    mg::GetScene().gamerules.generation = 2;
+    CHECK(gamerules->read(nullptr, &state) == SCO_OK && state.generation == 2 && state.quantum_boost_allowed == 1);
+    state.size = sizeof(state) - 1;
+    CHECK(gamerules->read(nullptr, &state) == SCO_BAD_ARG);
+    state.size = sizeof(state);
+    mg::GetScene().gamerulesReceived = false;
+    CHECK(gamerules->read(nullptr, &state) == SCO_UNAVAILABLE);
+    mg::GetScene().gamerulesReceived = true;
+    CHECK(mg::SetCapability("game.gamerules.read", false));
+    CHECK(gamerules->read(nullptr, &state) == SCO_UNAVAILABLE);
+    CHECK(mg::SetCapability("game.gamerules.read", true));
+    CHECK(mg::SetServicePublished(SC_INVENTORY_SERVICE_NAME, false));
+    CHECK(inventory->snapshot(nullptr, &snapshot) == SCO_UNAVAILABLE);
+    CHECK(mg::SetServicePublished(SC_INVENTORY_SERVICE_NAME, true));
+    CHECK(mg::SetServicePublished(SC_GAMERULES_SERVICE_NAME, false));
+    CHECK(gamerules->read(nullptr, &state) == SCO_UNAVAILABLE);
+    uint32_t count = 0;
+    const auto* input = Query<sc_input_v1>(SC_INPUT_SERVICE_NAME, SC_INPUT_SERVICE_VERSION);
+    CHECK(input->count(nullptr, &count) == SCO_BAD_ARG);
+    CHECK(mg::SetServicePublished(SC_GAMERULES_SERVICE_NAME, true));
+}
+
+void MetadataTests(sco_plugin* self) {
+    const auto* input = Query<sc_input_v1>(SC_INPUT_SERVICE_NAME, SC_INPUT_SERVICE_VERSION);
+    uint32_t count = 0;
+    CHECK(input->count(self, &count) == SCO_OK && count == SC_INPUT_ACTION_COUNT && count == 1297);
+    for (uint32_t id = 1; id <= count; ++id) {
+        sc_input_action_info byId{};
+        byId.size = sizeof(byId);
+        CHECK(input->by_id(self, id, &byId) == SCO_OK && byId.id == id);
+        sc_input_action_info byName{};
+        byName.size = sizeof(byName);
+        CHECK(input->by_name(self, byId.name, &byName) == SCO_OK);
+        CHECK(byName.id == byId.id && byName.flags == byId.flags && std::strcmp(byName.name, byId.name) == 0);
+        CHECK(byId.flags == 0);
+    }
+    sc_input_action_info alias{};
+    alias.size = sizeof(alias);
+    CHECK(input->by_id(self, 0, &alias) == SCO_NOT_FOUND);
+    CHECK(input->by_id(self, count + 1, &alias) == SCO_NOT_FOUND);
+    CHECK(input->by_id(self, 1, &alias) == SCO_OK && std::strcmp(alias.name, "toggle_cursor_input") == 0);
+    CHECK(input->by_id(self, count, &alias) == SCO_OK && std::strcmp(alias.name, "buildmode_toggle_construction_menu") == 0);
+    CHECK(input->by_name(self, "FIRST", &alias) == SCO_NOT_FOUND);
+    CHECK(input->by_name(self, "LAST", &alias) == SCO_NOT_FOUND);
+    CHECK(input->by_name(self, "INVALID", &alias) == SCO_NOT_FOUND);
+    CHECK(input->by_name(self, "attack1", &alias) == SCO_OK && alias.id == SC_ACTION_ATTACK1);
+    CHECK(input->by_name(self, "ATTACK1", &alias) == SCO_NOT_FOUND);
+    CHECK(input->by_name(self, "", &alias) == SCO_BAD_ARG);
+    CHECK(input->by_name(self, "not_a_real_action", &alias) == SCO_NOT_FOUND);
+    alias.size = sizeof(alias) - 1;
+    CHECK(input->by_id(self, 1, &alias) == SCO_BAD_ARG);
+
+    const auto* gamerules = Query<sc_gamerules_v1>(SC_GAMERULES_SERVICE_NAME, SC_GAMERULES_VERSION_1_0);
+    sc_gamerules_param_info params[SC_GAMERULES_PARAM_MAX_PAGE]{};
+    uint32_t n = 99, total = 99;
+    CHECK(sc_gamerules_list_params(gamerules, self, 0, nullptr, 0, 0, &n, &total) == SCO_OK);
+    CHECK(n == 0 && total == 15);
+    for (auto& param : params) param.size = sizeof(param);
+    CHECK(sc_gamerules_list_params(gamerules, self, 0, params, sizeof(params[0]), 15, &n, &total) == SCO_OK);
+    CHECK(n == 15 && total == 15);
+    constexpr const char* names[] = {"capturableDebug", "phaseDebug", "objectiveDebug", "log", "enabled",
+      "log", "log", "disableCollisionFilter", "showRaceCheckpoints", "showRaceInfo", "overrideRespawnTimer",
+      "editorUseSpawnpoints", "allowNonLocationSpawnpoints", "despawnOnProjectileHit", "allowAllPlayerCameras"};
+    constexpr const char* groups[] = {"control", "control", "control", "state", "scoring", "scoring",
+      "damagehandling", "damagehandling", "", "", "", "", "", "", ""};
+    constexpr uint32_t types[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1};
+    for (uint32_t i = 0; i < 15; ++i)
+        CHECK(std::strcmp(params[i].name, names[i]) == 0 && std::strcmp(params[i].group, groups[i]) == 0 &&
+              params[i].type == types[i]);
+    n = total = 99;
+    CHECK(sc_gamerules_list_params(gamerules, self, 15, params, sizeof(params[0]), 1, &n, &total) == SCO_OK &&
+          n == 0 && total == 15);
+    n = total = 99;
+    CHECK(sc_gamerules_list_params(gamerules, self, 16, params, sizeof(params[0]), 1, &n, &total) == SCO_BAD_ARG &&
+          n == 99 && total == 99);
+    CHECK(sc_gamerules_list_params(gamerules, self, 0, nullptr, sizeof(params[0]), 1, &n, &total) == SCO_BAD_ARG);
+    CHECK(sc_gamerules_list_params(gamerules, self, 0, params, sizeof(params[0]) - 1, 1, &n, &total) == SCO_BAD_ARG);
+    CHECK(sc_gamerules_list_params(gamerules, self, 0, params, SC_GAMERULES_PARAM_MAX_STRIDE + 1, 1,
+                                   &n, &total) == SCO_BAD_ARG);
+    CHECK(sc_gamerules_list_params(gamerules, self, 0, params, sizeof(params[0]),
+                                   SC_GAMERULES_PARAM_MAX_PAGE + 1, &n, &total) == SCO_BAD_ARG);
+    params[0].size = sizeof(params[0]) - 1;
+    CHECK(sc_gamerules_list_params(gamerules, self, 0, params, sizeof(params[0]), 1, &n, &total) == SCO_BAD_ARG);
+    CHECK(sc_gamerules_list_params(gamerules, self, 0, params, sizeof(params[0]), 1, &n, &n) == SCO_BAD_ARG);
+    params[0].size = sizeof(params[0]);
+    CHECK(mg::SetCapability("game.input.registry", false));
+    CHECK(input->count(self, &count) == SCO_UNAVAILABLE);
+    CHECK(mg::SetCapability("game.input.registry", true));
+    CHECK(mg::SetServicePublished(SC_INPUT_SERVICE_NAME, false));
+    CHECK(input->count(self, &count) == SCO_UNAVAILABLE);
+    CHECK(mg::SetServicePublished(SC_INPUT_SERVICE_NAME, true));
+    CHECK(mg::SetCapability("game.gamerules.params", false));
+    CHECK(sc_gamerules_list_params(gamerules, self, 0, params, sizeof(params[0]), 1, &n, &total) == SCO_OK && n == 1 && total == 15);
+    CHECK(mg::SetCapability("game.gamerules.params", true));
+}
+
+void BuildTests() {
+    const auto* build = Query<sc_game_build_v1>(SC_GAME_BUILD_SERVICE_NAME);
+    sc_game_build_info info{};
+    info.size = sizeof(info);
+    CHECK(sc_game_build_read(build, nullptr, &info) == SCO_OK);
+    CHECK(info.size == sizeof(info));
+    CHECK(info.pe_timestamp == 0 && info.size_of_image == 0);
+    CHECK(info.pack_major == 0 && info.pack_minor == 0 && info.pack_patch == 0);
+    CHECK(info.verified_build[0] == 0 && info.verified_pe_timestamp == 0 && info.pin_matches == 0);
+
+    struct ShortInfo { uint32_t size; uint32_t timestamp; } shortInfo{ sizeof(ShortInfo), 99 };
+    CHECK(build->read(nullptr, reinterpret_cast<sc_game_build_info*>(&shortInfo)) == SCO_BAD_ARG);
+    CHECK(shortInfo.timestamp == 99);
+
+    CHECK(mg::SetCapability("game.build", false));
+    info = {};
+    info.size = sizeof(info);
+    info.pe_timestamp = 123;
+    CHECK(build->read(nullptr, &info) == SCO_UNAVAILABLE && info.size == sizeof(info));
+    CHECK(info.pe_timestamp == 0 && info.pin_matches == 0);
+    CHECK(mg::SetCapability("game.build", true));
+    info = {};
+    info.size = sizeof(info);
+    CHECK(build->read(nullptr, &info) == SCO_OK && info.pin_matches == 0);
 }
 
 void HandlerTests() {
@@ -237,10 +438,13 @@ int main(int argc, char** argv) {
         const auto& plugin = sco::app::Plugins().back();
         CHECK(plugin.manifest.id == "mock_game_probe" && plugin.state == sco::plugins::State::Loaded);
         if (plugin.state != sco::plugins::State::Loaded) throw std::runtime_error(plugin.reason);
-        CHECK(mg::Services().size() == 24);
+        CHECK(mg::Services().size() == 32 + kActorStatsExtra);
         for (const auto& service : mg::Services()) CHECK(service.published);
         const sco_api* api = sco::host::BuildApi({ platform.hostVersion });
         ToggleTests(api);
+        BuildTests();
+        InventoryAndGameRulesTests();
+        MetadataTests(const_cast<sco_plugin*>(plugin.self));
         HandlerTests();
         const mg::Vec3 cameraBefore = mg::GetScene().cameraPos;
         const sco_plugin* oldHandle = plugin.self;

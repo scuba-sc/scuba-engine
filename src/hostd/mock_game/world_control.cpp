@@ -116,14 +116,81 @@ void Release(const void* owner) {
     if (g_leaseOwner == owner) Restore();
 }
 
-// The 1.1 tail (raycast_filtered_many) is not mocked yet: null, so callers get UNAVAILABLE.
+sco_result RaycastFilteredMany(sco_plugin* self, uint64_t zone, const double from[3], const double dir[3],
+                               double maxDist, const uint64_t* skipIds, uint32_t skipCount, sc_world_hits* out) {
+    const bool sized = out && out->size >= sizeof(sc_world_hits);
+    const uint32_t capacity = sized ? out->count : 0;
+    if (sized) {
+        const uint32_t size = out->size;
+        *out = sc_world_hits{};
+        out->size = size;
+    }
+    if (!OnGame()) return SCO_WRONG_THREAD;
+    if (!LivePlugin(self) || !sized || capacity > SC_WORLD_CONTROL_MAX_HITS ||
+        skipCount > SC_WORLD_CONTROL_MAX_SKIPS || (skipCount && !skipIds)) return SCO_BAD_ARG;
+    if (!Ready("game.world.raycast_filtered_many")) return SCO_UNAVAILABLE;
+    std::set<uint64_t> skip;
+    for (uint32_t i = 0; i < skipCount; ++i) {
+        if (!skipIds[i] || !skip.insert(skipIds[i]).second) return SCO_BAD_ARG;
+        const Entity* e = FindEntity(skipIds[i]);
+        if (!e || e->owner != self || e->kept ||
+            (e->origin != Origin::Entities && e->origin != Origin::Prefab && e->origin != Origin::SpawnAs))
+            return SCO_FAILED;
+    }
+    if (!from || !dir || !zone || !Finite(from, 3) || !Finite(dir, 3) ||
+        !std::isfinite(maxDist) || maxDist <= 0) return SCO_BAD_ARG;
+    const double len = std::hypot(dir[0], dir[1], dir[2]);
+    if (!std::isfinite(len) || len <= 0) return SCO_BAD_ARG;
+    if (!ZoneStreamed(zone) || !GetScene().spawned) return SCO_NOT_FOUND;
+    const double dist = std::min(maxDist, static_cast<double>(SC_WORLD_RAY_MAX_DISTANCE));
+    const Vec3 o{from[0], from[1], from[2]};
+    const Vec3 d{dir[0]/len, dir[1]/len, dir[2]/len};
+    std::vector<double> distances;
+    if (d[2] < 0 && o[2] >= 0) {
+        const double t = -o[2] / d[2];
+        if (t <= dist) distances.push_back(t);
+    }
+    std::set<uint64_t> castZones;
+    uint64_t ancestor = zone;
+    for (uint32_t depth = 0; depth < 3 && ancestor; ++depth) {
+        const auto it = GetScene().zones.find(ancestor);
+        if (it == GetScene().zones.end() || !it->second.parent) break;
+        castZones.insert(ancestor);
+        ancestor = it->second.parent;
+    }
+    for (const auto& [id, e] : GetScene().entities) {
+        if (!e.streamed || e.removing || e.radius <= 0 || skip.count(id) || !castZones.count(e.zone)) continue;
+        Vec3 c;
+        if (!ZoneToZone(e.zone, zone, e.pos, c)) continue;
+        const Vec3 oc{o[0]-c[0], o[1]-c[1], o[2]-c[2]};
+        const double b = oc[0]*d[0]+oc[1]*d[1]+oc[2]*d[2];
+        const double cc = oc[0]*oc[0]+oc[1]*oc[1]+oc[2]*oc[2]-e.radius*e.radius;
+        const double disc = b*b-cc;
+        if (disc < 0) continue;
+        double t = -b-std::sqrt(disc);
+        if (t < 0) t = -b+std::sqrt(disc);
+        if (t >= 0 && t <= dist) distances.push_back(t);
+    }
+    if (distances.empty()) return SCO_NOT_FOUND;
+    std::sort(distances.begin(), distances.end());
+    out->count = static_cast<uint32_t>(std::min<size_t>(capacity, distances.size()));
+    out->more = static_cast<uint32_t>(distances.size() - out->count);
+    for (uint32_t i = 0; i < out->count; ++i) {
+        auto& hit = out->hits[i];
+        hit.size = sizeof(hit);
+        hit.distance = distances[i];
+        for (size_t j = 0; j < 3; ++j) hit.pos[j] = o[j] + d[j]*distances[i];
+    }
+    return SCO_OK;
+}
+
 const sc_world_control_v1 kTable = { sizeof(sc_world_control_v1), 0, RaycastFiltered, CameraAcquire, CameraStep,
-                                     CameraRelease, nullptr };
+                                     CameraRelease, RaycastFilteredMany };
 
 }  // namespace
 
 const ServiceDef& WorldControlService() {
-    static const ServiceDef def{ SC_WORLD_CONTROL_NAME, SC_WORLD_CONTROL_VERSION_1_0, &kTable, Reset, Release, nullptr };
+    static const ServiceDef def{ SC_WORLD_CONTROL_NAME, SC_WORLD_CONTROL_VERSION_1_1, &kTable, Reset, Release, nullptr };
     return def;
 }
 

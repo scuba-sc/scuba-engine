@@ -98,11 +98,15 @@ try:
                 break
     if case.startswith('valid_') or case == 'default':
         assert port is not None, 'valid profile did not reach listening state'
-        if case in ('valid_service', 'default'):
+        if case in ('valid_service', 'valid_audio', 'default'):
             published = services(port)
-            assert published.get('game.actors') is True, f'game.actors not published: {published}'
-            if case == 'default':
-                assert all(published.values()) and len(published) > 1, f'default services changed: {published}'
+            if case == 'valid_audio':
+                assert published.get('game.audio') is True, f'game.audio not published: {published}'
+                assert not published.get('game.actors'), f'unselected game.actors published: {published}'
+            else:
+                assert published.get('game.actors') is True, f'game.actors not published: {published}'
+                if case == 'default':
+                    assert all(published.values()) and len(published) > 1, f'default services changed: {published}'
     else:
         assert port is None, 'invalid profile reached listening state'
         assert process.poll() is not None, 'invalid profile did not exit'

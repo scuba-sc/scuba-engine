@@ -5,15 +5,11 @@ There is no game image, signature scan, proprietary fixture, engine call, or
 network session behind these tables. Nothing here has been run in Star Citizen.
 Use `--no-mock-game` to omit the synthetic provider.
 
-The ABI is the published host-source kit's `include/sc_*.h`: SDK 2.4.0 release
-candidate 1 (tag `sdk-v2.4.0-rc.1`).
-Every member of every game service table that the 2.3.0 kit defined has an
-implementation, at the table version 2.3.0 defined. The 2.4.0 additions are not
-mocked yet: `game.actor_stats`, `game.actor_stats_write`, `game.audio`,
-`game.build`, `game.datacore_live`, `game.gamerules`, `game.input`,
-`game.inventory` and `game.inventory.contents` are not published (a query
-returns `SCO_NOT_FOUND`), and `game.entities` and `game.loadout` are published
-at 1.1, without their 1.2 tails.
+The pinned host-source kit is SDK 2.4.0 release candidate 2
+(`sdk-v2.4.0-rc.2`). The inventory below describes registered synthetic tables,
+not real game adapters. Publication can fail or be switched off individually;
+query `mock_game.services.list` for the actual publication state. Actor-stat
+tables are compiled and registered only when the kit supplies their headers.
 `sc_game_events.h` defines bus payloads, **not** a `game.events` service table.
 `game.asop` and `game.contracts` (new in 2.3.0) are read-only tables with fixed
 synthetic values. Neither value comes from the game.
@@ -35,8 +31,9 @@ checks its pinned SHA-256. For local builds, the optional
 mandatory. Kit sources stay in the ignored build tree.
 
 `mock_game_plugins` loads the compiled native `mock_game_probe.dll` through
-the real kit loader, queries all 24 tables, and calls every member. Its commands
-run a seed phase, two explicit host ticks (streaming and watch delivery), and an
+the real kit loader and exercises the original mock service tables. Separate
+rc2 tests exercise newer tables and tails. Its commands run a seed phase, two
+explicit host ticks (streaming and watch delivery), and an
 assertion phase. Coverage includes result codes, text-size handshakes, wrong
 threads, missing classes/entities, ownership, retained removals, keyed replay,
 capability changes visible through the **plugin's** `api->has()`, game events,
@@ -123,33 +120,50 @@ Versions are query-service arguments; the table's first field is its full size.
 
 | Table | Version | File | Members/behavior |
 |---|---|---|---|
+| `game.actor_stats` | 1.1, conditional | `actor_stats.cpp` | Synthetic actor stat reads when actor-stat headers are available |
+| `game.actor_stats_write` | 1.0, conditional | `actor_stats.cpp` | Bounded local-player writes subject to read/write capabilities, mode and offline admission |
 | `game.actors` | 1.1 | `actors.cpp` | Player IDs; owned NPC spawn/despawn; health, actor state, errors |
 | `game.asop` | 1.0 | `asop.cpp` | Synthetic claim timeout and shard-persisted flag, read only, errors |
+| `game.asop.selection` | `SC_ASOP_SELECTION_VERSION` | `asop_selection.cpp` | In-memory selection document, catalogue pages, editor lease, tick-driven receipts; no real file |
+| `game.audio` | 1.1 | `audio.cpp` | Synthetic trigger resolution and owner-scoped playback handles; no audio output |
+| `game.build` | `SC_GAME_BUILD_SERVICE_VERSION` | `build.cpp` | Synthetic build observation |
 | `game.contracts` | 1.0 | `contracts.cpp` | Synthetic mission stream radius, read only, errors |
 | `game.creative` | 1.0 | `creative.cpp` | Four reversible flags, bounded fly speed, flag query, errors |
 | `game.cvars` | 1.0 | `cvars.cpp` | Exact-name bool observations; unknown name `NOT_FOUND` |
 | `game.cvars_write` | 1.0 | `cvars_write.cpp` | Exclusive per-name claim, canonical bool writes, first-value restore |
+| `game.datacore_live` | `SC_DATACORE_LIVE_SERVICE_VERSION` | `datacore_live.cpp` | Small synthetic read-only pools and record; writes refused |
 | `game.economy` | 1.0 | `economy.cpp` | Balance, bounded once-only apply/receipt, synchronous transaction event |
-| `game.entities` | 1.1 | `entities.cpp` | Alive, class, poses, owned spawn/despawn, keep, watches and radius queries |
+| `game.entities` | 1.2 | `entities.cpp` | Alive, class, poses, owned spawn/despawn, keep, watches, radius queries, class catalog and component records; instance-name lookup refused |
 | `game.spatial` | 1.0 | `game_spatial.cpp` | Normalized full-pose conversion, zone records/find/pages; observed ancestry only |
+| `game.gamerules` | 1.1 | `gamerules.cpp` | Synthetic state and declared parameter pages |
 | `game.hangar` | 1.0 | `hangar.cpp` | Landing-area lift lookup, open/close intent, ATC cancellation, errors |
-| `game.loadout` | 1.1 | `loadout.cpp` | Typed batch equip with per-slot applied/missing/unsupported results; weapon and multitool slots 8-21 also need `game.loadout.weapons` (else that slot stays `UNAVAILABLE`), 22+ `UNSUPPORTED` |
+| `game.input` | `SC_INPUT_SERVICE_VERSION` | `input.cpp` | Static action declaration registry |
+| `game.inventory` | 1.2 | `inventory.cpp` | Synthetic player snapshot; layout snapshot refused |
+| `game.inventory.contents` | 1.0 | `inventory_contents.cpp` | Synthetic container snapshots, subject to availability |
+| `game.loadout` | 1.2 | `loadout.cpp` | Typed batch equip with per-slot applied/missing/unsupported results; weapon and multitool slots 8-21 also need `game.loadout.weapons` (else that slot stays `UNAVAILABLE`), 22+ `UNSUPPORTED`; tick-driven submit/status/cancel jobs |
 | `game.mining` | 1.0 | `mining.cpp` | Owner request/state, tick-driven synthetic cell/promotion counters |
 | `game.missions` | 1.0 | `missions.cpp` | Offers, owner-scoped acceptance/status/progress/abandon, bounded script ingestion |
 | `game.owned` | 1.0 | `owned.cpp` | Retain/remove build, owned NPC/seat-NPC removal, receipt/forget |
 | `game.prefabs` | 1.0 | `prefabs.cpp` | Canonical object-container path lookup and entities-owned spawn |
 | `game.private_session` | 1.0 | `private_session.cpp` | Consent-bound host/join/leave/state; no sockets, synthetic peers |
 | `game.quantum` | 1.0 | `quantum.cpp` | Enable/hold/release/state; 10 charging ticks, five boosting ticks |
-| `game.relocation` | 1.0 | `relocation.cpp` | Pending request/cancel/status, tick-driven movement then pose confirmation |
+| `game.relocation` | 1.1 | `relocation.cpp` | Pending request/cancel/status, tick-driven movement then pose confirmation |
 | `game.reputation` | 1.0 | `reputation.cpp` | Four synthetic intact check sites and services-present observation, errors |
 | `game.vehicles` | 1.0 | `vehicles.cpp` | Player ship, seats/occupant, allowed actor seating/ejection, Flight Ready, errors |
 | `game.world` | 1.1 | `world.cpp` | Sphere/ground-plane raycast, camera query, free-camera flag, errors |
-| `game.world.control` | 1.0 | `world_control.cpp` | Owned-entity filtered ray; exclusive, bounded, reversible camera lease |
+| `game.world.control` | 1.1 | `world_control.cpp` | Owned-entity filtered ray; exclusive, bounded, reversible camera lease; multi-hit ray requires a capability not in the mock capability registry |
 | `spawn.entities` | 1.2 | `spawn.cpp` | Near-player and owner-tagged spawn, class/ID/alive queries, authorized moves |
 | `teleport.spatial` | 1.0 | `teleport_spatial.cpp` | Player pose, entity zone, local/world/zone positions, copied zone name |
 
-No member is permanently left `SCO_UNAVAILABLE`. A disabled capability causes
-its associated calls to refuse, as specified by the headers. Readable control
+Some registered members deliberately refuse rather than invent data: valid
+`game.entities` instance-name lookup and `game.inventory` layout snapshot
+return `SCO_UNAVAILABLE`, as does `game.datacore_live` pool write (off-thread
+calls return `SCO_WRONG_THREAD`). `game.world.control` multi-hit ray checks
+`game.world.raycast_filtered_many`, which is not in `kCaps` and therefore cannot
+be enabled through the mock capability controls. Registration alone does not
+make every operation available. A disabled capability can cause associated
+calls to refuse; not every service checks its advertised capability (notably
+`game.asop.selection`). Readable control
 state and cleanup calls (unwatch, restore, lease release) remain available where
 needed to explain or undo state. Economy notification reentry is refused.
 `game.owned` removals also propagate disabled prerequisite actor/entity/seat
@@ -207,12 +221,13 @@ IDs fit the exact JSON integer range (0..2^53-1). Player move positions use the
 specified zone; `camera:true` also moves the camera to player eye height in the
 world frame. Camera movement is otherwise independent of the player.
 
-The default `all` profile enables all 52 mock capabilities, including those the
-real kit holds off. `game_pack` is a **header-derived testing profile**, not a
-claim about live engine readiness: it disables actors.state, both ASOP reads, the
-contracts stream radius, entity watch/radius, hangar operations, loadout weapon
-slots, mining, relocation, reputation checks, world free-camera flag and controls,
-and vehicle-seat events. `none` disables all 52. Boolean/string
+The default `all` profile enables registered capabilities with `defaultOn` set;
+when actor stats are compiled in, `game.actor_stats.write` is explicitly off
+by default even under `all`. `game_pack` uses the `gamePack` flags in
+`mock_game.cpp` as a **header-derived testing profile**, not a claim about live
+engine readiness. `none` disables all registered capabilities. These profiles
+only change entries in `kCaps`; they do not guarantee every member is usable.
+Boolean/string
 legacy services retain their own ABI return conventions.
 
 Event commands send the SDK payload structs on the kernel bus, gated separately
