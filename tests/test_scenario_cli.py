@@ -13,7 +13,9 @@ import threading
 import time
 import json
 
-host, scenario, case, data = sys.argv[1:]
+host, scenario, case, data, profile = sys.argv[1:]
+if case == "profile":
+    scenario = str(pathlib.Path(scenario).with_name("valid.json"))
 shutil.rmtree(data, ignore_errors=True)
 pathlib.Path(data).mkdir(parents=True)
 if case == 'oversize':
@@ -22,6 +24,8 @@ if case == 'oversize':
 command = [host, '--port', '0', '--data', data]
 if case != 'default':
     command += ['--scenario', scenario]
+if case == 'profile':
+    command += ['--profile', profile]
 process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
 lines = queue.Queue()
 assert process.stdout is not None
@@ -83,7 +87,7 @@ try:
                 while not lines.empty():
                     output.append(lines.get_nowait())
                 break
-    if case == 'valid':
+    if case in ('valid', 'profile'):
         assert process.wait(timeout=5) == 0, ''.join(output)
         reader.join(timeout=1)
         while not lines.empty():
@@ -92,6 +96,8 @@ try:
         for n in range(1, 5):
             assert f'SCENARIO step {n} ok' in result, result
         assert 'SCENARIO pass 4/4' in result, result
+        if case == 'profile':
+            assert 'mp_chat' in result and 'loaded' in result, result
     elif case == 'default':
         assert port is not None, 'host did not reach listening state'
         scene = state(port)

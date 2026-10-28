@@ -121,7 +121,7 @@ const sco_plugin_info* InitializerInfo() {
 
 sco_result Initialize(const sco_api*, sco_plugin*) {
     if (!g_published) return SCO_FAILED;
-    if (g_selective) return SCO_OK;
+    if (g_selective && std::find(g_selected.begin(), g_selected.end(), "game.private_session") == g_selected.end()) return SCO_OK;
     return SetCapability("game.private_session", true) ? SCO_OK : SCO_FAILED;
 }
 
@@ -183,7 +183,7 @@ void Publish() {
         for (const auto& cap : kCaps) {
             const bool on = std::find(g_selected.begin(), g_selected.end(), cap.service) != g_selected.end() ||
                             (g_events && std::string(cap.service) == "game.* events");
-            SetCapability(cap.name, on);
+            SetCapability(cap.name, on && cap.defaultOn);
         }
     }
     g_servicePublished.clear();

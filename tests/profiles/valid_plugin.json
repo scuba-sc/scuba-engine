@@ -1,0 +1,1 @@
+{"plugins":["mp_chat"],"mocks":["game.events"],"services":["game.actors","game.entities","game.world","spawn.entities","teleport.spatial"]}
