@@ -2,7 +2,9 @@
 #include "sco_net.h"
 #include "sco_widgets.h"
 #include <array>
+#include <chrono>
 #include <string>
+#include <thread>
 
 namespace {
 const sco_net_v1* netService = nullptr;
@@ -10,6 +12,23 @@ const sco_widgets_v1* widgetService = nullptr;
 sco_plugin* pluginSelf = nullptr;
 NetSimProbeStats counters{};
 std::string draft, latest = "No messages received";
+
+// A joiner's session can still be propagating when the broker starts its send, and the per-plugin
+// quota drains under load. The kit answers SCO_UNAVAILABLE / SCO_TOO_MANY for those transient
+// states, and a refused send queues nothing, so retrying the same message cannot duplicate it.
+// Only these two refusals retry; anything else (and a 10 s exhaustion) returns to the caller,
+// which is the same contract the Exchange lane of the netsim tests expects.
+sco_result SendChannelRetry(const char* channel, const void* data, uint32_t size) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    for (;;) {
+        const sco_result result = netService->send_channel(pluginSelf, channel, data, size);
+        if (result == SCO_OK) return result;
+        if (result != SCO_UNAVAILABLE && result != SCO_TOO_MANY) return result;
+        if (std::chrono::steady_clock::now() >= deadline) return result;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+
 
 void Publish();
 void ReceiveReliable(uint64_t sender, const void* data, uint32_t size, void*) {
@@ -24,11 +43,11 @@ sco_result Send(uint32_t count) {
     if (count == 0 || count > 100) return SCO_BAD_ARG;
     for (uint32_t i = 0; i < count; ++i) {
         const std::string payload = "synthetic-" + std::to_string(i);
-        sco_result result = netService->send_channel(pluginSelf, "netsim_probe.reliable",
+        sco_result result = SendChannelRetry("netsim_probe.reliable",
             payload.data(), static_cast<uint32_t>(payload.size()));
         if (result != SCO_OK) return result;
         ++counters.reliableSent;
-        result = netService->send_channel(pluginSelf, "netsim_probe.unreliable",
+        result = SendChannelRetry("netsim_probe.unreliable",
             payload.data(), static_cast<uint32_t>(payload.size()));
         if (result != SCO_OK) return result;
         ++counters.unreliableSent;
