@@ -6,7 +6,7 @@ Status: integrated out-of-game sandbox. Licence: GPL-3.0-only ([LICENSE](LICENSE
 
 ## Feature tour
 
-- **Widgets** renders loaded plugins through the SDK's retained widgets 1.2 service. Input travels back through hostd, including paging, tooltips and severity.
+- **Widgets** renders loaded plugins through the SDK's retained widgets service. The studio bridge advertises widgets 1.1 features, including paging, tooltips and severity; input travels back through hostd.
 - **Designer** edits nested widget trees, previews through the same widget renderer, round-trips generated C/C++/C#/Lua source, and exports native plugin folders.
 - **Viewport** projects plugin panels onto six synthetic terminal environments as billboards or perspective quads. Select a plugin surface and optionally follow the mock camera; projection and ray-plane input use the same camera.
 - **Asset Lab** browses DataCore records and TOML overrides, converts a documented clean-room subset of Cry/DDS/OBJ/glTF, and previews GLB. See [format limits](docs/assets.md).
