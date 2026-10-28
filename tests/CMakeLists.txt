@@ -80,6 +80,14 @@ foreach(scenario_case valid default unknown_field oversize)
   set_tests_properties(scenario_${scenario_case} PROPERTIES TIMEOUT 30)
 endforeach()
 
+# Scenario runner control-facade unit test (game-thread synthetic controls).
+add_executable(test_scenario_runner test_scenario_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/hostd/scenario_runner.cpp)
+target_link_libraries(test_scenario_runner PRIVATE scuba_mock_game)
+scuba_warnings(test_scenario_runner)
+add_test(NAME scenario_runner_unit COMMAND test_scenario_runner)
+set_tests_properties(scenario_runner_unit PROPERTIES TIMEOUT 60)
+
 add_executable(test_designer_export test_designer_export.cpp)
 target_link_libraries(test_designer_export PRIVATE scuba_bridge)
 target_compile_definitions(test_designer_export PRIVATE

@@ -2,6 +2,7 @@
 #include "hostd/scenario_runner.h"
 #include "hostd/mock_game/mock_game.h"
 #include "sco/app.h"
+#undef NDEBUG
 #include <cassert>
 #include <thread>
 
