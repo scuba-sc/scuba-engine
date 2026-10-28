@@ -54,6 +54,24 @@ add_dependencies(test_mock_game mock_game_probe)
 scuba_warnings(test_mock_game)
 add_test(NAME mock_game_plugins COMMAND test_mock_game "${mock_plugin_root}")
 set_tests_properties(mock_game_plugins PROPERTIES TIMEOUT 60)
+
+# Kernel lifecycle and profile CLI tests.
+add_executable(test_product_profile test_product_profile.cpp)
+target_link_libraries(test_product_profile PRIVATE scuba_kernel)
+add_dependencies(test_product_profile mock_game_probe)
+scuba_warnings(test_product_profile)
+add_test(NAME product_profile_lifecycle COMMAND test_product_profile
+  "${CMAKE_CURRENT_BINARY_DIR}/product-profile-fixture" $<TARGET_FILE:mock_game_probe>)
+set_tests_properties(product_profile_lifecycle PROPERTIES TIMEOUT 60)
+
+foreach(profile_case valid_empty valid_service default malformed unknown_service unknown_field oversize depth missing)
+  add_test(NAME profile_${profile_case} COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_profile_cli.py" "$<TARGET_FILE:scuba-hostd>"
+    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/${profile_case}.json" "${profile_case}"
+    "${CMAKE_CURRENT_BINARY_DIR}/profile-${profile_case}")
+  set_tests_properties(profile_${profile_case} PROPERTIES TIMEOUT 30)
+endforeach()
+
 add_executable(test_designer_export test_designer_export.cpp)
 target_link_libraries(test_designer_export PRIVATE scuba_bridge)
 target_compile_definitions(test_designer_export PRIVATE

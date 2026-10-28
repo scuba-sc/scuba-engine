@@ -60,7 +60,10 @@ bool Kernel::Start(const KernelOptions& options, LogFn log) {
     pf.pluginsEnabled = !pluginRoot.empty();
     pf.dataRoot = options.dataRoot;
     pf.scripts = options.lua ? &kLuaRuntime : nullptr;
-    if (options.mockGame) mock_game::Configure(pf);
+    if (options.mockGame) {
+        if (options.selectiveProfile) mock_game::ConfigureSelected(pf, options.profileServices, options.mockEvents);
+        else mock_game::Configure(pf);
+    }
     started_ = sco::app::Start(pf);
     return started_;
 }

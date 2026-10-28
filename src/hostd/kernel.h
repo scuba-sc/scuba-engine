@@ -15,6 +15,9 @@ struct KernelOptions {
     std::filesystem::path dataRoot;     // empty: no sco.storage
     bool lua = true;                    // false: lua plugins are refused "no script runtime"
     bool mockGame = true;
+    bool selectiveProfile = false;
+    bool mockEvents = false;
+    std::vector<std::string> profileServices;
     const char* hostVersion = nullptr;  // static string; null: "scuba-hostd <version>"
 };
 

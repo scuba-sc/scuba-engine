@@ -52,7 +52,7 @@ public:
     Json& push_back(Json value);
 
     std::string dump() const;
-    static std::optional<Json> parse(std::string_view text, std::string* error = nullptr);
+    static std::optional<Json> parse(std::string_view text, std::string* error = nullptr, bool rejectDuplicateKeys = false);
 
     friend bool operator==(const Json& a, const Json& b);
 
