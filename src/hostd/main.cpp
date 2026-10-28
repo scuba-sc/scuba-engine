@@ -6,7 +6,9 @@
 // Prints "scuba-hostd: listening port=<N>" once the server accepts connections. Stops on
 // SIGINT/SIGTERM (Ctrl+C) and, with --test-shutdown, on the bridge method system.shutdown.
 #include "hostd/handlers.h"
+#include "hostd/scenario_runner.h"
 #include "hostd/kernel.h"
+#include "hostd/mock_game/mock_game.h"
 #include "hostd/modules.h"
 #include "hostd/server.h"
 #include "hostd/net_sim/broker.h"
@@ -18,6 +20,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <fstream>
+#include <algorithm>
+#include <set>
+#include <iterator>
 
 namespace {
 
@@ -37,6 +43,54 @@ void KernelLog(const char* line) {
     }
 }
 
+bool LoadProfile(const std::string& path, scuba::hostd::KernelOptions& options, std::string& error) {
+    constexpr size_t kMaxBytes = 65536;
+    std::ifstream file(path, std::ios::binary);
+    if (!file) { error = "cannot open profile"; return false; }
+    std::string text(kMaxBytes + 1, '\0');
+    file.read(text.data(), static_cast<std::streamsize>(text.size()));
+    const auto count = static_cast<size_t>(file.gcount());
+    if (count > kMaxBytes) { error = "profile exceeds 65536 bytes"; return false; }
+    if (file.bad()) { error = "cannot read profile"; return false; }
+    text.resize(count);
+    auto profile = scuba::hostd::Json::parse(text, &error, true);
+    if (!profile || !profile->is_object()) { if (profile) error = "profile must be an object"; return false; }
+    for (const auto& key : profile->keys()) {
+        if (key != "plugins" && key != "mocks" && key != "services") {
+            error = "unknown profile field: " + key; return false;
+        }
+    }
+    for (const char* key : {"plugins", "mocks", "services"}) {
+        const auto* list = profile->find(key);
+        if (!list || !list->is_array()) { error = std::string(key) + " must be an array"; return false; }
+        if (list->size() > 128) { error = std::string(key) + " exceeds 128 entries"; return false; }
+        std::set<std::string> seen;
+        for (size_t i = 0; i < list->size(); ++i) {
+            const auto& item = list->at(i);
+            if (!item.is_string() || item.as_string().empty() || item.as_string().size() > 256 || item.as_string().find('\0') != std::string::npos) {
+                error = std::string(key) + " entries must be nonempty strings of at most 256 bytes"; return false;
+            }
+            const auto& name = item.as_string();
+            if (!seen.insert(name).second) { error = std::string("duplicate ") + key + " entry: " + name; return false; }
+            if (std::string(key) == "plugins") { error = "selective plugin loading is not supported: " + name; return false; }
+            if (std::string(key) == "mocks") {
+                if (name != "game.events") { error = "unknown mock: " + name; return false; }
+                options.mockEvents = true;
+            } else {
+                const auto services = scuba::hostd::mock_game::Services();
+                if (std::none_of(services.begin(), services.end(), [&](const auto& service) { return service.name == name; })) {
+                    error = "unknown service: " + name; return false;
+                }
+                options.profileServices.push_back(name);
+            }
+        }
+    }
+    options.selectiveProfile = true;
+    options.pluginRoot.clear();
+    options.mockGame = true;
+    return true;
+}
+
 int Usage() {
     std::fprintf(stderr,
                  "usage: scuba-hostd [--port N] [--bind ADDR] [--studio DIR] [--plugins DIR] [--data DIR]\n"
@@ -44,6 +98,8 @@ int Usage() {
                  "  --port N             listen port (default 7878; 0 picks a free port)\n"
                  "  --bind ADDR          IPv4 address to bind (default 127.0.0.1)\n"
                  "  --studio DIR         built studio to serve (default: the source tree's studio/dist)\n"
+                 "  --scenario FILE      run bounded synthetic scene controls before listening\n"
+                 "  --profile FILE       select services and mocks from a JSON profile\n"
                  "  --plugins DIR        plugin root (default: build-tree APP plugins)\n"
                  "  --data DIR           data root (sco.storage databases)\n"
                  "  --allow-origin O     also accept WebSocket connections from origin O (e.g. http://localhost:5173)\n"
@@ -64,6 +120,10 @@ int main(int argc, char** argv) {
     KernelOptions kernelOptions;
     kernelOptions.pluginRoot = SCUBA_DEFAULT_PLUGIN_DIR;
     bool testShutdown = false;
+    std::string profilePath;
+    std::string scenarioPath;
+    Json scenario;
+    bool conflictingProfileOption = false;
 
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -77,7 +137,14 @@ int main(int argc, char** argv) {
             serverOptions.bindAddress = argv[++i];
         } else if (!std::strcmp(a, "--studio") && hasValue) {
             serverOptions.staticDir = argv[++i];
+        } else if (!std::strcmp(a, "--scenario") && hasValue) {
+            if (!scenarioPath.empty()) return Usage();
+            scenarioPath = argv[++i];
+        } else if (!std::strcmp(a, "--profile") && hasValue) {
+            if (!profilePath.empty()) return Usage();
+            profilePath = argv[++i];
         } else if (!std::strcmp(a, "--plugins") && hasValue) {
+            conflictingProfileOption = true;
             kernelOptions.pluginRoot = argv[++i];
         } else if (!std::strcmp(a, "--data") && hasValue) {
             kernelOptions.dataRoot = argv[++i];
@@ -87,11 +154,23 @@ int main(int argc, char** argv) {
             kernelOptions.lua = false;
         } else if (!std::strcmp(a, "--no-mock-game")) {
             kernelOptions.mockGame = false;
+            conflictingProfileOption = true;
         } else if (!std::strcmp(a, "--test-shutdown")) {
             testShutdown = true;
         } else {
             return Usage();
         }
+    }
+
+    if (!profilePath.empty()) {
+        if (conflictingProfileOption) { std::fprintf(stderr, "scuba-hostd: --profile conflicts with --plugins and --no-mock-game\n"); return 1; }
+        std::string error;
+        if (!LoadProfile(profilePath, kernelOptions, error)) { std::fprintf(stderr, "scuba-hostd: profile: %s\n", error.c_str()); return 1; }
+    }
+
+    if (!scenarioPath.empty()) {
+        std::string error;
+        if (!LoadScenario(scenarioPath, scenario, error)) { std::fprintf(stderr, "scuba-hostd: scenario: %s\n", error.c_str()); return 1; }
     }
 
     std::signal(SIGINT, OnSignal);
@@ -119,6 +198,12 @@ int main(int argc, char** argv) {
     if (!kernel.Start(kernelOptions, KernelLog)) {
         std::fprintf(stderr, "scuba-hostd: the sco-core host kernel did not start\n");
         return 1;
+    }
+
+    if (!scenarioPath.empty()) {
+        const bool passed = RunScenario(scenario);
+        kernel.Stop();
+        return passed ? 0 : 1;
     }
 
     std::string error;

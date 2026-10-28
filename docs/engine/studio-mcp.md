@@ -19,6 +19,15 @@ tooling parity over the out-of-game sandbox and studio runtime.
 | `send_widget_event` | `panel_id: string, node_id: int, kind: string, text?: string` | Dispatch UI button click, text input, or tab select | `widgets.event` |
 | `mock_move_camera` | `pos: [x,y,z], rot?: [x,y,z,w]` | Set synthetic viewport camera pose | `mock_game.camera.move` |
 | `mock_set_service` | `service: string, published: bool` | Dynamically publish or withdraw mock service | `mock_game.services.set` |
+| `mock_get_state` | none | Read synthetic scene state (entities, player, camera) | `mock_game.state` |
+| `mock_list_services` | none | List mock services and published flags | `mock_game.services.list` |
+| `mock_spawn_entity` | `class: string, zone: int, pos?: [x,y,z], actor?: bool` | Spawn synthetic entity; returns `id` | `mock_game.entity.spawn` |
+| `mock_move_entity` | `id: int, zone?: int, pos: [x,y,z]` | Move a synthetic entity | `mock_game.entity.move` |
+| `mock_remove_entity` | `id: int` | Remove a synthetic entity (never the player) | `mock_game.entity.remove` |
+| `mock_move_player` | `pos: [x,y,z], zone?: int, rot?: [x,y,z,w], camera?: bool` | Move the synthetic player | `mock_game.player.move` |
+| `mock_set_capability` | `name: string, ready: bool` | Set one capability ready flag | `mock_game.caps.set` |
+| `mock_apply_caps_profile` | `name: 'all' \| 'game_pack' \| 'none'` | Apply a capability profile | `mock_game.caps.profile` |
+| `mock_reset` | none | Reset the synthetic scene to defaults | `mock_game.reset` |
 | `convert_asset` | `path: string` | Clean-room conversion of Cry/OBJ/DDS/glTF assets | `assets.convert` |
 
 ## 3. Protocol & Transport
@@ -30,7 +39,7 @@ tooling parity over the out-of-game sandbox and studio runtime.
 `tools/scuba-engine-mcp/server.mjs` implements these tools with Node.js 22.12+
 or Bun, without dependencies. The explicit endpoint accepts numeric IPv4 loopback
 only. MCP initialization and the initialized notification precede tool calls.
-The server forwards only the seven named methods, validates arguments and does
+The server forwards only the named tools (16), validates arguments and does
 not retry mutating calls after a timeout or disconnect. EOF closes its bridge;
 hostd remains independently owned.
 

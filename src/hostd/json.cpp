@@ -121,7 +121,7 @@ constexpr int kMaxDepth = 64;
 
 class Parser {
 public:
-    explicit Parser(std::string_view text) : s_(text) {}
+    explicit Parser(std::string_view text, bool rejectDuplicateKeys) : s_(text), rejectDuplicateKeys_(rejectDuplicateKeys) {}
 
     std::optional<Json> Run(std::string* error) {
         Json value;
@@ -188,6 +188,7 @@ private:
             SkipWs();
             Json value;
             if (!Value(value, depth + 1)) return false;
+            if (rejectDuplicateKeys_ && out.find(key)) return Err("duplicate object key");
             out.set(key, std::move(value));
             SkipWs();
             if (pos_ >= s_.size()) return Err("unexpected end");
@@ -319,14 +320,15 @@ private:
     }
 
     std::string_view s_;
+    bool rejectDuplicateKeys_;
     size_t pos_ = 0;
     std::string error_;
 };
 
 }  // namespace
 
-std::optional<Json> Json::parse(std::string_view text, std::string* error) {
-    return Parser(text).Run(error);
+std::optional<Json> Json::parse(std::string_view text, std::string* error, bool rejectDuplicateKeys) {
+    return Parser(text, rejectDuplicateKeys).Run(error);
 }
 
 }  // namespace scuba::hostd

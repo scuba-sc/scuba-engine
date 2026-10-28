@@ -102,6 +102,40 @@ if(SCUBA_HAVE_ACTOR_STATS AND SCUBA_ACTOR_STATS_PROBE_DIR)
   add_test(NAME mock_actor_stats COMMAND test_mock_actor_stats "${CMAKE_BINARY_DIR}/plugins/actor_stats_probe_root")
   set_tests_properties(mock_actor_stats PROPERTIES TIMEOUT 60)
 endif()
+
+# Kernel lifecycle and profile CLI tests.
+add_executable(test_product_profile test_product_profile.cpp)
+target_link_libraries(test_product_profile PRIVATE scuba_kernel)
+add_dependencies(test_product_profile mock_game_probe)
+scuba_warnings(test_product_profile)
+add_test(NAME product_profile_lifecycle COMMAND test_product_profile
+  "${CMAKE_CURRENT_BINARY_DIR}/product-profile-fixture" $<TARGET_FILE:mock_game_probe>)
+set_tests_properties(product_profile_lifecycle PROPERTIES TIMEOUT 60)
+
+foreach(profile_case valid_empty valid_service valid_audio default malformed unknown_service unknown_field oversize depth missing)
+  add_test(NAME profile_${profile_case} COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_profile_cli.py" "$<TARGET_FILE:scuba-hostd>"
+    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/${profile_case}.json" "${profile_case}"
+    "${CMAKE_CURRENT_BINARY_DIR}/profile-${profile_case}")
+  set_tests_properties(profile_${profile_case} PROPERTIES TIMEOUT 30)
+endforeach()
+
+foreach(scenario_case valid default unknown_field oversize)
+  add_test(NAME scenario_${scenario_case} COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_scenario_cli.py" "$<TARGET_FILE:scuba-hostd>"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/${scenario_case}.json" "${scenario_case}"
+    "${CMAKE_CURRENT_BINARY_DIR}/scenario-${scenario_case}")
+  set_tests_properties(scenario_${scenario_case} PROPERTIES TIMEOUT 30)
+endforeach()
+
+# Scenario runner control-facade unit test (game-thread synthetic controls).
+add_executable(test_scenario_runner test_scenario_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/hostd/scenario_runner.cpp)
+target_link_libraries(test_scenario_runner PRIVATE scuba_mock_game)
+scuba_warnings(test_scenario_runner)
+add_test(NAME scenario_runner_unit COMMAND test_scenario_runner)
+set_tests_properties(scenario_runner_unit PROPERTIES TIMEOUT 60)
+
 add_executable(test_designer_export test_designer_export.cpp)
 target_link_libraries(test_designer_export PRIVATE scuba_bridge)
 target_compile_definitions(test_designer_export PRIVATE

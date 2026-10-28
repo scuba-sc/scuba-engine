@@ -41,6 +41,29 @@ export const TOOLS = [
     'mock_game.services.set', a => ({ name: a.service, published: a.published })),
   spec('convert_asset', 'Convert a local asset using hostd bounded readers; may write hostd conversion output.',
     object({ path: string }), 'assets.convert', a => a),
+  spec('mock_get_state', 'Read the synthetic sandbox scene state; not a game-session result.', object({}),
+    'mock_game.state', () => ({}), true),
+  spec('mock_list_services', 'List synthetic game services and their published flags.', object({}),
+    'mock_game.services.list', () => ({}), true),
+  spec('mock_spawn_entity', 'Spawn a synthetic entity in the sandbox scene.',
+    object({ class: string, zone: integer, pos: vector(3), actor: { type: 'boolean' } }, ['class', 'zone']),
+    'mock_game.entity.spawn', a => a),
+  spec('mock_move_entity', 'Move a synthetic entity to a position in a streamed zone.',
+    object({ id: integer, zone: integer, pos: vector(3) }, ['id', 'pos']),
+    'mock_game.entity.move', a => a),
+  spec('mock_remove_entity', 'Remove a synthetic entity (never the player).',
+    object({ id: integer }, ['id']), 'mock_game.entity.remove', a => a),
+  spec('mock_move_player', 'Move the synthetic player; camera follows only when requested.',
+    object({ pos: vector(3), zone: integer, rot: vector(4), camera: { type: 'boolean' } }, ['pos']),
+    'mock_game.player.move', a => a),
+  spec('mock_set_capability', 'Set one synthetic game capability ready flag.',
+    object({ name: string, ready: { type: 'boolean' } }),
+    'mock_game.caps.set', a => a),
+  spec('mock_apply_caps_profile', 'Apply a synthetic capability profile: all, game_pack or none.',
+    object({ name: { type: 'string', enum: ['all', 'game_pack', 'none'] } }),
+    'mock_game.caps.profile', a => a),
+  spec('mock_reset', 'Reset the synthetic sandbox scene to defaults.', object({}),
+    'mock_game.reset', () => ({})),
 ];
 
 function record(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
@@ -161,7 +184,7 @@ export class Server {
               typeof params.clientInfo.version !== 'string') throw new RpcError(-32602, 'Invalid initialize params');
           this.state = 'initializing';
           result = { protocolVersion: PROTOCOL, capabilities: { tools: {} },
-            serverInfo: { name: 'scuba-engine-mcp', version: '0.1.0' } };
+            serverInfo: { name: 'scuba-engine-mcp', version: '0.2.0' } };
           break;
         case 'ping': result = {}; break;
         case 'tools/list':

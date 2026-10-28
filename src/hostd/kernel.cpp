@@ -17,6 +17,35 @@ const sco::plugins::ScriptRuntime kLuaRuntime{ sco_lua_load, sco_lua_unload };
 
 bool Kernel::Start(const KernelOptions& options, LogFn log) {
     if (started_) return false;
+    profileError_.clear();
+    auto pluginRoot = options.pluginRoot;
+    if (!options.productRoot.empty()) {
+        pluginRoot = options.productRoot / "data" / "plugins";
+        std::error_code ec;
+        if (!std::filesystem::is_directory(pluginRoot, ec) || ec) {
+            profileError_ = "Product profile requires an existing data/plugins directory";
+            if (log) log(profileError_.c_str());
+            return false;
+        }
+        sco::plugins::Options discover;
+        discover.enabled = true;
+        // Preflight validates manifests/entries only; live capability admission
+        // is evaluated again by the kernel after mock providers are published.
+        discover.has = [](const char*) { return 1; };
+        const auto found = sco::plugins::Discover(pluginRoot, discover);
+        if (found.empty()) {
+            profileError_ = "Product profile contains no plugin manifests";
+            if (log) log(profileError_.c_str());
+            return false;
+        }
+        for (const auto& plugin : found) {
+            if (plugin.state == sco::plugins::State::Refused) {
+                profileError_ = "Product profile refused: " + plugin.folder + ": " + plugin.reason;
+                if (log) log(profileError_.c_str());
+                return false;
+            }
+        }
+    }
     if (log) sco::SetLogSink(log);
 
     static bool luaExtensionAdded = false;
@@ -27,11 +56,14 @@ bool Kernel::Start(const KernelOptions& options, LogFn log) {
 
     sco::app::Platform pf;
     pf.hostVersion = options.hostVersion ? options.hostVersion : "scuba-hostd " SCUBA_VERSION;
-    pf.pluginRoot = options.pluginRoot;
-    pf.pluginsEnabled = !options.pluginRoot.empty();
+    pf.pluginRoot = pluginRoot;
+    pf.pluginsEnabled = !pluginRoot.empty();
     pf.dataRoot = options.dataRoot;
     pf.scripts = options.lua ? &kLuaRuntime : nullptr;
-    if (options.mockGame) mock_game::Configure(pf);
+    if (options.mockGame) {
+        if (options.selectiveProfile) mock_game::ConfigureSelected(pf, options.profileServices, options.mockEvents);
+        else mock_game::Configure(pf);
+    }
     started_ = sco::app::Start(pf);
     return started_;
 }

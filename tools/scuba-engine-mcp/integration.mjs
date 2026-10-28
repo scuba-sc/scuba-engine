@@ -85,7 +85,7 @@ try {
     clientInfo: { name: 'studio-mcp-integration', version: '1' } });
   assert.equal(initial.result.protocolVersion, '2025-11-25');
   server.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
-  assert.equal((await request('tools/list')).result.tools.length, 7);
+  assert.equal((await request('tools/list')).result.tools.length, 16);
   const status = await call('host_status');
   assert.equal(status.name, 'scuba-hostd');
   assert(status.kernel.plugins.some(p => p.id === 'diegetic_asop' && p.state === 'loaded'));
@@ -104,6 +104,28 @@ try {
   assert.equal((await adminCall('mock_game.services.list')).find(s => s.name === 'game.actors').published, false);
   await call('mock_set_service', { service: 'game.actors', published: true });
   assert((await call('convert_asset', { path: fixture })).bytes > 0);
+  const scene = await call('mock_get_state');
+  assert(Array.isArray(scene.entities));
+  assert((await call('mock_list_services')).some(s => s.name === 'game.actors' && s.published));
+  const spawned = await call('mock_spawn_entity', { class: "Mcp_Integration_Actor", zone: 4, pos: [1, 2, 3], actor: true });
+  assert(Number.isSafeInteger(spawned.id) && spawned.id > 0);
+  assert((await adminCall('mock_game.state')).entities.some(e => e.id === spawned.id && e.class === 'Mcp_Integration_Actor'));
+  await call('mock_move_entity', { id: spawned.id, pos: [4, 5, 6] });
+  assert((await adminCall('mock_game.state')).entities.find(e => e.id === spawned.id).pos.join() === '4,5,6');
+  assert((await call('mock_remove_entity', { id: spawned.id })).removing === true);
+  const moved = await call('mock_move_player', { pos: [10, 0, 0.5] });
+  assert(typeof moved.fired === 'boolean');
+  assert((await call('mock_set_capability', { name: 'game.events.player_spawned', ready: false }))
+    .find(c => c.name === 'game.events.player_spawned').ready === false);
+  assert((await call('mock_set_capability', { name: 'game.events.player_spawned', ready: true }))
+    .find(c => c.name === 'game.events.player_spawned').ready === true);
+  assert((await call('mock_apply_caps_profile', { name: 'none' })).every(c => !c.ready));
+  const allCaps = await call('mock_apply_caps_profile', { name: 'all' });
+  // actor_stats.write is explicitly default-off when that optional mock is present.
+  assert(allCaps.length > 0);
+  assert(allCaps.every(c => c.name === 'game.actor_stats.write' ? !c.ready : c.ready));
+  assert(allCaps.some(c => c.name === 'game.events.player_spawned' && c.ready));
+  assert(Array.isArray((await call('mock_reset')).entities));
   const invalid = await request('tools/call', { name: 'mock_move_camera', arguments: { pos: [1, 2] } });
   assert.equal(invalid.result.isError, true);
   const unknown = await request('tools/call', { name: 'invoke_command', arguments: { name: 'missing.command' } });

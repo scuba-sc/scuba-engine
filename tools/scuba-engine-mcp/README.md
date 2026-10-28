@@ -1,6 +1,6 @@
 # Local sandbox MCP bridge
 
-`scuba-engine-mcp` exposes seven tools over newline-delimited stdio JSON-RPC,
+`scuba-engine-mcp` exposes 16 tools over newline-delimited stdio JSON-RPC,
 using MCP protocol `2025-11-25`. Requires Node.js 22.12+ or Bun; no dependencies.
 Start an existing `scuba-hostd` on loopback with the plugins you trust, then run:
 
@@ -10,8 +10,10 @@ node tools/scuba-engine-mcp/server.mjs --host ws://127.0.0.1:7878/ws
 
 Initialize, send `notifications/initialized`, then use `tools/list` and
 `tools/call`. The tools are `host_status`, `invoke_command`, `get_widget_panel`,
-`send_widget_event`, `mock_move_camera`, `mock_set_service`, and `convert_asset`.
-Their JSON Schemas are returned by `tools/list`. `panel_id` maps to hostd's `id`
+`send_widget_event`, `mock_move_camera`, `mock_set_service`, `mock_get_state`,
+`mock_list_services`, `mock_spawn_entity`, `mock_move_entity`, `mock_remove_entity`,
+`mock_move_player`, `mock_set_capability`, `mock_apply_caps_profile`, `mock_reset`,
+and `convert_asset`. Their JSON Schemas are returned by `tools/list`. `panel_id` maps to hostd's `id`
 for reads and `panel` for events; `service` maps to `name`.
 
 This is an opt-in control channel for the out-of-game sandbox. Plugin commands,

@@ -11,6 +11,7 @@ namespace sco::app { struct Platform; }
 namespace scuba::hostd::mock_game {
 
 void Configure(sco::app::Platform& platform);
+void ConfigureSelected(sco::app::Platform& platform, const std::vector<std::string>& services, bool events);
 // Resets the scene and every service, applies the "all" profile and publishes every table.
 void Publish();
 // After sco::app::Stop: forgets the published state (the kit already withdrew the tables).

@@ -9,6 +9,7 @@
 #include "sco/runtime.h"
 
 #include <iterator>
+#include <algorithm>
 
 namespace scuba::hostd::mock_game {
 
@@ -107,6 +108,9 @@ constexpr CapDef kCaps[] = {
 };
 
 bool g_published = false;
+bool g_selective = false;
+bool g_events = false;
+std::vector<std::string> g_selected;
 std::map<std::string, bool> g_servicePublished;
 
 const sco_plugin_info* InitializerInfo() {
@@ -117,6 +121,7 @@ const sco_plugin_info* InitializerInfo() {
 
 sco_result Initialize(const sco_api*, sco_plugin*) {
     if (!g_published) return SCO_FAILED;
+    if (g_selective) return SCO_OK;
     return SetCapability("game.private_session", true) ? SCO_OK : SCO_FAILED;
 }
 
@@ -146,10 +151,18 @@ const CapDef* FindCap(const std::string& name) {
 }  // namespace
 
 void Configure(sco::app::Platform& platform) {
+    g_selective = false;
     platform.setCapabilities = Publish;
     platform.privateSession.enabled = false;
     platform.builtins = &kInitializer;
     platform.nBuiltins = 1;
+}
+
+void ConfigureSelected(sco::app::Platform& platform, const std::vector<std::string>& services, bool events) {
+    Configure(platform);
+    g_selective = true;
+    g_selected = services;
+    g_events = events;
 }
 
 void ResetAll() {
@@ -165,11 +178,19 @@ void Publish() {
         return;
     }
     ResetAll();
-    ApplyProfile("all");
+    ApplyProfile(g_selective ? "none" : "all");
+    if (g_selective) {
+        for (const auto& cap : kCaps) {
+            const bool on = std::find(g_selected.begin(), g_selected.end(), cap.service) != g_selected.end() ||
+                            (g_events && std::string(cap.service) == "game.* events");
+            SetCapability(cap.name, on);
+        }
+    }
     g_servicePublished.clear();
     size_t published = 0;
     for (ServiceFn fn : kServices) {
         const ServiceDef& def = fn();
+        if (g_selective && std::find(g_selected.begin(), g_selected.end(), def.name) == g_selected.end()) continue;
         const sco::Result r = sco::host::ProvideGameService(def.name, def.version, def.table);
         g_servicePublished[def.name] = r == sco::Result::Ok;
         if (r == sco::Result::Ok)
