@@ -24,10 +24,10 @@ test('requires initialized notification before exposing tools', async () => {
   expect((await server.handle(request('ping', null))).error.code).toBe(-32602);
 });
 
-test('advertises seven explicit tools with object schemas and mutation annotations', async () => {
+test('advertises sixteen explicit tools with object schemas and mutation annotations', async () => {
   const server = await initialized({});
   const tools = (await server.handle(request('tools/list'))).result.tools;
-  expect(tools).toHaveLength(7);
+  expect(tools).toHaveLength(16);
   expect(tools.every(t => t.inputSchema.additionalProperties === false && !('map' in t) && !('method' in t))).toBe(true);
   expect(tools.find(t => t.name === 'host_status').annotations.readOnlyHint).toBe(true);
   expect(tools.find(t => t.name === 'invoke_command').annotations.destructiveHint).toBe(true);
@@ -45,6 +45,16 @@ test('maps every approved tool to the actual hostd field names', async () => {
     ['mock_move_camera', { pos: [1, 2, 3], rot: [0, 0, 0, 1] }, 'mock_game.camera.move', { pos: [1, 2, 3], rot: [0, 0, 0, 1] }],
     ['mock_set_service', { service: 'game.actors', published: false }, 'mock_game.services.set', { name: 'game.actors', published: false }],
     ['convert_asset', { path: 'fixture.obj' }, 'assets.convert', { path: 'fixture.obj' }],
+    ['mock_get_state', {}, 'mock_game.state', {}],
+    ['mock_list_services', {}, 'mock_game.services.list', {}],
+    ['mock_spawn_entity', { class: 'Actor_Scientist', zone: 4, pos: [1, 2, 3], actor: true },
+      'mock_game.entity.spawn', { class: 'Actor_Scientist', zone: 4, pos: [1, 2, 3], actor: true }],
+    ['mock_move_entity', { id: 7, pos: [0, 0, 1] }, 'mock_game.entity.move', { id: 7, pos: [0, 0, 1] }],
+    ['mock_remove_entity', { id: 7 }, 'mock_game.entity.remove', { id: 7 }],
+    ['mock_move_player', { pos: [1, 2, 3], camera: true }, 'mock_game.player.move', { pos: [1, 2, 3], camera: true }],
+    ['mock_set_capability', { name: 'game.actors', ready: false }, 'mock_game.caps.set', { name: 'game.actors', ready: false }],
+    ['mock_apply_caps_profile', { name: 'game_pack' }, 'mock_game.caps.profile', { name: 'game_pack' }],
+    ['mock_reset', {}, 'mock_game.reset', {}],
   ];
   for (const [name, args, method, params] of samples) {
     const reply = await server.handle(request('tools/call', { name, arguments: args }));
@@ -66,6 +76,15 @@ test('rejects invalid input without making any bridge call', async () => {
     ['send_widget_event', { panel_id: 'p', node_id: 1, kind: 'toggle' }],
     ['send_widget_event', { panel_id: 'p', node_id: 1, kind: 'button', text: 'x' }],
     ['send_widget_event', { panel_id: 'p', node_id: 1, kind: 'tab' }],
+    ['mock_spawn_entity', {}],
+    ['mock_spawn_entity', { class: 'ok' }],
+    ['mock_spawn_entity', { class: 'ok', actor: 'yes' }],
+    ['mock_spawn_entity', { class: 'ok', zone: -1 }],
+    ['mock_move_entity', { pos: [1, 2, 3] }],
+    ['mock_remove_entity', { id: 1.5 }],
+    ['mock_move_player', { pos: [1, 2, 3], rot: [0, 0, 0] }],
+    ['mock_apply_caps_profile', { name: 'everything' }],
+    ['mock_reset', { force: true }],
   ];
   for (const [name, args] of invalid)
     expect((await server.handle(request('tools/call', { name, arguments: args }))).result.isError).toBe(true);

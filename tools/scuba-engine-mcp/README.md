@@ -1,6 +1,6 @@
 # Local sandbox MCP bridge
 
-`scuba-engine-mcp` exposes seven tools over newline-delimited stdio JSON-RPC,
+`scuba-engine-mcp` exposes 16 tools over newline-delimited stdio JSON-RPC,
 using MCP protocol `2025-11-25`. Requires Node.js 22.12+ or Bun; no dependencies.
 Start an existing `scuba-hostd` on loopback with the plugins you trust, then run:
 
