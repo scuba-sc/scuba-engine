@@ -120,7 +120,11 @@ try {
   assert((await call('mock_set_capability', { name: 'game.events.player_spawned', ready: true }))
     .find(c => c.name === 'game.events.player_spawned').ready === true);
   assert((await call('mock_apply_caps_profile', { name: 'none' })).every(c => !c.ready));
-  assert((await call('mock_apply_caps_profile', { name: 'all' })).every(c => c.ready));
+  const allCaps = await call('mock_apply_caps_profile', { name: 'all' });
+  // actor_stats.write is explicitly default-off when that optional mock is present.
+  assert(allCaps.length > 0);
+  assert(allCaps.every(c => c.name === 'game.actor_stats.write' ? !c.ready : c.ready));
+  assert(allCaps.some(c => c.name === 'game.events.player_spawned' && c.ready));
   assert(Array.isArray((await call('mock_reset')).entities));
   const invalid = await request('tools/call', { name: 'mock_move_camera', arguments: { pos: [1, 2] } });
   assert.equal(invalid.result.isError, true);
