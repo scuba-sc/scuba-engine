@@ -147,7 +147,7 @@ Versions are query-service arguments; the table's first field is its full size.
 | `game.prefabs` | 1.0 | `prefabs.cpp` | Canonical object-container path lookup and entities-owned spawn |
 | `game.private_session` | 1.0 | `private_session.cpp` | Consent-bound host/join/leave/state; no sockets, synthetic peers |
 | `game.quantum` | 1.0 | `quantum.cpp` | Enable/hold/release/state; 10 charging ticks, five boosting ticks |
-| `game.relocation` | 1.0 | `relocation.cpp` | Pending request/cancel/status, tick-driven movement then pose confirmation |
+| `game.relocation` | 1.1 | `relocation.cpp` | Pending request/cancel/status, tick-driven movement then pose confirmation |
 | `game.reputation` | 1.0 | `reputation.cpp` | Four synthetic intact check sites and services-present observation, errors |
 | `game.vehicles` | 1.0 | `vehicles.cpp` | Player ship, seats/occupant, allowed actor seating/ejection, Flight Ready, errors |
 | `game.world` | 1.1 | `world.cpp` | Sphere/ground-plane raycast, camera query, free-camera flag, errors |
