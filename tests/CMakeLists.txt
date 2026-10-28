@@ -72,6 +72,14 @@ foreach(profile_case valid_empty valid_service default malformed unknown_service
   set_tests_properties(profile_${profile_case} PROPERTIES TIMEOUT 30)
 endforeach()
 
+foreach(scenario_case valid default unknown_field oversize)
+  add_test(NAME scenario_${scenario_case} COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_scenario_cli.py" "$<TARGET_FILE:scuba-hostd>"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/${scenario_case}.json" "${scenario_case}"
+    "${CMAKE_CURRENT_BINARY_DIR}/scenario-${scenario_case}")
+  set_tests_properties(scenario_${scenario_case} PROPERTIES TIMEOUT 30)
+endforeach()
+
 add_executable(test_designer_export test_designer_export.cpp)
 target_link_libraries(test_designer_export PRIVATE scuba_bridge)
 target_compile_definitions(test_designer_export PRIVATE

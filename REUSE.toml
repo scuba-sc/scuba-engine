@@ -1,0 +1,7 @@
+version = 1
+
+[[annotations]]
+path = ["tests/profiles/*.json", "tests/scenarios/*.json"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 scuba-engine contributors"
+SPDX-License-Identifier = "GPL-3.0-only"

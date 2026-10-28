@@ -121,6 +121,7 @@ scuba_warnings(scuba_kernel)
 
 add_executable(scuba-hostd
   src/hostd/main.cpp
+  src/hostd/scenario_runner.cpp
   src/hostd/modules.cpp
   src/hostd/system_handlers.cpp
   src/hostd/plugins_handlers.cpp

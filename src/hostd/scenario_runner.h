@@ -2,12 +2,16 @@
 #pragma once
 
 #include "hostd/mock_game/mock_game.h"
+#include "hostd/json.h"
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace scuba::hostd {
+
+bool LoadScenario(const std::string& path, Json& scenario, std::string& error);
+bool RunScenario(const Json& scenario);
 
 // Synthetic controls for a running mock host. Call only on the host game thread.
 // This does not own the host or represent production admission/in-game evidence.

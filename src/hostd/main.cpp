@@ -6,6 +6,7 @@
 // Prints "scuba-hostd: listening port=<N>" once the server accepts connections. Stops on
 // SIGINT/SIGTERM (Ctrl+C) and, with --test-shutdown, on the bridge method system.shutdown.
 #include "hostd/handlers.h"
+#include "hostd/scenario_runner.h"
 #include "hostd/kernel.h"
 #include "hostd/mock_game/mock_game.h"
 #include "hostd/modules.h"
@@ -97,6 +98,7 @@ int Usage() {
                  "  --port N             listen port (default 7878; 0 picks a free port)\n"
                  "  --bind ADDR          IPv4 address to bind (default 127.0.0.1)\n"
                  "  --studio DIR         built studio to serve (default: the source tree's studio/dist)\n"
+                 "  --scenario FILE      run bounded synthetic scene controls before listening\n"
                  "  --profile FILE       select services and mocks from a JSON profile\n"
                  "  --plugins DIR        plugin root (default: build-tree APP plugins)\n"
                  "  --data DIR           data root (sco.storage databases)\n"
@@ -119,6 +121,8 @@ int main(int argc, char** argv) {
     kernelOptions.pluginRoot = SCUBA_DEFAULT_PLUGIN_DIR;
     bool testShutdown = false;
     std::string profilePath;
+    std::string scenarioPath;
+    Json scenario;
     bool conflictingProfileOption = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -133,6 +137,9 @@ int main(int argc, char** argv) {
             serverOptions.bindAddress = argv[++i];
         } else if (!std::strcmp(a, "--studio") && hasValue) {
             serverOptions.staticDir = argv[++i];
+        } else if (!std::strcmp(a, "--scenario") && hasValue) {
+            if (!scenarioPath.empty()) return Usage();
+            scenarioPath = argv[++i];
         } else if (!std::strcmp(a, "--profile") && hasValue) {
             if (!profilePath.empty()) return Usage();
             profilePath = argv[++i];
@@ -161,6 +168,11 @@ int main(int argc, char** argv) {
         if (!LoadProfile(profilePath, kernelOptions, error)) { std::fprintf(stderr, "scuba-hostd: profile: %s\n", error.c_str()); return 1; }
     }
 
+    if (!scenarioPath.empty()) {
+        std::string error;
+        if (!LoadScenario(scenarioPath, scenario, error)) { std::fprintf(stderr, "scuba-hostd: scenario: %s\n", error.c_str()); return 1; }
+    }
+
     std::signal(SIGINT, OnSignal);
     std::signal(SIGTERM, OnSignal);
 #ifndef _WIN32
@@ -186,6 +198,12 @@ int main(int argc, char** argv) {
     if (!kernel.Start(kernelOptions, KernelLog)) {
         std::fprintf(stderr, "scuba-hostd: the sco-core host kernel did not start\n");
         return 1;
+    }
+
+    if (!scenarioPath.empty()) {
+        const bool passed = RunScenario(scenario);
+        kernel.Stop();
+        return passed ? 0 : 1;
     }
 
     std::string error;
