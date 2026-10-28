@@ -85,6 +85,27 @@ void ResetScene() {
     Insert(player);
     s.player = 0x100;
     s.playerActor = 0x9100;
+    s.inventoryPorts = {
+        sc_inventory_port{ sizeof(sc_inventory_port), 1, 0x1234, 0x1001 },
+        sc_inventory_port{ sizeof(sc_inventory_port), 1, 0x5678, 0x1002 },
+        sc_inventory_port{ sizeof(sc_inventory_port), 1, SC_ITEM_TYPE_CHAR_ARMOR_HELMET, 0x1003 },
+    };
+    s.inventoryGeneration = 1;
+    s.inventoryAvailable = true;
+    s.gamerules = sc_gamerules_state{};
+    s.gamerules.size = sizeof(sc_gamerules_state);
+    s.gamerules.valid = 1;
+    s.gamerules.generation = 1;
+    s.gamerules.enforce_group_qt = 1;
+    s.gamerules.quantum_travel_allowed = 1;
+    s.gamerules.quantum_boost_allowed = 0;
+    s.gamerules.travel_target_threshold_angle = 12.5f;
+    s.gamerules.target_lock_angular_player = 4.0f;
+    s.gamerules.target_lock_angular_ai = 6.0f;
+    s.gamerules.target_lock_linear_player = 8.0f;
+    s.gamerules.target_lock_linear_ai = 10.0f;
+    s.gamerules.boost_group_distance_threshold = 2500.0f;
+    s.gamerulesReceived = true;
 
     Entity ship = MakeEntity(0x101, "MOCK_Ship_Starter", 0x4, { 10, 0, 0 }, 12.0);
     ship.vehicle = true;

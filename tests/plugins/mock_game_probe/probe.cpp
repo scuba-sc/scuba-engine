@@ -74,13 +74,13 @@ void Check(bool ok, const char* expression) {
 #define PROBE(expression) Check((expression), #expression)
 
 template<class Table>
-bool Query(const char* name, uint32_t version, const Table*& out) {
+bool Query(const char* name, uint32_t version, const Table*& out, size_t expectedSize = sizeof(Table)) {
     const void* table = nullptr;
     const bool ok = g_api->query_service(name, version, &table) == SCO_OK && table != nullptr;
     PROBE(ok);
     if (!ok) return false;
     out = static_cast<const Table*>(table);
-    PROBE(out->size == sizeof(Table));
+    PROBE(out->size == expectedSize);
     return true;
 }
 
@@ -511,14 +511,15 @@ extern "C" SCO_EXPORT sco_result sco_plugin_load(const sco_api* api, sco_plugin*
     QUERY(g_entities, SC_ENTITIES_NAME, SC_ENTITIES_VERSION_1_1);
     QUERY(g_spatial, SC_GAME_SPATIAL_NAME, SC_GAME_SPATIAL_VERSION);
     QUERY(g_hangar, SC_HANGAR_SERVICE_NAME, SC_HANGAR_SERVICE_VERSION);
-    QUERY(g_loadout, SC_LOADOUT_SERVICE_NAME, SC_LOADOUT_VERSION_1_1);
+    // The provider returns its extended table even for a prefix-version query.
+    ok = Query(SC_LOADOUT_SERVICE_NAME, SC_LOADOUT_VERSION_1_1, g_loadout, sizeof(sc_loadout_v1_2)) && ok;
     QUERY(g_mining, SC_MINING_SERVICE_NAME, SC_MINING_SERVICE_VERSION);
     QUERY(g_missions, SC_MISSIONS_SERVICE_NAME, SC_MISSIONS_SERVICE_VERSION);
     QUERY(g_owned, SC_OWNED_NAME, SC_OWNED_VERSION_1_0);
     QUERY(g_prefabs, SC_PREFABS_NAME, SC_PREFABS_VERSION_1_0);
     QUERY(g_session, SC_PRIVATE_SESSION_NAME, SC_PRIVATE_SESSION_VERSION);
     QUERY(g_quantum, SC_QUANTUM_SERVICE_NAME, SC_QUANTUM_SERVICE_VERSION);
-    QUERY(g_relocation, SC_RELOCATION_NAME, SC_RELOCATION_VERSION);
+    ok = Query(SC_RELOCATION_NAME, SC_RELOCATION_VERSION, g_relocation, sizeof(sc_relocation_v1_1)) && ok;
     QUERY(g_reputation, SC_REPUTATION_SERVICE_NAME, SC_REPUTATION_SERVICE_VERSION);
     QUERY(g_vehicles, SC_VEHICLES_SERVICE_NAME, SC_VEHICLES_SERVICE_VERSION);
     QUERY(g_world, SC_WORLD_NAME, SC_WORLD_VERSION_1_1);
