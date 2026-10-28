@@ -6,14 +6,14 @@ Status: integrated out-of-game sandbox. Licence: GPL-3.0-only ([LICENSE](LICENSE
 
 ## Feature tour
 
-- **Widgets** renders loaded plugins through the SDK's retained widgets 1.1 service. Input travels back through hostd, including paging, tooltips and severity.
+- **Widgets** renders loaded plugins through the SDK's retained widgets 1.2 service. Input travels back through hostd, including paging, tooltips and severity.
 - **Designer** edits nested widget trees, previews through the same widget renderer, round-trips generated C/C++/C#/Lua source, and exports native plugin folders.
 - **Viewport** projects plugin panels onto six synthetic terminal environments as billboards or perspective quads. Select a plugin surface and optionally follow the mock camera; projection and ray-plane input use the same camera.
 - **Asset Lab** browses DataCore records and TOML overrides, converts a documented clean-room subset of Cry/DDS/OBJ/glTF, and previews GLB. See [format limits](docs/assets.md).
 - **NetSandbox** runs two to eight separate kernel processes with real loopback UDP, private IPC namespaces, widget panels and traffic counters.
 - **APP examples** load by default: `mp_chat`, `org_social`, `diegetic_asop`, and `diegetic_shop_inv`. Their panels appear in Widgets and the Viewport surface picker. The mock game supplies the shop's fictional item/prefab catalog and hangar services.
 
-There is **no live game link**: ENG-8 could not implement spatial streaming through the SDK's metadata-only diagnostics contract. Mock camera events are synthetic, not evidence of a live connection.
+There is **no live game link**: ENG-8 could not implement spatial streaming through the SDK's metadata-only diagnostics contract. The `game.*` values described here come from synthetic mock services, not real game-native adapters. Mock camera events are synthetic, not evidence of a live connection.
 
 ## Native engine (phase 1, Windows)
 
@@ -50,24 +50,11 @@ ctest --test-dir build --output-on-failure
 
 Build and CTest before running studio tests: Asset Lab's loader tests consume synthetic files generated at `build/tests/assets-fixtures`. If using another build directory, generate its fixtures and copy them to that location before `npm test`.
 
-Configure downloads `sco-sdk-host-source-sc-2.4.0.zip` from the sco-core [`sdk-v2.4.0-rc.2`](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0-rc.2) release (SDK 2.4.0, release candidate 2), checks its SHA-256 (`3d711463…77b8201`, the value in the release's `SHA256SUMS`) and builds it under `build/_sdk/`. A mismatched archive stops the configure. A build tree configured before the pin moved keeps its cached `SCUBA_SDK_*` values: configure a fresh tree, or add `-U "SCUBA_SDK_*"` once. To build offline from a local copy of the release assets:
+Configure downloads `sco-sdk-host-source-sc-2.4.0.zip` from the latest sco-core [`sdk-v2.4.0-rc.2`](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0-rc.2) release (SDK 2.4.0, release candidate 2), checks its SHA-256 (`3d711463…77b8201`, the value in the release's `SHA256SUMS`) and builds it under `build/_sdk/`. The release tag points to source commit `844e136ccb280ad8cb43f73bc43c9447e8f6799d`; later `main` commits do not change the released archive bytes. A mismatched archive stops the configure. A build tree configured before the pin moved keeps its cached `SCUBA_SDK_*` values: configure a fresh tree, or add `-U "SCUBA_SDK_*"` once. To build offline from a local copy of the release assets:
 
 ```sh
 cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.4.0-rc.2-assets
 ```
-
-To test an unpublished, independently verified candidate without changing the published default,
-pass its exact version and locked archive hash explicitly:
-
-```sh
-cmake -S . -B build-candidate \
-  -DSCUBA_SDK_VERSION=2.4.0 \
-  -DSCUBA_SDK_HOST_SOURCE_SHA256=d321f6b34e50a892dd58895dce043ad57e3fa4d7899f086c738e668b71cae78c \
-  -DSCUBA_SDK_ARCHIVE_DIR=/path/to/verified-candidate-assets
-```
-
-The local directory must contain `sco-sdk-host-source-sc-2.4.0.zip`. Configure checks its SHA-256
-before extraction; the candidate coordinates do not imply that SDK 2.4.0 has been published.
 
 On Windows add `-A x64` to the configure and `--config Release` / `-C Release` to build and ctest.
 
@@ -99,4 +86,4 @@ The bridge is unauthenticated and loopback-only by default; it refuses foreign `
 
 ## Limits
 
-Mock services are a deterministic test model, not the game: no real physics, entitlement, authenticated game networking, or proprietary catalogs. A shop purchase only debits synthetic balance; it grants no inventory. `game.asop` and `game.contracts` return fixed synthetic values; the game pack holds their capabilities off until an in-game run confirms them. C# and Lua generation support only the published builder subset; native folder export supports C/C++ only. C# requires a separate dotnet environment; CI is its first compile opportunity. Linux GCC and Windows MSVC platform paths require their own builds; a macOS pass is not cross-platform certification.
+The `game.*` services are deterministic mock models, not the game's native adapters: they provide no real physics, entitlement, authenticated game networking, or proprietary catalogs. A shop purchase only debits synthetic balance; it grants no inventory. `game.asop` and `game.contracts` return fixed synthetic values; the game pack holds their capabilities off until an in-game run confirms them. Mock tests do not establish real native service support or gameplay. C# and Lua generation support only the published builder subset; native folder export supports C/C++ only. C# requires a separate dotnet environment; CI is its first compile opportunity. Linux GCC and Windows MSVC platform paths require their own builds; a macOS pass is not cross-platform certification.
