@@ -78,7 +78,8 @@ def services(port):
             response += receive_exact(sock, 1)
             assert len(response) < 8192
         assert b' 101 ' in response, response
-        return {item['name']: item['published'] for item in rpc(sock, 'mock_game.services.list')}
+        return ({item['name']: item['published'] for item in rpc(sock, 'mock_game.services.list')},
+                rpc(sock, 'system.status')['kernel']['plugins'])
 
 try:
     deadline = time.monotonic() + 15
@@ -98,8 +99,11 @@ try:
                 break
     if case.startswith('valid_') or case == 'default':
         assert port is not None, 'valid profile did not reach listening state'
-        if case in ('valid_service', 'valid_audio', 'default'):
-            published = services(port)
+        if case in ('valid_service', 'valid_audio', 'valid_plugin', 'default'):
+            published, plugins = services(port)
+            if case == 'valid_plugin':
+                external = [p for p in plugins if p['id'] != 'scuba_mock_game']
+                assert len(external) == 1 and external[0]['id'] == 'mp_chat' and external[0]['state'] == 'loaded', external
             if case == 'valid_audio':
                 assert published.get('game.audio') is True, f'game.audio not published: {published}'
                 assert not published.get('game.actors'), f'unselected game.actors published: {published}'

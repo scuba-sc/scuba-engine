@@ -18,6 +18,7 @@ struct KernelOptions {
     bool selectiveProfile = false;
     bool mockEvents = false;
     std::vector<std::string> profileServices;
+    std::vector<std::string> profilePlugins;
     const char* hostVersion = nullptr;  // static string; null: "scuba-hostd <version>"
 };
 
@@ -45,6 +46,7 @@ public:
 private:
     bool started_ = false;
     std::string profileError_;
+    std::filesystem::path profileStage_;
 };
 
 }  // namespace scuba::hostd
