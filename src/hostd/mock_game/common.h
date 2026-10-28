@@ -5,6 +5,8 @@
 // Threading: every table function checks sco::OnGameThread() itself; the scene is only touched on
 // the game thread (hostd's main thread), so it has no lock. last_error is the one any-thread call.
 #include "sco_api.h"
+#include "sc_gamerules.h"
+#include "sc_inventory.h"
 
 #include <array>
 #include <cstddef>
@@ -88,6 +90,11 @@ struct Scene {
     Vec3 cameraPos{};                // world frame
     Quat cameraRot{ 0, 0, 0, 1 };
     bool freeCameraFlag = false;
+    std::vector<sc_inventory_port> inventoryPorts;
+    uint64_t inventoryGeneration = 1;
+    bool inventoryAvailable = true;
+    sc_gamerules_state gamerules{};
+    bool gamerulesReceived = true;
     uint32_t streamTicks = 1;        // ticks a fresh spawn takes to stream in
     uint32_t nowMs = 0;
     uint64_t tick = 0;

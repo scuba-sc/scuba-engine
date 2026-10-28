@@ -3,6 +3,7 @@
 #include "hostd/mock_game/common.h"
 #include "hostd/mock_game/services.h"
 #include "sc_relocation.h"
+#include "sc_game_spatial.h"
 
 #include <algorithm>
 #include <cmath>
@@ -23,6 +24,8 @@ struct Request {
     Vec3 pos{};
     Quat rot{};
     uint32_t deadline = 0;
+    bool positionOnly = false;
+    std::vector<std::pair<uint64_t, uint64_t>> ancestry;
 };
 
 std::map<uint64_t, Request> g_requests;
@@ -75,6 +78,50 @@ sco_result RequestFn(sco_plugin* self, const sc_relocation_request* req, uint64_
     return SCO_OK;
 }
 
+bool Ancestry(uint64_t zone, std::vector<std::pair<uint64_t, uint64_t>>& out) {
+    std::set<uint64_t> seen;
+    while (zone) {
+        const auto it = GetScene().zones.find(zone);
+        if (it == GetScene().zones.end() || !seen.insert(zone).second) return false;
+        out.emplace_back(zone, it->second.parent);
+        zone = it->second.parent;
+    }
+    return !out.empty();
+}
+
+sco_result RequestPosition(sco_plugin* self, const sc_relocation_position_request* req, uint64_t* outTicket) {
+    if (!OnGame()) return SCO_WRONG_THREAD;
+    if (!LivePlugin(self) || !req || !outTicket || req->size < sizeof(*req) || !req->zone_id ||
+        !req->target_epoch || !req->timeout_ms || req->timeout_ms > 60000 || !Finite(req->pos, 3)) return SCO_BAD_ARG;
+    for (double v : req->pos) if (std::fabs(v) > 1e12) return SCO_BAD_ARG;
+    if (!Ready(kCap) || !Ready(SC_RELOCATION_POSITION_CAPABILITY)) return SCO_UNAVAILABLE;
+    if (!ZoneStreamed(req->zone_id)) return SCO_NOT_FOUND;
+    const auto* spatial = static_cast<const sc_game_spatial_v1*>(GameSpatialService().table);
+    sc_game_zone zone{};
+    zone.size = sizeof(zone);
+    if (!spatial->zone_record(req->zone_id, &zone) || zone.epoch != req->target_epoch) return SCO_UNAVAILABLE;
+    const Scene& s = GetScene();
+    const Entity* player = FindEntity(s.player);
+    if (!s.spawned || !player) return SCO_FAILED;
+    const uint64_t root = RootOf(req->zone_id);
+    if (!root || root != RootOf(player->zone) || g_active) return SCO_FAILED;
+    Request r;
+    if (!Ancestry(req->zone_id, r.ancestry)) return SCO_UNAVAILABLE;
+    r.positionOnly = true;
+    r.owner = self;
+    r.status.size = sizeof(sc_relocation_status);
+    r.status.state = SC_RELOCATION_PENDING;
+    r.status.ticket = g_nextTicket++;
+    r.zone = req->zone_id;
+    r.root = root;
+    r.pos = {req->pos[0], req->pos[1], req->pos[2]};
+    r.deadline = s.nowMs + req->timeout_ms;
+    g_active = r.status.ticket;
+    *outTicket = r.status.ticket;
+    g_requests[r.status.ticket] = r;
+    return SCO_OK;
+}
+
 sco_result Cancel(sco_plugin* self, uint64_t ticket) {
     if (!OnGame()) return SCO_WRONG_THREAD;
     if (!LivePlugin(self) || ticket == 0) return SCO_BAD_ARG;
@@ -113,12 +160,20 @@ void Tick() {
         Finish(r, SC_RELOCATION_FAILED, SC_RELOCATION_REASON_TIMEOUT);
         return;
     }
+    if (r.positionOnly && !ZoneStreamed(r.zone)) return;
+    if (r.positionOnly) {
+        std::vector<std::pair<uint64_t, uint64_t>> ancestry;
+        if (!Ancestry(r.zone, ancestry) || ancestry != r.ancestry) {
+            Finish(r, SC_RELOCATION_FAILED, SC_RELOCATION_REASON_TARGET);
+            return;
+        }
+    }
     if (!r.status.applied) {
         r.status.applied = 1;
         const uint64_t zone = r.zone;
         const Vec3 pos = r.pos;
         const Quat rot = r.rot;
-        MovePlayer(zone, pos, &rot);
+        MovePlayer(zone, pos, r.positionOnly ? nullptr : &rot);
         return;
     }
     const double d = std::sqrt((player->pos[0] - r.pos[0]) * (player->pos[0] - r.pos[0]) +
@@ -126,7 +181,7 @@ void Tick() {
                                (player->pos[2] - r.pos[2]) * (player->pos[2] - r.pos[2]));
     double dot = 0;
     for (size_t i = 0; i < 4; ++i) dot += player->rot[i] * r.rot[i];
-    if (player->zone == r.zone && d <= 0.05 && std::fabs(dot) >= 0.999999)
+    if (player->zone == r.zone && d <= 0.05 && (r.positionOnly || std::fabs(dot) >= 0.999999))
         Finish(r, SC_RELOCATION_COMPLETE, SC_RELOCATION_REASON_NONE);
 }
 
@@ -149,12 +204,12 @@ void Release(const void* owner) {
     }
 }
 
-const sc_relocation_v1 kTable = { sizeof(sc_relocation_v1), RequestFn, Cancel, Status };
+const sc_relocation_v1_1 kTable = { sizeof(sc_relocation_v1_1), RequestFn, Cancel, Status, RequestPosition };
 
 }  // namespace
 
 const ServiceDef& RelocationService() {
-    static const ServiceDef def{ SC_RELOCATION_NAME, SC_RELOCATION_VERSION, &kTable, Reset, Release, Tick };
+    static const ServiceDef def{ SC_RELOCATION_NAME, SC_RELOCATION_VERSION_1_1, &kTable, Reset, Release, Tick };
     return def;
 }
 
