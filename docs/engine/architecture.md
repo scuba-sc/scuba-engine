@@ -110,7 +110,7 @@ next request.
 | glTF 2.0 (`.gltf`, `.glb`) | yes | accessor decode (float positions/normals, normalized-int UVs, u8/u16/u32 indices), base64 and VFS-relative buffers; Y-up converted to Z-up; node transforms, skins, sparse accessors not yet |
 | OBJ | yes | scuba_assets bounded reader; polygons fan-triangulated; Y-up converted |
 | CryEngine `.cgf` / `.cga` | yes | scuba_assets bounded reader (static mesh chunks, see [assets.md](../assets.md)); already Z-up |
-| FBX | refused with a reason | planned: ufbx (MIT) |
+| FBX (`.fbx`) | yes | ufbx (MIT, pinned); ASCII and binary, static triangle geometry; per-corner normals de-indexed; a +Y file is converted to Z-up, a +Z file is taken as is (other up axes are refused); node transforms, skins and animation not applied |
 
 Missing normals are generated (area-weighted). Bounds are computed per mesh and per model.
 
@@ -151,7 +151,7 @@ picking (right drag orbit, middle drag pan, wheel dolly, left click select, F fr
 | Phase | Scope | Exit |
 |---|---|---|
 | 1 (this branch) | core, VFS, sco host, D3D12 loop, ImGui shell, async OBJ/glTF/CGF intake, PBR-lite, CPU picking, move tool | `engine_core` + `engine_smoke` (WARP) green on Windows |
-| 2 | gizmos (translate/rotate/scale, snapping), GPU id-buffer picking, scene save/load through the VFS, FBX via ufbx, glTF node hierarchy | editor round-trips a scene |
+| 2 | gizmos (translate/rotate/scale, snapping), GPU id-buffer picking, scene save/load through the VFS, glTF node hierarchy | editor round-trips a scene |
 | 3 | textures and mip streaming (priority IO queue, budget-driven residency), material textures, DDS | Asset Lab parity |
 | 4 | studio parity: Widgets, Designer, Viewport (diegetic panels), NetSandbox panels in native UI | browser studio retired; hostd remains for headless CI |
 | 5 | Vulkan backend; Linux build of the editor | cross-platform CI (roadmap E-5) |
@@ -159,5 +159,5 @@ picking (right drag orbit, middle drag pan, wheel dolly, left click select, F fr
 ## Provenance
 
 All engine code in this repository is written for scuba-engine. Third-party code is fetched at
-configure time, pinned by SHA-256 and never vendored: Dear ImGui (MIT) and miniz (MIT); see
-[THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md). The `.scpak` format is scuba-engine's own.
+configure time, pinned by SHA-256 and never vendored: Dear ImGui (MIT), miniz (MIT) and ufbx (MIT);
+see [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md). The `.scpak` format is scuba-engine's own.

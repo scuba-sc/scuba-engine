@@ -26,7 +26,9 @@ target_include_directories(scuba_engine_core
   PUBLIC "${SCUBA_ENGINE_INCLUDE}"
   PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 # scuba_assets: the bounded OBJ/CGF readers and the JSON parser the glTF decoder uses.
-target_link_libraries(scuba_engine_core PUBLIC sco_vfs Threads::Threads PRIVATE scuba_assets scuba_miniz)
+# scuba_ufbx: the pinned FBX importer the decode path calls (engine/src/asset/decode.cpp).
+target_link_libraries(scuba_engine_core PUBLIC sco_vfs Threads::Threads
+  PRIVATE scuba_assets scuba_miniz scuba_ufbx)
 scuba_warnings(scuba_engine_core)
 
 add_executable(scuba-pack tools/scuba_pack.cpp)
