@@ -97,7 +97,8 @@ try:
             assert f'SCENARIO step {n} ok' in result, result
         assert 'SCENARIO pass 4/4' in result, result
         if case == 'profile':
-            assert 'mp_chat' in result and 'loaded' in result, result
+            selected = json.loads(pathlib.Path(profile).read_text())['plugins']
+            assert all(plugin in result for plugin in selected), result
     elif case == 'default':
         assert port is not None, 'host did not reach listening state'
         scene = state(port)

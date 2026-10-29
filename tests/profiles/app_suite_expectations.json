@@ -1,0 +1,24 @@
+{
+  "plugins": ["mp_chat", "org_social", "diegetic_asop", "diegetic_shop_inv"],
+  "commands": [
+    "mp_chat.status",
+    "org_social.roster",
+    "diegetic_asop.status",
+    "diegetic_shop_inv.status"
+  ],
+  "panels": [
+    { "id": "mp_chat.main", "owner": "mp_chat" },
+    { "id": "org_social.roster", "owner": "org_social" },
+    { "id": "diegetic_asop.terminal", "owner": "diegetic_asop" },
+    { "id": "diegetic_shop_inv.shop", "owner": "diegetic_shop_inv" }
+  ],
+  "unpublished_services": [
+    "game.actors",
+    "game.economy",
+    "game.hangar",
+    "game.loadout",
+    "game.prefabs",
+    "game.spatial"
+  ],
+  "refuse_plugin": "diegetic_asop"
+}

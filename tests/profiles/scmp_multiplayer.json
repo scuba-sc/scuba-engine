@@ -1,0 +1,5 @@
+{
+  "plugins": ["multiplayer"],
+  "mocks": ["game.events"],
+  "services": []
+}

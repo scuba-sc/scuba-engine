@@ -72,6 +72,7 @@ Json WidgetPanelToJson(const sco::widgets::Panel& panel, uint64_t revision) {
         const bool password = (n.flags & SCO_WIDGET_PASSWORD) != 0;
         Json node = Json::MakeObject();
         node.set("id", n.id);
+        node.set("tag", n.tag);
         node.set("parent", n.parent);
         node.set("kind", WidgetKindName(n.kind));
         node.set("kind_code", n.kind);
@@ -107,7 +108,8 @@ Json WidgetPanelToJson(const sco::widgets::Panel& panel, uint64_t revision) {
 
 Json WidgetCapabilitiesJson() {
     Json features = Json::MakeArray();
-    for (const char* f : { "update_nodes", "remove_nodes", "severity", "tooltip", "paging", "event_row", "coalesced_render" })
+    for (const char* f : { "update_nodes", "remove_nodes", "severity", "tooltip", "paging", "event_row",
+                           "coalesced_render", "stable_tags" })
         features.push_back(f);
     Json limits = Json::MakeObject();
     limits.set("max_panels", SCO_WIDGETS_MAX_PANELS);
@@ -117,11 +119,12 @@ Json WidgetCapabilitiesJson() {
     limits.set("max_columns", SCO_WIDGETS_MAX_COLUMNS);
     limits.set("max_text", SCO_WIDGETS_MAX_TEXT);
     limits.set("max_events", SCO_WIDGETS_MAX_EVENTS);
+    limits.set("max_tag", SCO_WIDGETS_MAX_TAG);
     Json events = Json::MakeArray();
     for (const char* e : { "button", "toggle", "slider", "combo", "list", "text_input", "page" }) events.push_back(e);
     Json out = Json::MakeObject();
     out.set("service", SCO_WIDGETS_NAME);
-    out.set("version", "1.1");
+    out.set("version", "1.2");
     out.set("features", std::move(features));
     out.set("limits", std::move(limits));
     out.set("events", std::move(events));
