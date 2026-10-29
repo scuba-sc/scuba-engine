@@ -1,0 +1,5 @@
+{
+  "plugins": ["mp_chat", "org_social", "diegetic_asop", "diegetic_shop_inv"],
+  "mocks": ["game.events"],
+  "services": []
+}

@@ -272,7 +272,7 @@ void Exercise(uint16_t port) {
     const Json list = s.Call("widgets.list", Json::MakeObject());
     const Json* result = list.find("result");
     CHECK(result && result->find("started") && result->find("started")->as_bool());
-    CHECK(result && result->find("capabilities") && result->find("capabilities")->find("version")->as_string() == "1.1");
+    CHECK(result && result->find("capabilities") && result->find("capabilities")->find("version")->as_string() == "1.2");
     const Json* panels = result ? result->find("panels") : nullptr;
     // The 2.4.0 kit's widgets example adds a one-node "widgets.named" panel (a stable-tag anchor) when
     // the host offers widgets 1.2 stable tags, as the kit's own host does.
@@ -283,6 +283,9 @@ void Exercise(uint16_t port) {
     const Json* named = FindPanel(*panels, "widgets.named");
     CHECK(native && lua && named);
     CHECK(named && named->find("owner")->as_string() == "widgets" && named->find("nodes")->size() == 1);
+    CHECK(named && named->find("nodes") && named->find("nodes")->size() == 1 &&
+          named->find("nodes")->at(0).find("tag") &&
+          named->find("nodes")->at(0).find("tag")->as_string() == "widgets.sample.anchor");
     if (!native || !lua) return;
     std::printf("widgets.main: %s\n", native->dump().c_str());
     CHECK(native->find("nodes")->size() == 10);

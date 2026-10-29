@@ -1,5 +1,8 @@
 # Hostd profiles
 
+See [the first-party plugin map](plugin-integration.md) for the tested engine app suite, external
+sc-mp profile, and provider-readiness boundaries.
+
 `scuba-hostd --profile profile.json` selects plugin folders and synthetic mock services for a
 bounded out-of-game run. For example:
 

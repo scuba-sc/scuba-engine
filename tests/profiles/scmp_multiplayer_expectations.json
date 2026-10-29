@@ -1,0 +1,17 @@
+{
+  "plugins": ["multiplayer"],
+  "commands": ["multiplayer.status"],
+  "panels": [
+    {
+      "id": "multiplayer.session",
+      "owner": "multiplayer",
+      "required_tags": [
+        "host", "join", "leave", "name", "address", "passphrase", "host-port",
+        "join-port", "avatar", "ships", "remember", "status", "goto", "reply",
+        "notice", "players", "scope", "profiles", "save-profile"
+      ]
+    }
+  ],
+  "unpublished_services": ["game.actors", "game.entities", "game.spatial"],
+  "refuse_plugin": "multiplayer"
+}

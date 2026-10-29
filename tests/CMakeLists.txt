@@ -155,7 +155,8 @@ foreach(scenario_case valid profile default unknown_field oversize)
   add_test(NAME scenario_${scenario_case} COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_scenario_cli.py" "$<TARGET_FILE:scuba-hostd>"
     "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/${scenario_case}.json" "${scenario_case}"
-    "${CMAKE_CURRENT_BINARY_DIR}/scenario-${scenario_case}" "${CMAKE_CURRENT_SOURCE_DIR}/profiles/valid_plugin.json")
+    "${CMAKE_CURRENT_BINARY_DIR}/scenario-${scenario_case}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/app_suite.json")
   set_tests_properties(scenario_${scenario_case} PROPERTIES TIMEOUT 30)
 endforeach()
 
@@ -218,8 +219,9 @@ add_test(NAME studio_mcp_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
 set_tests_properties(studio_mcp_integration PROPERTIES TIMEOUT 60)
 add_test(NAME profile_mcp_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/profile_mcp.mjs" "$<TARGET_FILE:scuba-hostd>"
-  "${CMAKE_BINARY_DIR}/plugins/runtime" "${CMAKE_CURRENT_SOURCE_DIR}/profiles/valid_plugin.json"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../tools/scuba-engine-mcp/server.mjs")
+  "${CMAKE_BINARY_DIR}/plugins/runtime" "${CMAKE_CURRENT_SOURCE_DIR}/profiles/app_suite.json"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../tools/scuba-engine-mcp/server.mjs"
+  "${CMAKE_CURRENT_SOURCE_DIR}/profiles/app_suite_expectations.json")
 set_tests_properties(profile_mcp_integration PROPERTIES TIMEOUT 60)
 add_test(NAME engine_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/integration-smoke.mjs" "$<TARGET_FILE:scuba-hostd>"
