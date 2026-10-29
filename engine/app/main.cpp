@@ -4,7 +4,7 @@
 //
 //   scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR | --no-plugins]
 //                [--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync]
-//                [--hidden] [--frames N] [--scenario FILE]
+//                [--hidden] [--frames N] [--scenario FILE] [--export DIR | --export-pack FILE]
 //
 // --product DIR mounts a product distribution root: <DIR>/data/plugins is the roster, <DIR>/data is
 // the content mount and sco.storage root. It is fail-closed: a refused plugin, a missing
@@ -18,11 +18,16 @@
 // --scenario FILE runs a bounded scenario (the same steps scuba-hostd accepts) against the mock
 // game before the first frame, prints each step, and exits 1 if any step did not match. The
 // Scenario dock runs one on demand from the UI.
+//
+// --export DIR / --export-pack FILE write a product distribution from the mounted --product root
+// and exit without creating a window: <DIR>/data (the roster included) or one .scpak of the same
+// tree. Both refuse an occupied destination and a roster folder without a plugin.ini.
 #include "scuba/asset/model_loader.h"
 #include "scuba/core/job_system.h"
 #include "scuba/core/log.h"
 #include "scuba/platform/window.h"
 #include "scuba/render/camera.h"
+#include "scuba/product/export.h"
 #include "scuba/render/picking.h"
 #include "scuba/render/renderer.h"
 #include "scuba/sco/sco_host.h"
@@ -73,6 +78,7 @@ struct Args {
     std::vector<MountArg> mounts;
     std::vector<std::string> open;
     fs::path scenario;
+    fs::path exportDir, exportPack;
     bool warp = false, debugLayer = false, vsync = true, hidden = false, plugins_on = true;
     int frames = 0;
 };
@@ -105,6 +111,8 @@ std::optional<Args> ParseArgs() {
         else if (k == "--product") { if (auto v = next()) args.product = PathFromUtf8(*v); else return std::nullopt; }
         else if (k == "--open") { if (auto v = next()) args.open.push_back(*v); else return std::nullopt; }
         else if (k == "--scenario") { if (auto v = next()) args.scenario = PathFromUtf8(*v); else return std::nullopt; }
+        else if (k == "--export") { if (auto v = next()) args.exportDir = PathFromUtf8(*v); else return std::nullopt; }
+        else if (k == "--export-pack") { if (auto v = next()) args.exportPack = PathFromUtf8(*v); else return std::nullopt; }
         else if (k == "--frames") { if (auto v = next()) args.frames = std::max(1, std::atoi(v->c_str())); else return std::nullopt; }
         else if (k == "--mount") {
             auto v = next();
@@ -124,6 +132,10 @@ std::optional<Args> ParseArgs() {
     }
     // A product profile derives all three of its roots; mixing them would be ambiguous.
     if (!args.product.empty() && (args.pluginsSet || args.dataSet || args.contentSet)) return std::nullopt;
+    // An export is a product distribution or nothing: it reads the mounted root, so it needs one,
+    // and the two destinations are different artifacts.
+    if (!args.exportDir.empty() && !args.exportPack.empty()) return std::nullopt;
+    if ((!args.exportDir.empty() || !args.exportPack.empty()) && args.product.empty()) return std::nullopt;
     return args;
 }
 
@@ -173,8 +185,13 @@ struct Editor {
 
     // panels
     bool showContent = true, showMounts = true, showScene = true, showInspector = true, showPlugins = true,
-         showLoader = true, showLog = true, showStats = true, showScenario = false, showDemo = false;
+         showLoader = true, showLog = true, showStats = true, showScenario = false, showProduct = false,
+         showDemo = false;
     char scenarioPath[512] = "";
+    fs::path productRoot;
+    char exportPath[512] = "";
+    std::string exportStatus;
+    bool exportPack = false;
     std::vector<hostd::ScenarioStepResult> scenarioResults;
     std::string scenarioStatus;
     bool scenarioPassed = false;
@@ -289,6 +306,7 @@ struct Editor {
     void DrawStats();
     void DrawLog();
     void DrawScenario();
+    void DrawProduct();
 };
 
 // ---- input layers --------------------------------------------------------------------------------
@@ -399,6 +417,7 @@ void Editor::DrawMenu(bool& quit) {
         ImGui::MenuItem("Stats", nullptr, &showStats);
         ImGui::MenuItem("Log", nullptr, &showLog);
         ImGui::MenuItem("Scenario", nullptr, &showScenario);
+        ImGui::MenuItem("Product", nullptr, &showProduct);
         ImGui::Separator();
         ImGui::MenuItem("ImGui demo", nullptr, &showDemo);
         ImGui::EndMenu();
@@ -623,6 +642,44 @@ void Editor::DrawScenario() {
     ImGui::End();
 }
 
+void Editor::DrawProduct() {
+    if (!ImGui::Begin("Product", &showProduct)) { ImGui::End(); return; }
+    if (productRoot.empty()) {
+        ImGui::TextDisabled("No product profile mounted. Start the editor with --product DIR.");
+        ImGui::End();
+        return;
+    }
+    ImGui::Text("root  %s", productRoot.generic_string().c_str());
+    ImGui::TextDisabled("Writes a distribution that --product accepts again; nothing leaves this machine.");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##export", "output directory or .scpak", exportPath, sizeof exportPath);
+    if (ImGui::RadioButton("directory", !exportPack)) exportPack = false;
+    ImGui::SameLine();
+    if (ImGui::RadioButton(".scpak", exportPack)) exportPack = true;
+    ImGui::SameLine();
+    if (ImGui::Button("Export") && exportPath[0] != '\0') {
+        product::ExportReport report;
+        const fs::path out = PathFromUtf8(exportPath);
+        const Status st = exportPack ? product::ExportProductPack(productRoot, out, report)
+                                     : product::ExportProduct(productRoot, out, report);
+        if (!st) {
+            exportStatus = "failed: " + st.error;
+            log::Error("product", st.error);
+        } else {
+            exportStatus = "exported " + std::to_string(report.files) + " file(s), " +
+                           std::to_string(report.bytes) + " byte(s), " + std::to_string(report.plugins.size()) +
+                           " plugin(s) to " + out.generic_string();
+            log::Info("product", exportStatus);
+        }
+    }
+    if (!exportStatus.empty()) ImGui::TextWrapped("%s", exportStatus.c_str());
+    ImGui::SeparatorText("Roster");
+    for (const auto& p : sco.Plugins())
+        ImGui::Text("%s  %s%s%s", p.id.empty() ? p.folder.c_str() : p.id.c_str(), p.state.c_str(),
+                    p.reason.empty() ? "" : " - ", p.reason.c_str());
+    ImGui::End();
+}
+
 void Editor::DrawUi() {
     if (showContent) DrawContent();
     if (showMounts) DrawMounts();
@@ -633,6 +690,7 @@ void Editor::DrawUi() {
     if (showStats) DrawStats();
     if (showLog) DrawLog();
     if (showScenario) DrawScenario();
+    if (showProduct) DrawProduct();
     if (showDemo) ImGui::ShowDemoWindow(&showDemo);
 }
 
@@ -653,6 +711,21 @@ int Run(const Args& args) {
         data = dataDir;
         content = fs::is_directory(dataDir, ec) && !ec ? dataDir : fs::path();
     }
+    if (!args.exportDir.empty() || !args.exportPack.empty()) {
+        // An export creates no window and no GPU object: it reads the mounted root and writes the
+        // distribution, so it also works where the editor cannot open a window at all.
+        product::ExportReport report;
+        const fs::path& out = args.exportDir.empty() ? args.exportPack : args.exportDir;
+        const Status st = args.exportDir.empty() ? product::ExportProductPack(args.product, out, report)
+                                                 : product::ExportProduct(args.product, out, report);
+        if (!st) { log::Error("product", st.error); return 1; }
+        std::fprintf(stderr, "scuba-engine: exported %s: %zu file(s), %llu byte(s), %zu plugin(s)\n",
+                     out.generic_string().c_str(), report.files,
+                     static_cast<unsigned long long>(report.bytes), report.plugins.size());
+        for (const auto& plugin : report.plugins) std::fprintf(stderr, "  %s\n", plugin.c_str());
+        return 0;
+    }
+
     platform::Window window;
     platform::WindowDesc wd;
     wd.title = "scuba-engine " SCUBA_VERSION;
@@ -660,6 +733,7 @@ int Run(const Args& args) {
     if (auto st = window.Create(wd); !st) { log::Error("app", st.error); return 1; }
 
     Editor ed;
+    ed.productRoot = args.product;
     render::RendererDesc rd;
     rd.window = window.native();
     rd.width = window.width();
@@ -786,7 +860,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     const auto args = ParseArgs();
     if (!args) {
         std::fprintf(stderr, "usage: scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR|--no-plugins] "
-                             "[--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N] [--scenario FILE]\n");
+                             "[--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N] [--scenario FILE] [--export DIR | --export-pack FILE]\n");
         return 2;
     }
     return Run(*args);

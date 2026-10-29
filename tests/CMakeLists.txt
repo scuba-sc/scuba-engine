@@ -112,6 +112,14 @@ add_test(NAME product_profile_lifecycle COMMAND test_product_profile
   "${CMAKE_CURRENT_BINARY_DIR}/product-profile-fixture" $<TARGET_FILE:mock_game_probe>)
 set_tests_properties(product_profile_lifecycle PROPERTIES TIMEOUT 60)
 
+# Product distribution export: the tree --product accepts again, and every refusal that keeps a
+# half-written distribution from existing. Portable, so it runs everywhere the core builds.
+add_executable(test_product_export test_product_export.cpp)
+target_link_libraries(test_product_export PRIVATE scuba_engine_core)
+scuba_warnings(test_product_export)
+add_test(NAME product_export COMMAND test_product_export "${CMAKE_CURRENT_BINARY_DIR}/product-export-fixture")
+set_tests_properties(product_export PROPERTIES TIMEOUT 60)
+
 # The editor's headless path: --frames with --hidden renders off-screen and exits without a
 # desktop, so the smoke run is a real test instead of a manual check.
 if(TARGET scuba-engine)

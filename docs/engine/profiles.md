@@ -53,6 +53,20 @@ mounted as content and the roster printed to stderr. The editor derives `--conte
 Both forms run the product's real plugin code against synthetic game services. That is still not
 native game behavior, and the snapshot, trusted-code and no-sandbox rules above apply unchanged.
 
+## Exporting a distribution
+
+`scuba-engine --product DIR --export OUT` writes the mounted product as a distribution that
+`--product` accepts again: `<OUT>/data` holds the roster and the storage root, and the export
+refuses an occupied destination, a roster folder without `plugin.ini`, a symlink or special file,
+and the same 4096-entry / 32-level / 256 MiB ceilings the profile snapshot uses. The tree is staged
+beside the destination and renamed into place only when it is complete, so a refused export never
+leaves a partial distribution behind. `--export-pack FILE` writes the same tree as one `.scpak` and
+verifies it before returning. Both run without creating a window, so they work on a build host.
+
+The **View > Product** dock does the same from a mounted product profile and lists the roster it
+exported. An export is a local file operation: nothing is uploaded and no game data is included
+beyond the product tree the profile already mounts.
+
 ## Scenarios and the headless smoke run
 
 `scuba-engine --scenario FILE` runs a bounded scenario against the mock game on the game thread

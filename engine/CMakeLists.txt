@@ -20,6 +20,7 @@ add_library(scuba_engine_core STATIC
   src/vfs/virtual_file_system.cpp
   src/asset/decode.cpp
   src/asset/model_loader.cpp
+  src/product/export.cpp
   src/render/camera.cpp
   src/render/picking.cpp)
 target_include_directories(scuba_engine_core
