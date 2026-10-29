@@ -91,6 +91,7 @@ int main(int argc, char** argv) {
     std::ofstream(broken / "main.lua") << "this is not lua (((\n";
     st = host.Start(options);
     CHECK(!st);
+    CHECK(host.profileError().find("failed to load") != std::string::npos);
     CHECK(host.profileError().find("broken_lua") != std::string::npos);
     fs::remove_all(broken, ec);
 
