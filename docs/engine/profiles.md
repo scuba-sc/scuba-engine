@@ -36,3 +36,19 @@ A profile and `--scenario FILE` may be combined: plugins start first, then the b
 scenario runs and hostd unloads them before exiting. With no scenario, the normal bridge starts.
 The profile JSON is limited to 65536 bytes and each array to 128 entries; unknown fields and
 duplicate entries are rejected.
+
+## Product profile (`--product DIR`)
+
+`--product DIR` mounts a whole product distribution instead of a selection: `<DIR>/data/plugins`
+is the roster and `<DIR>/data` is the `sco.storage` root. Every folder in the roster loads, the
+whole synthetic game service set is published, and the mode is fail-closed — a missing
+`data/plugins`, an empty roster, a refused plugin or a plugin that fails to load stops startup with
+exit code 1 and names the folder. It conflicts with `--profile`, `--plugins`, `--data` and
+`--no-mock-game`; the root supplies all of them.
+
+`scuba-engine --product DIR` is the same mount in the native editor, with `<DIR>/data` also
+mounted as content and the roster printed to stderr. The editor derives `--content`, `--data` and
+`--plugins` from the root and refuses to combine them with it.
+
+Both forms run the product's real plugin code against synthetic game services. That is still not
+native game behavior, and the snapshot, trusted-code and no-sandbox rules above apply unchanged.

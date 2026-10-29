@@ -3,8 +3,12 @@
 // render thread inside the renderer, and a job pool for asset intake.
 //
 //   scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR | --no-plugins]
-//                [--data DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync]
+//                [--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync]
 //                [--hidden] [--frames N]
+//
+// --product DIR mounts a product distribution root: <DIR>/data/plugins is the roster, <DIR>/data is
+// the content mount and sco.storage root. It is fail-closed: a refused plugin, a missing
+// data/plugins or an unusable root stops the editor with exit code 1 and prints the roster.
 //
 // --frames N renders N frames and exits: 0 when every --open model became resident and nothing
 // was logged at error level, 1 otherwise (the smoke test uses it with --warp --hidden).
@@ -55,6 +59,8 @@ struct Args {
     fs::path content = SCUBA_DEFAULT_CONTENT_DIR;
     fs::path plugins = SCUBA_DEFAULT_PLUGIN_ROOT;
     fs::path data;
+    fs::path product;
+    bool contentSet = false, pluginsSet = false, dataSet = false;
     struct MountArg { std::string path, mountPoint; int priority = 10; };
     std::vector<MountArg> mounts;
     std::vector<std::string> open;
@@ -83,10 +89,11 @@ std::optional<Args> ParseArgs() {
     for (size_t i = 0; i < a.size(); ++i) {
         auto next = [&]() -> std::optional<std::string> { return i + 1 < a.size() ? std::optional<std::string>(a[++i]) : std::nullopt; };
         const std::string& k = a[i];
-        if (k == "--content") { if (auto v = next()) args.content = PathFromUtf8(*v); else return std::nullopt; }
-        else if (k == "--plugins") { if (auto v = next()) args.plugins = PathFromUtf8(*v); else return std::nullopt; }
-        else if (k == "--no-plugins") args.plugins_on = false;
-        else if (k == "--data") { if (auto v = next()) args.data = PathFromUtf8(*v); else return std::nullopt; }
+        if (k == "--content") { if (auto v = next()) { args.content = PathFromUtf8(*v); args.contentSet = true; } else return std::nullopt; }
+        else if (k == "--plugins") { if (auto v = next()) { args.plugins = PathFromUtf8(*v); args.pluginsSet = true; } else return std::nullopt; }
+        else if (k == "--no-plugins") { args.plugins_on = false; args.pluginsSet = true; }
+        else if (k == "--data") { if (auto v = next()) { args.data = PathFromUtf8(*v); args.dataSet = true; } else return std::nullopt; }
+        else if (k == "--product") { if (auto v = next()) args.product = PathFromUtf8(*v); else return std::nullopt; }
         else if (k == "--open") { if (auto v = next()) args.open.push_back(*v); else return std::nullopt; }
         else if (k == "--frames") { if (auto v = next()) args.frames = std::max(1, std::atoi(v->c_str())); else return std::nullopt; }
         else if (k == "--mount") {
@@ -105,6 +112,8 @@ std::optional<Args> ParseArgs() {
         else if (k == "--hidden") args.hidden = true;
         else return std::nullopt;
     }
+    // A product profile derives all three of its roots; mixing them would be ambiguous.
+    if (!args.product.empty() && (args.pluginsSet || args.dataSet || args.contentSet)) return std::nullopt;
     return args;
 }
 
@@ -553,6 +562,21 @@ void Editor::DrawUi() {
 
 int Run(const Args& args) {
     log::SetSink(&LogSink);
+    fs::path content = args.content;
+    fs::path data = args.data;
+    std::error_code ec;
+    if (!args.product.empty()) {
+        // A product profile is the whole distribution root: data/plugins must exist before any
+        // window or GPU object is created, so a bad root fails fast instead of half-starting.
+        const fs::path dataDir = args.product / "data";
+        const fs::path pluginsDir = dataDir / "plugins";
+        if (!fs::is_directory(pluginsDir, ec) || ec) {
+            log::Error("app", "product profile requires " + pluginsDir.generic_string());
+            return 1;
+        }
+        data = dataDir;
+        content = fs::is_directory(dataDir, ec) && !ec ? dataDir : fs::path();
+    }
     platform::Window window;
     platform::WindowDesc wd;
     wd.title = "scuba-engine " SCUBA_VERSION;
@@ -572,16 +596,29 @@ int Run(const Args& args) {
     if (!ed.renderer) { log::Error("render", st.error); return 1; }
     if (st = ed.ui.Init(window, *ed.renderer); !st) { log::Error("ui", st.error); return 1; }
 
-    if (!args.content.empty() && fs::is_directory(args.content))
-        if (auto m = MountPath(ed.vfs, args.content, "", 0); !m) log::Warn("vfs", m.error);
+    if (!content.empty() && fs::is_directory(content))
+        if (auto m = MountPath(ed.vfs, content, "", 0); !m) log::Warn("vfs", m.error);
     for (const auto& m : args.mounts)
         if (auto r = MountPath(ed.vfs, PathFromUtf8(m.path), m.mountPoint, m.priority); !r) log::Error("vfs", r.error);
     ed.loader = std::make_unique<asset::ModelLoader>(ed.vfs, ed.jobs);
 
     ScoHostOptions so;
-    if (args.plugins_on) so.pluginRoot = args.plugins;
-    so.dataRoot = args.data;
-    if (auto r = ed.sco.Start(so); !r) log::Warn("sco", r.error);   // the editor still runs without plugins
+    if (args.plugins_on && args.product.empty()) so.pluginRoot = args.plugins;
+    so.productRoot = args.product;
+    so.dataRoot = data;
+    if (auto r = ed.sco.Start(so); !r) {
+        // A product profile is fail-closed: a refused plugin or an unusable root stops the editor.
+        if (!args.product.empty()) { log::Error("sco", r.error); return 1; }
+        log::Warn("sco", r.error);   // the editor still runs without plugins
+    }
+    if (!args.product.empty()) {
+        const auto roster = ed.sco.Plugins();
+        std::fprintf(stderr, "scuba-engine: product profile %s: %zu plugin(s)\n",
+                     args.product.generic_string().c_str(), roster.size());
+        for (const auto& p : roster)
+            std::fprintf(stderr, "  %s %s%s%s\n", p.id.empty() ? p.folder.c_str() : p.id.c_str(), p.state.c_str(),
+                         p.reason.empty() ? "" : " - ", p.reason.c_str());
+    }
 
     for (const auto& p : args.open) ed.Spawn(p);
 
@@ -657,7 +694,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     const auto args = ParseArgs();
     if (!args) {
         std::fprintf(stderr, "usage: scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR|--no-plugins] "
-                             "[--data DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N]\n");
+                             "[--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N]\n");
         return 2;
     }
     return Run(*args);

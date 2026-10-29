@@ -93,13 +93,15 @@ bool LoadProfile(const std::string& path, scuba::hostd::KernelOptions& options, 
 
 int Usage() {
     std::fprintf(stderr,
-                 "usage: scuba-hostd [--port N] [--bind ADDR] [--studio DIR] [--plugins DIR] [--data DIR]\n"
+                 "usage: scuba-hostd [--port N] [--bind ADDR] [--studio DIR] [--plugins DIR] [--data DIR] [--product DIR]\n"
                  "                   [--allow-origin ORIGIN]... [--no-lua] [--no-mock-game] [--test-shutdown]\n"
                  "  --port N             listen port (default 7878; 0 picks a free port)\n"
                  "  --bind ADDR          IPv4 address to bind (default 127.0.0.1)\n"
                  "  --studio DIR         built studio to serve (default: the source tree's studio/dist)\n"
                  "  --scenario FILE      run bounded synthetic scene controls before listening\n"
                  "  --profile FILE       select plugins, services and mocks (see docs/engine/profiles.md)\n"
+                 "  --product DIR        mount a product distribution root: DIR/data/plugins is the roster and\n"
+                 "                       DIR/data is the sco.storage root; fail-closed on a refused plugin\n"
                  "  --plugins DIR        plugin root (default: build-tree APP plugins)\n"
                  "  --data DIR           data root (sco.storage databases)\n"
                  "  --allow-origin O     also accept WebSocket connections from origin O (e.g. http://localhost:5173)\n"
@@ -124,6 +126,7 @@ int main(int argc, char** argv) {
     std::string scenarioPath;
     Json scenario;
     bool noMockGame = false;
+    bool pluginRootSet = false, dataRootSet = false;
 
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -143,10 +146,15 @@ int main(int argc, char** argv) {
         } else if (!std::strcmp(a, "--profile") && hasValue) {
             if (!profilePath.empty()) return Usage();
             profilePath = argv[++i];
+        } else if (!std::strcmp(a, "--product") && hasValue) {
+            if (!kernelOptions.productRoot.empty()) return Usage();
+            kernelOptions.productRoot = argv[++i];
         } else if (!std::strcmp(a, "--plugins") && hasValue) {
             kernelOptions.pluginRoot = argv[++i];
+            pluginRootSet = true;
         } else if (!std::strcmp(a, "--data") && hasValue) {
             kernelOptions.dataRoot = argv[++i];
+            dataRootSet = true;
         } else if (!std::strcmp(a, "--allow-origin") && hasValue) {
             serverOptions.allowedOrigins.emplace_back(argv[++i]);
         } else if (!std::strcmp(a, "--no-lua")) {
@@ -159,6 +167,15 @@ int main(int argc, char** argv) {
         } else {
             return Usage();
         }
+    }
+
+    if (!kernelOptions.productRoot.empty()) {
+        if (!profilePath.empty()) { std::fprintf(stderr, "scuba-hostd: --product conflicts with --profile\n"); return 1; }
+        if (pluginRootSet) { std::fprintf(stderr, "scuba-hostd: --product conflicts with --plugins\n"); return 1; }
+        if (dataRootSet) { std::fprintf(stderr, "scuba-hostd: --product conflicts with --data\n"); return 1; }
+        if (noMockGame) { std::fprintf(stderr, "scuba-hostd: --product conflicts with --no-mock-game\n"); return 1; }
+        kernelOptions.pluginRoot = kernelOptions.productRoot / "data" / "plugins";
+        kernelOptions.dataRoot = kernelOptions.productRoot / "data";
     }
 
     if (!profilePath.empty()) {

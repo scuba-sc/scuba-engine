@@ -193,6 +193,19 @@ bool Kernel::Start(const KernelOptions& options, LogFn log) {
             }
         }
     }
+    if (!options.productRoot.empty()) {
+        // A product profile is the whole distribution: a folder that discovers but does not load
+        // is as fatal as one the preflight refused, so a half-mounted roster never reaches the UI.
+        for (const auto& plugin : sco::app::Plugins()) {
+            if (plugin.folder.empty()) continue;   // built-ins have no folder: not part of the roster
+            if (plugin.state != sco::plugins::State::Loaded) {
+                profileError_ = "Product profile plugin failed to load: " + plugin.folder + ": " + plugin.reason;
+                if (log) log(profileError_.c_str());
+                Stop();
+                return false;
+            }
+        }
+    }
     return true;
 }
 

@@ -238,3 +238,13 @@ if(TARGET scuba_engine_core)
   add_test(NAME engine_core COMMAND test_engine_core)
   set_tests_properties(engine_core PROPERTIES TIMEOUT 60)
 endif()
+
+# The engine's product-profile path: ScoHost::Start with productRoot, fail-closed on a missing
+# data/plugins or a refused plugin, and the roster it reports.
+if(TARGET scuba_engine_sco)
+  add_executable(test_sco_host_product test_sco_host_product.cpp)
+  target_link_libraries(test_sco_host_product PRIVATE scuba_engine_sco)
+  scuba_warnings(test_sco_host_product)
+  add_test(NAME sco_host_product COMMAND test_sco_host_product "${CMAKE_CURRENT_BINARY_DIR}/product-app-fixture")
+  set_tests_properties(sco_host_product PROPERTIES TIMEOUT 60)
+endif()
