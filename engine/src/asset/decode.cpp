@@ -7,6 +7,7 @@
 #include "assets/formats.h"
 #include "assets/io.h"
 #include "hostd/json.h"
+#include "ufbx.h"
 
 #include <algorithm>
 #include <cctype>
@@ -357,6 +358,80 @@ void FinishMesh(MeshData& mesh) {
     if (n == 0) mesh.boundsMin = mesh.boundsMax = {0, 0, 0};
 }
 
+// ---- FBX -------------------------------------------------------------------------------------
+
+// ufbx (MIT, pinned in cmake/ScubaDeps.cmake) parses the file; this importer keeps the contract the
+// other importers have: static triangle geometry in file order, node transforms not applied, skins,
+// blendshapes and animation ignored. Corners are de-indexed because FBX attributes are per corner
+// (a shared position can carry different normals), which is also what the renderer wants.
+Status DecodeFbx(std::span<const uint8_t> bytes, ModelData& out) {
+    ufbx_load_opts opts{};
+    opts.generate_missing_normals = true;   // vertex_normal is then always defined
+    opts.ignore_animation = true;
+    opts.evaluate_skinning = false;
+    ufbx_error error{};
+    ufbx_scene* scene = ufbx_load_memory(bytes.data(), bytes.size(), &opts, &error);
+    if (!scene) {
+        const std::string why = error.description.data
+                                    ? std::string(error.description.data, error.description.length)
+                                    : std::string("load failed");
+        return Status::Fail(why);
+    }
+    struct FreeScene {
+        ufbx_scene* scene;
+        ~FreeScene() { ufbx_free_scene(scene); }
+    } freeScene{scene};
+
+    // The engine and the SDK are Z-up. FBX records its own axes, so convert here instead of asking
+    // ufbx to normalise (that rewrites node transforms, which this importer does not consume).
+    const ufbx_coordinate_axes axes = scene->settings.axes;
+    const bool yUp = axes.up == UFBX_COORDINATE_AXIS_POSITIVE_Y;
+    if (!yUp && axes.up != UFBX_COORDINATE_AXIS_POSITIVE_Z)
+        return Status::Fail("unsupported FBX up axis (only +Y and +Z are imported)");
+
+    std::vector<uint32_t> corners;
+    for (size_t mi = 0; mi < scene->meshes.count; ++mi) {
+        const ufbx_mesh* mesh = scene->meshes.data[mi];
+        if (!mesh || mesh->num_faces == 0) continue;
+        MeshData m;
+        corners.resize(mesh->max_face_triangles * 3);
+        for (size_t fi = 0; fi < mesh->num_faces; ++fi) {
+            const ufbx_face face = mesh->faces.data[fi];
+            if (face.num_indices < 3) continue;   // point and line faces carry no surface
+            const uint32_t triangles = ufbx_triangulate_face(corners.data(), corners.size(), mesh, face);
+            for (uint32_t k = 0; k < triangles * 3; ++k) {
+                const uint32_t corner = corners[k];
+                if (corner >= mesh->num_indices) return Status::Fail("FBX face index out of range");
+                const uint32_t vertex = mesh->vertex_position.indices.data[corner];
+                if (vertex >= mesh->num_vertices) return Status::Fail("FBX vertex index out of range");
+                if (m.positions.size() / 3 >= kMaxVertices) return Status::Fail("FBX mesh is too large");
+                const ufbx_vec3 p = mesh->vertex_position.values.data[vertex];
+                const uint32_t ncorner = mesh->vertex_normal.indices.data ? mesh->vertex_normal.indices.data[corner]
+                                                                          : vertex;
+                const ufbx_vec3 zero{};
+                const ufbx_vec3 n =
+                    mesh->vertex_normal.values.data ? mesh->vertex_normal.values.data[ncorner] : zero;
+                // ufbx_real is double by default; the engine's model data is float.
+                const auto f = [](ufbx_real v) { return static_cast<float>(v); };
+                if (yUp) {
+                    m.positions.insert(m.positions.end(), {f(p.x), f(-p.z), f(p.y)});
+                    m.normals.insert(m.normals.end(), {f(n.x), f(-n.z), f(n.y)});
+                } else {
+                    m.positions.insert(m.positions.end(), {f(p.x), f(p.y), f(p.z)});
+                    m.normals.insert(m.normals.end(), {f(n.x), f(n.y), f(n.z)});
+                }
+                m.indices.push_back(static_cast<uint32_t>(m.positions.size() / 3 - 1));
+            }
+        }
+        if (m.indices.empty()) continue;
+        if (mesh->materials.count > 0 && mesh->materials.data[0]->name.data)
+            m.material.assign(mesh->materials.data[0]->name.data, mesh->materials.data[0]->name.length);
+        out.meshes.push_back(std::move(m));
+    }
+    if (out.meshes.empty()) return Status::Fail("no triangle geometry");
+    return Status::Ok();
+}
+
 Status DecodeModel(std::string_view path, std::span<const uint8_t> bytes, const vfs::VirtualFileSystem* vfs,
                    ModelData& out) {
     out = ModelData{};
@@ -374,9 +449,7 @@ Status DecodeModel(std::string_view path, std::span<const uint8_t> bytes, const 
             for (const auto& m : assets::ReadCry(bytes)) out.meshes.push_back(FromAssetMesh(m));
             if (out.meshes.empty()) st = Status::Fail("no mesh chunks");
             break;
-        case ModelFormat::Fbx:
-            st = Status::Fail("FBX import is not built yet (planned: ufbx, MIT)");
-            break;
+        case ModelFormat::Fbx: st = DecodeFbx(bytes, out); break;
         case ModelFormat::Unknown:
             st = Status::Fail("unknown model format: " + std::string(path));
             break;

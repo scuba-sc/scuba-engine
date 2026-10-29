@@ -241,10 +241,97 @@ assets::Mesh Triangle() {
     return m;
 }
 
+// A minimal hand-written ASCII FBX 7.4 scene: one triangle with explicit per-corner normals. The
+// repository ships no third-party FBX asset, and ufbx reads ASCII FBX, so the test owns its bytes.
+// yUp selects GlobalSettings UpAxis (1 = Y-up, 2 = Z-up) and puts the tip on that axis, so both
+// variants must land with the tip at +Z in engine space.
+vfs::Bytes Fbx(bool yUp) {
+    static constexpr std::string_view kHead =
+        "; FBX 7.4.0 project file\n"
+        "FBXHeaderExtension:  {\n"
+        "    FBXHeaderVersion: 1003\n"
+        "    FBXVersion: 7400\n"
+        "}\n"
+        "GlobalSettings:  {\n"
+        "    Version: 1000\n"
+        "    Properties70:  {\n"
+        "        P: \"UpAxis\", \"int\", \"Integer\", \"\",";
+    static constexpr std::string_view kMiddle =
+        "\n"
+        "        P: \"UpAxisSign\", \"int\", \"Integer\", \"\",1\n"
+        "        P: \"FrontAxis\", \"int\", \"Integer\", \"\",1\n"
+        "        P: \"FrontAxisSign\", \"int\", \"Integer\", \"\",1\n"
+        "        P: \"CoordAxis\", \"int\", \"Integer\", \"\",0\n"
+        "        P: \"CoordAxisSign\", \"int\", \"Integer\", \"\",1\n"
+        "    }\n"
+        "}\n"
+        "Objects:  {\n"
+        "    Geometry: 100000, \"Geometry::tri\", \"Mesh\" {\n"
+        "        Vertices: *9 {\n"
+        "            a: 0,0,0,1,0,0,";
+    static constexpr std::string_view kTail =
+        "\n"
+        "        }\n"
+        "        PolygonVertexIndex: *3 {\n"
+        "            a: 0,1,-3\n"
+        "        }\n"
+        "        GeometryVersion: 124\n"
+        "        LayerElementNormal: 0 {\n"
+        "            Version: 101\n"
+        "            Name: \"\"\n"
+        "            MappingInformationType: \"ByPolygonVertex\"\n"
+        "            ReferenceInformationType: \"Direct\"\n"
+        "            Normals: *9 {\n"
+        "                a: ";
+    static constexpr std::string_view kEnd =
+        "\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "    Model: 200000, \"Model::tri\", \"Mesh\" {\n"
+        "        Version: 232\n"
+        "    }\n"
+        "}\n"
+        "Connections:  {\n"
+        "    C: \"OO\",100000,200000\n"
+        "    C: \"OO\",200000,0\n"
+        "}\n";
+    std::string text(kHead);
+    text += yUp ? "1" : "2";
+    text += kMiddle;
+    text += yUp ? "0,2,0" : "0,0,2";
+    text += kTail;
+    text += yUp ? "0,0,-1,0,0,-1,0,0,-1" : "0,-1,0,0,-1,0,0,-1,0";
+    text += kEnd;
+    return B(text);
+}
+
+void TestFbx() {
+    for (const bool yUp : {true, false}) {
+        asset::ModelData model;
+        const auto bytes = Fbx(yUp);
+        const auto st = asset::DecodeModel(yUp ? "y.fbx" : "z.fbx", bytes, nullptr, model);
+        CHECK(st.ok());
+        CHECK(model.meshes.size() == 1 && model.triangleCount() == 1);
+        if (model.meshes.size() != 1) continue;
+        const auto& m = model.meshes[0];
+        CHECK(m.positions.size() == 9 && m.normals.size() == 9 && m.indices.size() == 3);
+        CHECK(std::fabs(m.boundsMax[2] - 2.0f) < 1e-6f);   // the tip is +Z in engine space either way
+        CHECK(std::fabs(m.boundsMax[0] - 1.0f) < 1e-6f);
+        CHECK(m.material.empty() || m.material == "tri");
+        // Y-up normals (0,0,-1) rotate to +Y; a Z-up file's (0,-1,0) is taken as is.
+        CHECK(std::fabs(m.normals[1] - (yUp ? 1.0f : -1.0f)) < 1e-6f);
+    }
+    asset::ModelData broken;
+    CHECK(!asset::DecodeModel("junk.fbx", B("fbx"), nullptr, broken).ok());
+    CHECK(!asset::DecodeModel("junk.fbx", vfs::Bytes{}, nullptr, broken).ok());
+}
+
 void TestLoader() {
     vfs::VirtualFileSystem v;
     const auto glb = assets::MakeGlb({Triangle()});
     v.Mount(vfs::MemoryFileSystem({{"models/tri.glb", glb},
+                                   {"models/tri.fbx", Fbx(true)},
                                    {"models/quad.obj", B("v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n")},
                                    {"models/broken.glb", B("glTF junk")},
                                    {"models/thing.fbx", B("fbx")}}),
@@ -255,6 +342,7 @@ void TestLoader() {
         const auto tri = loader.Request("Models/Tri.GLB");
         CHECK(loader.Request("models/tri.glb") == tri);   // deduplicated by normalized path
         const auto quad = loader.Request("models/quad.obj", JobPriority::High);
+        const auto fbxOk = loader.Request("models/tri.fbx");
         const auto broken = loader.Request("models/broken.glb");
         const auto fbx = loader.Request("models/thing.fbx");
         const auto missing = loader.Request("models/missing.obj");
@@ -272,11 +360,16 @@ void TestLoader() {
         }
         auto q = loader.Get(quad);
         CHECK(q && q->triangleCount() == 2);
+        CHECK(loader.Info(fbxOk).state == asset::LoadState::Ready);
+        auto f = loader.Get(fbxOk);
+        CHECK(f && f->meshes.size() == 1 && f->triangleCount() == 1);
+        if (f && f->meshes.size() == 1)
+            CHECK(std::fabs(f->meshes[0].boundsMax[2] - 2.0f) < 1e-6f);   // Y-up FBX became Z-up
         CHECK(loader.Info(broken).state == asset::LoadState::Failed);
         CHECK(loader.Info(fbx).state == asset::LoadState::Failed && loader.Info(fbx).error.find("FBX") != std::string::npos);
         CHECK(loader.Info(missing).state == asset::LoadState::Failed);
         CHECK(loader.Info(bad).state == asset::LoadState::Failed);
-        CHECK(loader.TakeCompleted().size() == 6);
+        CHECK(loader.TakeCompleted().size() == 7);
         CHECK(loader.TakeCompleted().empty());
         CHECK(loader.Request("models/broken.glb") != broken);   // failures are retried
         jobs.WaitIdle();
@@ -329,6 +422,7 @@ int main() {
     TestZip(root);
     TestOverlay();
     TestJobs();
+    TestFbx();
     TestLoader();
     TestPicking();
     std::error_code ec;

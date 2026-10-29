@@ -31,7 +31,7 @@ build/engine/Release/scuba-engine.exe --open models/cube.obj --mount D:/assets.z
 Right drag orbits, middle drag pans, the wheel zooms, left click selects, Ctrl + left drag moves
 the selection, F frames it. `--warp --hidden --frames N` renders N frames on the software adapter
 and exits (the `engine_smoke` test). Phase 1 limits: Windows only, constant PBR materials (no
-textures yet), CPU picking, no FBX.
+textures yet), CPU picking.
 
 ## Requirements
 

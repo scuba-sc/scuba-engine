@@ -59,3 +59,18 @@ add_library(scuba_miniz STATIC "${_miniz_root}/miniz.c")
 target_include_directories(scuba_miniz SYSTEM PUBLIC "${_miniz_root}")
 target_compile_definitions(scuba_miniz PUBLIC MINIZ_NO_ZLIB_COMPATIBLE_NAMES MINIZ_NO_TIME
                            MINIZ_NO_ARCHIVE_APIS MINIZ_NO_STDIO)
+
+# ufbx: single-source FBX importer for the model loader (docs/engine/architecture.md, asset intake).
+# The upstream archive carries the whole tree (samples, tests, its own fixtures); only ufbx.c is
+# compiled and only ufbx.h is exposed. Third-party code keeps its own warnings: scuba_warnings is
+# deliberately not applied to it.
+set(SCUBA_UFBX_VERSION "0.23.1")
+set(SCUBA_UFBX_SHA256 "3e5d8219f5b634fd374949808206eba1a1da49b2b2e3ee31ff0bd228c0abd469")
+scuba_fetch_archive(ufbx
+  "https://github.com/ufbx/ufbx/archive/refs/tags/v${SCUBA_UFBX_VERSION}.zip"
+  "${SCUBA_UFBX_SHA256}" "ufbx-v${SCUBA_UFBX_VERSION}.zip" _ufbx_root)
+set(SCUBA_UFBX_DIR "${_ufbx_root}/ufbx-${SCUBA_UFBX_VERSION}" CACHE INTERNAL "")
+
+add_library(scuba_ufbx STATIC "${SCUBA_UFBX_DIR}/ufbx.c")
+target_include_directories(scuba_ufbx SYSTEM PUBLIC "${SCUBA_UFBX_DIR}")
+
