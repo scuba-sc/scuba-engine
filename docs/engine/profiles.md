@@ -67,6 +67,26 @@ The **View > Product** dock does the same from a mounted product profile and lis
 exported. An export is a local file operation: nothing is uploaded and no game data is included
 beyond the product tree the profile already mounts.
 
+## Diegetic panels
+
+`Renderer::CreatePanel(w, h)` makes an off-screen surface with its own colour target and
+shader-visible view; `FramePacket::panels` places it in the scene as one world-space quad, and the
+frame's UI draw list fills it when the panel asks for content. The quad is drawn with the 3D
+viewport and the depth buffer, so a panel sits in the scene instead of floating over it. Panels
+live in the renderer's own descriptor heaps — the UI backend owns the shared SRV heap — and a panel
+that nothing drew is a magenta rectangle rather than an invisible one.
+
+`scuba-engine --diegetic` creates one 512x384 panel and places it 3 m in front of the camera,
+oriented by the camera's own basis. `--readback FILE` copies the off-screen target back as a binary
+PPM (only an off-screen frame can answer: a swap-chain frame has no stable surface) and fails the
+run when the panel's clear colour never reached the frame. CTest registers that as
+`engine_diegetic_panel`, which is the pixel-level proof that the quad is drawn and sampling the
+panel surface — on WARP, with no desktop.
+
+The content today is the editor's own UI draw list rendered at 1:1 into the panel; a plugin panel
+supplied by its own draw list is the next step and needs a second ImGui context. Neither is native
+game behavior.
+
 ## Scenarios and the headless smoke run
 
 `scuba-engine --scenario FILE` runs a bounded scenario against the mock game on the game thread

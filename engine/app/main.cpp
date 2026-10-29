@@ -4,7 +4,8 @@
 //
 //   scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR | --no-plugins]
 //                [--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync]
-//                [--hidden] [--frames N] [--scenario FILE] [--export DIR | --export-pack FILE]
+//                [--hidden] [--frames N] [--scenario FILE] [--diegetic] [--readback FILE]
+//                [--export DIR | --export-pack FILE]
 //
 // --product DIR mounts a product distribution root: <DIR>/data/plugins is the roster, <DIR>/data is
 // the content mount and sco.storage root. It is fail-closed: a refused plugin, a missing
@@ -18,6 +19,11 @@
 // --scenario FILE runs a bounded scenario (the same steps scuba-hostd accepts) against the mock
 // game before the first frame, prints each step, and exits 1 if any step did not match. The
 // Scenario dock runs one on demand from the UI.
+//
+// --diegetic draws a render-to-texture panel as a world-space quad in front of the camera; with
+// --readback FILE the frame is copied back and written as a binary PPM, and the run fails when the
+// panel's own clear colour never reached the target (a panel nobody drew is magenta, so a missing
+// quad cannot pass as a quiet frame).
 //
 // --export DIR / --export-pack FILE write a product distribution from the mounted --product root
 // and exit without creating a window: <DIR>/data (the roster included) or one .scpak of the same
@@ -48,6 +54,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -79,6 +86,8 @@ struct Args {
     std::vector<std::string> open;
     fs::path scenario;
     fs::path exportDir, exportPack;
+    fs::path readback;
+    bool diegetic = false;
     bool warp = false, debugLayer = false, vsync = true, hidden = false, plugins_on = true;
     int frames = 0;
 };
@@ -113,6 +122,8 @@ std::optional<Args> ParseArgs() {
         else if (k == "--scenario") { if (auto v = next()) args.scenario = PathFromUtf8(*v); else return std::nullopt; }
         else if (k == "--export") { if (auto v = next()) args.exportDir = PathFromUtf8(*v); else return std::nullopt; }
         else if (k == "--export-pack") { if (auto v = next()) args.exportPack = PathFromUtf8(*v); else return std::nullopt; }
+        else if (k == "--readback") { if (auto v = next()) args.readback = PathFromUtf8(*v); else return std::nullopt; }
+        else if (k == "--diegetic") args.diegetic = true;
         else if (k == "--frames") { if (auto v = next()) args.frames = std::max(1, std::atoi(v->c_str())); else return std::nullopt; }
         else if (k == "--mount") {
             auto v = next();
@@ -773,6 +784,17 @@ int Run(const Args& args) {
                          p.reason.empty() ? "" : " - ", p.reason.c_str());
     }
 
+    // The diegetic panel: one surface, filled with this frame's UI and drawn as a quad in front of
+    // the camera. Created before the first frame so its descriptors are never written mid-flight.
+    render::GpuPanel panel = 0;
+    if (args.diegetic) {
+        panel = ed.renderer->CreatePanel(512, 384);
+        if (!panel) {
+            log::Error("render", "diegetic panel creation failed");
+            return 1;
+        }
+    }
+
     int code = 0;
     if (!args.scenario.empty()) {
         // Runs on the game thread before the first frame: a failing step has to be a nonzero exit,
@@ -820,6 +842,30 @@ int Run(const Args& args) {
             if (!inst.gpu) continue;
             packet.items.push_back({inst.gpu, inst.transform.Matrix(), inst.material, inst.id == ed.selected});
         }
+        if (panel) {
+            // Rows of the view matrix are the camera's right, up and forward in world space: the quad
+            // is built from them so it faces the camera wherever the camera is.
+            const render::Float4x4& view = packet.view.view;
+            const float w = 2.0f, h = 1.5f, distance = 3.0f;
+            render::PanelDraw pd;
+            pd.panel = panel;
+            // The shader multiplies a row vector by this matrix, so the rows are the quad's axes:
+            // right, up and forward from the view matrix, then the centre in the last row.
+            for (int c = 0; c < 4; ++c) {
+                pd.world.m[0][c] = view.m[0][c] * w;
+                pd.world.m[1][c] = view.m[1][c] * h;
+                pd.world.m[2][c] = view.m[2][c];
+            }
+            // Row 2 of a D3D view matrix points back towards the camera, so it is both the quad's
+            // normal (the quad faces +Z) and the direction the centre is offset against.
+            const render::Float3 eye = packet.view.eye;
+            const render::Float3 back{view.m[2][0], view.m[2][1], view.m[2][2]};
+            pd.world.m[3][0] = eye.x - back.x * distance;
+            pd.world.m[3][1] = eye.y - back.y * distance;
+            pd.world.m[3][2] = eye.z - back.z * distance;
+            pd.world.m[3][3] = 1.0f;
+            packet.panels.push_back(pd);
+        }
         packet.ui = std::move(uiFrame);
         if (!window.minimized()) ed.renderer->Submit(std::move(packet));
 
@@ -835,6 +881,44 @@ int Run(const Args& args) {
                 code = 1;
             }
         if (gErrors.load()) code = 1;
+        if (!args.readback.empty()) {
+            std::vector<uint8_t> rgba;
+            uint32_t w = 0, h = 0;
+            if (auto rb = ed.renderer->Readback(rgba, w, h); !rb) {
+                log::Error("render", "readback: " + rb.error);
+                code = 1;
+            } else {
+                // Binary PPM: no encoder, no dependency, and every viewer reads it.
+                std::FILE* out = std::fopen(args.readback.string().c_str(), "wb");
+                if (!out) {
+                    log::Error("render", "cannot write " + args.readback.generic_string());
+                    code = 1;
+                } else {
+                    std::fprintf(out, "P6\n%u %u\n255\n", w, h);
+                    std::vector<uint8_t> rgb(size_t{w} * h * 3);
+                    size_t panelPixels = 0;
+                    for (size_t i = 0; i < size_t{w} * h; ++i) {
+                        const uint8_t r = rgba[i * 4 + 0], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
+                        rgb[i * 3 + 0] = r;
+                        rgb[i * 3 + 1] = g;
+                        rgb[i * 3 + 2] = b;
+                        // The panel's clear colour, which only the panel surface and the quad that
+                        // samples it can put on screen.
+                        if (std::abs(int{r} - 158) <= 8 && std::abs(int{g} - 33) <= 8 && std::abs(int{b} - 122) <= 8)
+                            ++panelPixels;
+                    }
+                    std::fwrite(rgb.data(), 1, rgb.size(), out);
+                    std::fclose(out);
+                    std::fprintf(stderr, "scuba-engine: readback %s (%ux%u), panel pixels %zu\n",
+                                 args.readback.generic_string().c_str(), w, h, panelPixels);
+                    if (panelPixels < 64) {
+                        log::Error("render", "diegetic panel never reached the frame: " + std::to_string(panelPixels) +
+                                                 " panel pixel(s)");
+                        code = 1;
+                    }
+                }
+            }
+        }
         std::fprintf(stderr, "scuba-engine: %d frame(s), %zu instance(s), %d error(s) -> exit %d\n", frame, ed.scene.size(), gErrors.load(), code);
     }
 
@@ -860,7 +944,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     const auto args = ParseArgs();
     if (!args) {
         std::fprintf(stderr, "usage: scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR|--no-plugins] "
-                             "[--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N] [--scenario FILE] [--export DIR | --export-pack FILE]\n");
+                             "[--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N] [--scenario FILE] [--diegetic] [--readback FILE] [--export DIR | --export-pack FILE]\n");
         return 2;
     }
     return Run(*args);

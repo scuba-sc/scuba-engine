@@ -136,6 +136,13 @@ if(TARGET scuba-engine)
   add_test(NAME engine_scenario_valid COMMAND scuba-engine --frames 1 --warp --hidden --no-plugins
     --scenario "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/valid.json")
   set_tests_properties(engine_scenario_valid PROPERTIES TIMEOUT 180)
+
+  # The diegetic panel: a render-to-texture surface drawn as a scene quad, read back from the
+  # off-screen target. The engine fails the run when the panel's own clear colour never reaches the
+  # frame, so a quad that stopped being drawn cannot pass as a quiet frame.
+  add_test(NAME engine_diegetic_panel COMMAND scuba-engine --frames 3 --warp --hidden --no-plugins --diegetic
+    --readback "${CMAKE_CURRENT_BINARY_DIR}/diegetic.ppm")
+  set_tests_properties(engine_diegetic_panel PROPERTIES TIMEOUT 300)
 endif()
 
 add_executable(test_selected_profile test_selected_profile.cpp ${CMAKE_SOURCE_DIR}/src/hostd/scenario_runner.cpp)

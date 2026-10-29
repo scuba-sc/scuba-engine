@@ -46,7 +46,9 @@ int main(int argc, char** argv) {
         const fs::path out = base / "dist";
         fs::remove_all(out);
         ExportReport report;
-        CHECK(ExportProduct(root, out, report));
+        const auto st0 = ExportProduct(root, out, report);
+        if (!st0) std::fprintf(stderr, "export refused: %s\n", st0.error.c_str());
+        CHECK(st0);
         CHECK(report.plugins.size() == 2);
         CHECK(report.plugins[0] == "catalog_a" && report.plugins[1] == "catalog_b");
         CHECK(report.files == 5);   // two manifests, two lists, one settings file

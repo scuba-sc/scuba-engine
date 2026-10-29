@@ -96,7 +96,10 @@ Status ExportProduct(const fs::path& root, const fs::path& out, ExportReport& re
     const fs::path staging = out.parent_path() / (out.filename().generic_string() + ".partial");
     std::error_code ec;
     fs::remove_all(staging, ec);   // our own leftover from an interrupted run
-    if (!fs::create_directories(staging, ec) || ec)
+    ec.clear();
+    // create_directories reports false for a directory that already exists, which is not an error.
+    fs::create_directories(staging, ec);
+    if (ec || !fs::is_directory(staging, ec) || ec)
         return Status::Fail("cannot create " + staging.generic_string());
 
     auto fail = [&](const Status& st) {
@@ -128,8 +131,9 @@ Status ExportProduct(const fs::path& root, const fs::path& out, ExportReport& re
         return fail(Status::Fail("exported roster does not match the source roster"));
 
     if (!fs::exists(out, ec)) {
-        if (!fs::create_directories(out.parent_path().empty() ? fs::path(".") : out.parent_path(), ec) || ec)
-            return fail(Status::Fail("cannot create " + out.parent_path().generic_string()));
+        std::error_code cec;
+        fs::create_directories(out.parent_path().empty() ? fs::path(".") : out.parent_path(), cec);
+        if (cec) return fail(Status::Fail("cannot create " + out.parent_path().generic_string()));
         fs::rename(staging, out, ec);
     } else {
         // An empty destination was allowed: move the staged tree into it.
