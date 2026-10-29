@@ -194,22 +194,26 @@ public:
         if (SUCCEEDED(factory_.As(&f5))) f5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &tearing, sizeof tearing);
         tearing_ = tearing == TRUE;
 
-        DXGI_SWAP_CHAIN_DESC1 sc{};
-        sc.Width = std::max(desc.width, 1u);
-        sc.Height = std::max(desc.height, 1u);
-        sc.Format = kColorFormat;
-        sc.SampleDesc.Count = 1;
-        sc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        sc.BufferCount = kBackBuffers;
-        sc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        sc.Flags = tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
-        ComPtr<IDXGISwapChain1> sc1;
-        if (HRESULT hr = factory_->CreateSwapChainForHwnd(queue_.Get(), static_cast<HWND>(desc.window), &sc, nullptr, nullptr, &sc1); FAILED(hr))
-            return Status::Fail(Hr("CreateSwapChainForHwnd", hr));
-        factory_->MakeWindowAssociation(static_cast<HWND>(desc.window), DXGI_MWA_NO_ALT_ENTER);
-        sc1.As(&swapChain_);
-        width_ = sc.Width;
-        height_ = sc.Height;
+        width_ = std::max(desc.width, 1u);
+        height_ = std::max(desc.height, 1u);
+        // An off-screen target has no swap chain: a hidden window cannot host one, and the smoke
+        // path must run where there is no desktop at all.
+        if (!desc.offscreen) {
+            DXGI_SWAP_CHAIN_DESC1 sc{};
+            sc.Width = width_;
+            sc.Height = height_;
+            sc.Format = kColorFormat;
+            sc.SampleDesc.Count = 1;
+            sc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+            sc.BufferCount = kBackBuffers;
+            sc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+            sc.Flags = tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+            ComPtr<IDXGISwapChain1> sc1;
+            if (HRESULT hr = factory_->CreateSwapChainForHwnd(queue_.Get(), static_cast<HWND>(desc.window), &sc, nullptr, nullptr, &sc1); FAILED(hr))
+                return Status::Fail(Hr("CreateSwapChainForHwnd", hr));
+            factory_->MakeWindowAssociation(static_cast<HWND>(desc.window), DXGI_MWA_NO_ALT_ENTER);
+            sc1.As(&swapChain_);
+        }
 
         D3D12_DESCRIPTOR_HEAP_DESC rtv{D3D12_DESCRIPTOR_HEAP_TYPE_RTV, kBackBuffers, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0};
         D3D12_DESCRIPTOR_HEAP_DESC dsv{D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0};
@@ -429,7 +433,26 @@ private:
 
     Status CreateTargets() {
         for (UINT i = 0; i < kBackBuffers; ++i) {
-            if (FAILED(swapChain_->GetBuffer(i, IID_PPV_ARGS(&backBuffers_[i])))) return Status::Fail("GetBuffer failed");
+            if (swapChain_) {
+                if (FAILED(swapChain_->GetBuffer(i, IID_PPV_ARGS(&backBuffers_[i])))) return Status::Fail("GetBuffer failed");
+            } else {
+                D3D12_RESOURCE_DESC t{};
+                t.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+                t.Width = width_;
+                t.Height = height_;
+                t.DepthOrArraySize = 1;
+                t.MipLevels = 1;
+                t.Format = kColorFormat;
+                t.SampleDesc.Count = 1;
+                t.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+                D3D12_CLEAR_VALUE color{};
+                color.Format = kColorFormat;
+                const auto targetHeap = Heap(D3D12_HEAP_TYPE_DEFAULT);
+                if (FAILED(device_->CreateCommittedResource(&targetHeap, D3D12_HEAP_FLAG_NONE, &t,
+                                                            D3D12_RESOURCE_STATE_RENDER_TARGET, &color,
+                                                            IID_PPV_ARGS(&backBuffers_[i]))))
+                    return Status::Fail("off-screen target allocation failed");
+            }
             device_->CreateRenderTargetView(backBuffers_[i].Get(), nullptr, Rtv(i));
         }
         D3D12_RESOURCE_DESC d{};
@@ -492,7 +515,8 @@ private:
         WaitGpu();
         for (auto& b : backBuffers_) b.Reset();
         depth_.Reset();
-        swapChain_->ResizeBuffers(kBackBuffers, w, h, kColorFormat, tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
+        if (swapChain_)
+            swapChain_->ResizeBuffers(kBackBuffers, w, h, kColorFormat, tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
         width_ = w;
         height_ = h;
         if (auto st = CreateTargets(); !st) log::Error("render", "resize: " + st.error);
@@ -558,7 +582,8 @@ private:
     }
 
     void RecordFrame(FramePacket& packet, std::vector<UploadRequest>& uploads, std::vector<GpuModel>& releases) {
-        const UINT bb = swapChain_->GetCurrentBackBufferIndex();
+        // Off-screen frames rotate the targets themselves: there is no swap chain to ask.
+        const UINT bb = swapChain_ ? swapChain_->GetCurrentBackBufferIndex() : (offscreenIndex_ = (offscreenIndex_ + 1) % kBackBuffers);
         FrameContext& frame = frames_[bb];
         if (fence_->GetCompletedValue() < frame.fence) {
             fence_->SetEventOnCompletion(frame.fence, fenceEvent_);
@@ -596,8 +621,10 @@ private:
             at += kInstanceStride;
         }
 
-        auto toRt = Transition(backBuffers_[bb].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-        list_->ResourceBarrier(1, &toRt);
+        if (swapChain_) {
+            auto toRt = Transition(backBuffers_[bb].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            list_->ResourceBarrier(1, &toRt);
+        }
         const auto rtv = Rtv(bb);
         const auto dsv = dsvHeap_->GetCPUDescriptorHandleForHeapStart();
         const float clear[4] = {v.clear.x, v.clear.y, v.clear.z, v.clear.w};
@@ -656,13 +683,17 @@ private:
         }
         uiCv_.notify_all();
 
-        auto toPresent = Transition(backBuffers_[bb].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-        list_->ResourceBarrier(1, &toPresent);
+        if (swapChain_) {
+            auto toPresent = Transition(backBuffers_[bb].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+            list_->ResourceBarrier(1, &toPresent);
+        }
         list_->Close();
         ID3D12CommandList* lists[] = {list_.Get()};
         queue_->ExecuteCommandLists(1, lists);
-        const HRESULT pr = swapChain_->Present(desc_.vsync ? 1 : 0, (!desc_.vsync && tearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0);
-        if (FAILED(pr)) log::Error("render", Hr("Present", pr));
+        if (swapChain_) {
+            const HRESULT pr = swapChain_->Present(desc_.vsync ? 1 : 0, (!desc_.vsync && tearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0);
+            if (FAILED(pr)) log::Error("render", Hr("Present", pr));
+        }
         frame.fence = ++fenceValue_;
         queue_->Signal(fence_.Get(), frame.fence);
 
@@ -758,6 +789,7 @@ private:
     std::vector<GpuModel> releases_;
     std::unordered_set<GpuModel> resident_;
     std::optional<std::pair<uint32_t, uint32_t>> resizeTo_;
+    UINT offscreenIndex_ = 0;   // rotates the off-screen targets; unused with a swap chain
     GpuModel nextModel_ = 1;
     uint64_t uiSubmitted_ = 0, uiConsumed_ = 0;
     bool stopping_ = false, recording_ = false, failed_ = false;

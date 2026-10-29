@@ -65,6 +65,9 @@ struct RendererDesc {
     bool vsync = true;
     bool debugLayer = false;
     bool warp = false;        // software adapter (CI, no GPU)
+    // Render into off-screen targets and never present: the smoke path (--frames) has to run
+    // without a desktop, and a hidden window cannot host a swap chain.
+    bool offscreen = false;
 };
 
 struct RendererStats {

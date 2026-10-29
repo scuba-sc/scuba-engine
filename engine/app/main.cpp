@@ -11,7 +11,9 @@
 // data/plugins or an unusable root stops the editor with exit code 1 and prints the roster.
 //
 // --frames N renders N frames and exits: 0 when every --open model became resident and nothing
-// was logged at error level, 1 otherwise (the smoke test uses it with --warp --hidden).
+// was logged at error level, 1 otherwise (the smoke test uses it with --warp --hidden). With
+// --hidden the frames go to an off-screen target and nothing is presented, so the smoke path runs
+// where there is no desktop at all.
 #include "scuba/asset/model_loader.h"
 #include "scuba/core/job_system.h"
 #include "scuba/core/log.h"
@@ -591,6 +593,9 @@ int Run(const Args& args) {
     rd.vsync = args.vsync;
     rd.debugLayer = args.debugLayer;
     rd.warp = args.warp;
+    // --frames is the smoke path and has to run without a desktop: a hidden window cannot host a
+    // swap chain, so the frames go to an off-screen target and nothing is presented.
+    rd.offscreen = args.frames != 0 && args.hidden;
     Status st;
     ed.renderer = render::Renderer::CreateD3D12(rd, st);
     if (!ed.renderer) { log::Error("render", st.error); return 1; }
