@@ -24,6 +24,7 @@ namespace scuba {
 
 struct ScoHostOptions {
     std::filesystem::path pluginRoot;   // empty: no plugin folders are discovered
+    std::filesystem::path productRoot;  // a product distribution root: mounts <root>/data/plugins
     std::filesystem::path dataRoot;     // empty: no sco.storage
     bool mockGame = true;               // publish the synthetic game.* services
     bool lua = true;                    // false: lua plugins are refused
@@ -48,6 +49,9 @@ public:
     void Tick();
     void Stop();
     bool started() const noexcept { return started_; }
+    // Why the last Start failed, when the kernel could name a reason (a refused product plugin,
+    // a missing data/plugins root); empty otherwise.
+    const std::string& profileError() const noexcept { return profileError_; }
 
     std::vector<ScoPlugin> Plugins() const;
     std::vector<ScoPanel> Panels() const;
@@ -59,6 +63,7 @@ public:
 
 private:
     bool started_ = false;
+    std::string profileError_;
     std::chrono::steady_clock::time_point start_{};
 };
 

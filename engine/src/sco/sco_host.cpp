@@ -33,14 +33,19 @@ ScoHost::~ScoHost() { Stop(); }
 
 Status ScoHost::Start(const ScoHostOptions& options) {
     if (started_) return Status::Fail("sco host already started");
+    profileError_.clear();
     hostd::KernelOptions k;
     k.pluginRoot = options.pluginRoot;
+    k.productRoot = options.productRoot;
     k.dataRoot = options.dataRoot;
     k.lua = options.lua;
     k.mockGame = options.mockGame;
     k.hostVersion = "scuba-engine " SCUBA_VERSION;
     start_ = std::chrono::steady_clock::now();
-    if (!TheKernel().Start(k, &ForwardKernelLog)) return Status::Fail("sco::app::Start failed (see the sco log channel)");
+    if (!TheKernel().Start(k, &ForwardKernelLog)) {
+        profileError_ = TheKernel().profileError();
+        return Status::Fail(profileError_.empty() ? "sco::app::Start failed (see the sco log channel)" : profileError_);
+    }
     started_ = true;
     log::Info("sco", "kernel started; " + std::to_string(Plugins().size()) + " plugin folder(s)");
     return Status::Ok();

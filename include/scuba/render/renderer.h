@@ -23,6 +23,7 @@
 namespace scuba::render {
 
 using GpuModel = uint32_t;   // 0 is never valid
+using GpuPanel = uint32_t;   // 0 is never valid; a render-to-texture surface the scene samples
 
 // Metallic-roughness PBR without textures (phase 1): constant factors per draw.
 struct Material {
@@ -53,10 +54,19 @@ struct UiFrameDeleter {
 };
 using UiFramePtr = std::unique_ptr<UiFrame, UiFrameDeleter>;
 
+// A diegetic panel: an off-screen surface that is filled with the frame's UI and then drawn as one
+// world-space quad, so a plugin panel can live in the scene instead of floating over it.
+struct PanelDraw {
+    GpuPanel panel = 0;
+    Float4x4 world;      // the quad's transform: unit quad in XY, facing +Z before the transform
+    bool content = true; // false leaves the surface as it is (the panel was filled earlier)
+};
+
 struct FramePacket {
     FrameView view;
     std::vector<DrawItem> items;
     UiFramePtr ui;
+    std::vector<PanelDraw> panels;
 };
 
 struct RendererDesc {
@@ -65,6 +75,9 @@ struct RendererDesc {
     bool vsync = true;
     bool debugLayer = false;
     bool warp = false;        // software adapter (CI, no GPU)
+    // Render into off-screen targets and never present: the smoke path (--frames) has to run
+    // without a desktop, and a hidden window cannot host a swap chain.
+    bool offscreen = false;
 };
 
 struct RendererStats {
@@ -91,6 +104,15 @@ public:
     // Waits until the render thread has recorded the previous UI frame, then starts the backend's
     // new frame. Call before ImGui::NewFrame.
     virtual void BeginUiFrame() = 0;
+
+    // Diegetic panels: a surface with its own colour target and shader-visible view, filled by the
+    // frame's UI draw list when a PanelDraw asks for content, then sampled by a world-space quad.
+    // Main thread; the surface lives in the renderer's own heaps and dies with ReleasePanel.
+    virtual GpuPanel CreatePanel(uint32_t width, uint32_t height) = 0;
+    virtual void ReleasePanel(GpuPanel panel) = 0;
+    // Copies the last submitted frame's colour target back as RGBA8. Only an off-screen renderer can
+    // answer this: a swap-chain frame has no stable surface to read.
+    virtual Status Readback(std::vector<uint8_t>& rgba, uint32_t& width, uint32_t& height) = 0;
 
     virtual void Submit(FramePacket packet) = 0;
     virtual void Resize(uint32_t width, uint32_t height) = 0;

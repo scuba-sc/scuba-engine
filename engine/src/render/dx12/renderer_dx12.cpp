@@ -37,6 +37,8 @@ constexpr UINT kBackBuffers = 3;
 constexpr DXGI_FORMAT kColorFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 constexpr DXGI_FORMAT kDepthFormat = DXGI_FORMAT_D32_FLOAT;
 constexpr UINT kSrvDescriptors = 256;
+constexpr UINT kPanelSlots = 4;                          // diegetic panels alive at once
+constexpr UINT kPanelVertexStride = 84;                  // POSITION(3) + TEXCOORD(2) + WORLD(16) floats
 constexpr size_t kFrameUploadBytes = size_t{8} << 20;   // constants + instance data per frame
 constexpr size_t kInstanceStride = 96;                  // 4 world rows + color + params
 
@@ -91,6 +93,26 @@ float4 PSMesh(VOut i, bool front : SV_IsFrontFace) : SV_Target {
     if (i.params.z > 0.5) c = lerp(c, float3(1.0, 0.62, 0.15), 0.35);
     c = c / (1 + c);
     return float4(pow(c, 1 / 2.2), 1);
+}
+
+// A diegetic panel: one unit quad in XY carrying its own world matrix, sampling the surface the
+// UI was rendered into. The sampled colour is already display-encoded, so it is written as-is.
+Texture2D panelTex : register(t0);
+SamplerState panelSampler : register(s0);
+struct PIn {
+    float3 pos : POSITION; float2 uv : TEXCOORD0;
+    float4 w0 : WORLD0; float4 w1 : WORLD1; float4 w2 : WORLD2; float4 w3 : WORLD3;
+};
+struct POut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
+POut VSPanel(PIn v) {
+    float4x4 world = float4x4(v.w0, v.w1, v.w2, v.w3);
+    POut o;
+    o.pos = mul(mul(float4(v.pos, 1), world), viewProj);
+    o.uv = v.uv;
+    return o;
+}
+float4 PSPanel(POut i) : SV_Target {
+    return float4(panelTex.Sample(panelSampler, i.uv).rgb, 1);
 }
 
 struct GOut { float4 pos : SV_Position; float4 color : COLOR; };
@@ -194,22 +216,26 @@ public:
         if (SUCCEEDED(factory_.As(&f5))) f5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &tearing, sizeof tearing);
         tearing_ = tearing == TRUE;
 
-        DXGI_SWAP_CHAIN_DESC1 sc{};
-        sc.Width = std::max(desc.width, 1u);
-        sc.Height = std::max(desc.height, 1u);
-        sc.Format = kColorFormat;
-        sc.SampleDesc.Count = 1;
-        sc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        sc.BufferCount = kBackBuffers;
-        sc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        sc.Flags = tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
-        ComPtr<IDXGISwapChain1> sc1;
-        if (HRESULT hr = factory_->CreateSwapChainForHwnd(queue_.Get(), static_cast<HWND>(desc.window), &sc, nullptr, nullptr, &sc1); FAILED(hr))
-            return Status::Fail(Hr("CreateSwapChainForHwnd", hr));
-        factory_->MakeWindowAssociation(static_cast<HWND>(desc.window), DXGI_MWA_NO_ALT_ENTER);
-        sc1.As(&swapChain_);
-        width_ = sc.Width;
-        height_ = sc.Height;
+        width_ = std::max(desc.width, 1u);
+        height_ = std::max(desc.height, 1u);
+        // An off-screen target has no swap chain: a hidden window cannot host one, and the smoke
+        // path must run where there is no desktop at all.
+        if (!desc.offscreen) {
+            DXGI_SWAP_CHAIN_DESC1 sc{};
+            sc.Width = width_;
+            sc.Height = height_;
+            sc.Format = kColorFormat;
+            sc.SampleDesc.Count = 1;
+            sc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+            sc.BufferCount = kBackBuffers;
+            sc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+            sc.Flags = tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+            ComPtr<IDXGISwapChain1> sc1;
+            if (HRESULT hr = factory_->CreateSwapChainForHwnd(queue_.Get(), static_cast<HWND>(desc.window), &sc, nullptr, nullptr, &sc1); FAILED(hr))
+                return Status::Fail(Hr("CreateSwapChainForHwnd", hr));
+            factory_->MakeWindowAssociation(static_cast<HWND>(desc.window), DXGI_MWA_NO_ALT_ENTER);
+            sc1.As(&swapChain_);
+        }
 
         D3D12_DESCRIPTOR_HEAP_DESC rtv{D3D12_DESCRIPTOR_HEAP_TYPE_RTV, kBackBuffers, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0};
         D3D12_DESCRIPTOR_HEAP_DESC dsv{D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0};
@@ -220,6 +246,17 @@ public:
         rtvStride_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
         srvStride_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         for (UINT i = kSrvDescriptors; i-- > 0;) freeSrv_.push_back(i);
+
+        // Panels get their own heaps: the UI backend owns the shared SRV heap, and a panel surface
+        // must not be handed out and freed by the ImGui allocator.
+        D3D12_DESCRIPTOR_HEAP_DESC psrv{D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, kPanelSlots, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
+        D3D12_DESCRIPTOR_HEAP_DESC prtv{D3D12_DESCRIPTOR_HEAP_TYPE_RTV, kPanelSlots, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0};
+        if (FAILED(device_->CreateDescriptorHeap(&psrv, IID_PPV_ARGS(&panelSrvHeap_))) ||
+            FAILED(device_->CreateDescriptorHeap(&prtv, IID_PPV_ARGS(&panelRtvHeap_))))
+            return Status::Fail("panel descriptor heap creation failed");
+        panelSrvStride_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        panelRtvStride_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        for (UINT i = kPanelSlots; i-- > 0;) freePanelSlots_.push_back(i);
 
         for (auto& f : frames_) {
             if (FAILED(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&f.allocator)))) return Status::Fail("CreateCommandAllocator failed");
@@ -368,12 +405,30 @@ private:
     }
 
     Status CreatePipelines() {
-        D3D12_ROOT_PARAMETER param{};
-        param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        // 0: frame constants. 1: the diegetic panel's surface (a single SRV), so a panel quad can
+        // sample what the UI pass rendered without a second root signature.
+        D3D12_DESCRIPTOR_RANGE panelRange{};
+        panelRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        panelRange.NumDescriptors = 1;
+        panelRange.BaseShaderRegister = 0;
+        D3D12_ROOT_PARAMETER param[2]{};
+        param[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        param[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        param[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        param[1].DescriptorTable = {1, &panelRange};
+        param[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        D3D12_STATIC_SAMPLER_DESC panelSampler{};
+        panelSampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;   // 1:1 texel-to-pixel
+        panelSampler.AddressU = panelSampler.AddressV = panelSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        panelSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        panelSampler.ShaderRegister = 0;
+        panelSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        panelSampler.MaxLOD = D3D12_FLOAT32_MAX;
         D3D12_ROOT_SIGNATURE_DESC rs{};
-        rs.NumParameters = 1;
-        rs.pParameters = &param;
+        rs.NumParameters = 2;
+        rs.pParameters = param;
+        rs.NumStaticSamplers = 1;
+        rs.pStaticSamplers = &panelSampler;
         rs.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
         ComPtr<ID3DBlob> blob, error;
         if (FAILED(D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error)) ||
@@ -424,12 +479,50 @@ private:
         pso.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
         pso.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
         if (HRESULT hr = device_->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&gridPso_)); FAILED(hr)) return Status::Fail(Hr("grid PSO", hr));
+
+        ComPtr<ID3DBlob> vsPanel, psPanel;
+        if (auto st = Compile("VSPanel", "vs_5_0", vsPanel); !st) return st;
+        if (auto st = Compile("PSPanel", "ps_5_0", psPanel); !st) return st;
+        const D3D12_INPUT_ELEMENT_DESC panelLayout[] = {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"WORLD", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 20, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"WORLD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"WORLD", 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 52, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"WORLD", 3, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 68, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        };
+        pso.VS = {vsPanel->GetBufferPointer(), vsPanel->GetBufferSize()};
+        pso.PS = {psPanel->GetBufferPointer(), psPanel->GetBufferSize()};
+        pso.InputLayout = {panelLayout, static_cast<UINT>(std::size(panelLayout))};
+        pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        pso.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+        pso.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+        if (HRESULT hr = device_->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&panelPso_)); FAILED(hr)) return Status::Fail(Hr("panel PSO", hr));
         return Status::Ok();
     }
 
     Status CreateTargets() {
         for (UINT i = 0; i < kBackBuffers; ++i) {
-            if (FAILED(swapChain_->GetBuffer(i, IID_PPV_ARGS(&backBuffers_[i])))) return Status::Fail("GetBuffer failed");
+            if (swapChain_) {
+                if (FAILED(swapChain_->GetBuffer(i, IID_PPV_ARGS(&backBuffers_[i])))) return Status::Fail("GetBuffer failed");
+            } else {
+                D3D12_RESOURCE_DESC t{};
+                t.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+                t.Width = width_;
+                t.Height = height_;
+                t.DepthOrArraySize = 1;
+                t.MipLevels = 1;
+                t.Format = kColorFormat;
+                t.SampleDesc.Count = 1;
+                t.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+                D3D12_CLEAR_VALUE color{};
+                color.Format = kColorFormat;
+                const auto targetHeap = Heap(D3D12_HEAP_TYPE_DEFAULT);
+                if (FAILED(device_->CreateCommittedResource(&targetHeap, D3D12_HEAP_FLAG_NONE, &t,
+                                                            D3D12_RESOURCE_STATE_RENDER_TARGET, &color,
+                                                            IID_PPV_ARGS(&backBuffers_[i]))))
+                    return Status::Fail("off-screen target allocation failed");
+            }
             device_->CreateRenderTargetView(backBuffers_[i].Get(), nullptr, Rtv(i));
         }
         D3D12_RESOURCE_DESC d{};
@@ -448,7 +541,123 @@ private:
         if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &d, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clear, IID_PPV_ARGS(&depth_))))
             return Status::Fail("depth buffer allocation failed");
         device_->CreateDepthStencilView(depth_.Get(), nullptr, dsvHeap_->GetCPUDescriptorHandleForHeapStart());
+
+        // The off-screen path can read its target back; a swap-chain frame has no stable surface, so
+        // nothing is allocated for it.
+        readback_.Reset();
+        readbackBytes_ = 0;
+        readbackPitch_ = 0;
+        if (desc_.offscreen) {
+            // A readback heap takes buffers, not textures: the frame is copied through a placed
+            // footprint, which is also the only place the row pitch the map sees comes from.
+            D3D12_RESOURCE_DESC c{};
+            c.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+            c.Width = width_;
+            c.Height = height_;
+            c.DepthOrArraySize = 1;
+            c.MipLevels = 1;
+            c.Format = kColorFormat;
+            c.SampleDesc.Count = 1;
+            UINT rows = 0;
+            UINT64 rowBytes = 0, total = 0;
+            device_->GetCopyableFootprints(&c, 0, 1, 0, &readbackFootprint_, &rows, &rowBytes, &total);
+            if (total == 0) return Status::Fail("readback footprint is empty");
+            D3D12_RESOURCE_DESC b{};
+            b.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+            b.Width = total;
+            b.Height = 1;
+            b.DepthOrArraySize = 1;
+            b.MipLevels = 1;
+            b.Format = DXGI_FORMAT_UNKNOWN;
+            b.SampleDesc.Count = 1;
+            b.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            b.Flags = D3D12_RESOURCE_FLAG_NONE;
+            const auto rbHeap = Heap(D3D12_HEAP_TYPE_READBACK);
+            if (HRESULT hr = device_->CreateCommittedResource(&rbHeap, D3D12_HEAP_FLAG_NONE, &b,
+                                                              D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                              IID_PPV_ARGS(&readback_)); FAILED(hr))
+                return Status::Fail(Hr("readback allocation", hr));
+            readbackPitch_ = readbackFootprint_.Footprint.RowPitch;
+            readbackBytes_ = total;
+        }
         return Status::Ok();
+    }
+
+    GpuPanel CreatePanel(uint32_t width, uint32_t height) override {
+        if (freePanelSlots_.empty()) return 0;
+        PanelGpu panel;
+        panel.width = std::max(width, 1u);
+        panel.height = std::max(height, 1u);
+        D3D12_RESOURCE_DESC t{};
+        t.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        t.Width = panel.width;
+        t.Height = panel.height;
+        t.DepthOrArraySize = 1;
+        t.MipLevels = 1;
+        t.Format = kColorFormat;
+        t.SampleDesc.Count = 1;
+        t.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+        D3D12_CLEAR_VALUE clear{};
+        clear.Format = kColorFormat;
+        // A panel with nothing drawn into it is a visible magenta rectangle, not an invisible black
+        // one: a panel that silently shows nothing is the failure this makes obvious.
+        clear.Color[0] = 0.62f; clear.Color[1] = 0.13f; clear.Color[2] = 0.48f; clear.Color[3] = 1.0f;
+        const auto heap = Heap(D3D12_HEAP_TYPE_DEFAULT);
+        if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &t,
+                                                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &clear,
+                                                    IID_PPV_ARGS(&panel.tex))))
+            return 0;
+        panel.slot = freePanelSlots_.back();
+        freePanelSlots_.pop_back();
+        panel.rtv = panelRtvHeap_->GetCPUDescriptorHandleForHeapStart();
+        panel.rtv.ptr += static_cast<SIZE_T>(panel.slot) * panelRtvStride_;
+        panel.srvCpu = panelSrvHeap_->GetCPUDescriptorHandleForHeapStart();
+        panel.srvCpu.ptr += static_cast<SIZE_T>(panel.slot) * panelSrvStride_;
+        panel.srv = panelSrvHeap_->GetGPUDescriptorHandleForHeapStart();
+        panel.srv.ptr += static_cast<UINT64>(panel.slot) * panelSrvStride_;
+        device_->CreateRenderTargetView(panel.tex.Get(), nullptr, panel.rtv);
+        device_->CreateShaderResourceView(panel.tex.Get(), nullptr, panel.srvCpu);
+        const GpuPanel id = nextPanel_++;
+        panels_.emplace(id, std::move(panel));
+        return id;
+    }
+
+    void ReleasePanel(GpuPanel panel) override {
+        auto it = panels_.find(panel);
+        if (it == panels_.end()) return;
+        // The surface may be sampled by a frame still in flight: idle the GPU, then hand the slot back.
+        Flush();
+        freePanelSlots_.push_back(it->second.slot);
+        panels_.erase(it);
+    }
+
+    Status Readback(std::vector<uint8_t>& rgba, uint32_t& width, uint32_t& height) override {
+        if (!desc_.offscreen || !readback_) return Status::Fail("readback requires an off-screen target");
+        Flush();
+        void* mapped = nullptr;
+        const D3D12_RANGE range{0, static_cast<SIZE_T>(readbackBytes_)};
+        if (FAILED(readback_->Map(0, &range, &mapped)) || !mapped) return Status::Fail("readback map failed");
+        width = width_;
+        height = height_;
+        const size_t rowBytes = static_cast<size_t>(width_) * 4;
+        rgba.resize(rowBytes * height_);
+        for (uint32_t y = 0; y < height_; ++y)
+            std::memcpy(rgba.data() + y * rowBytes, static_cast<const uint8_t*>(mapped) + static_cast<size_t>(y) * readbackPitch_, rowBytes);
+        readback_->Unmap(0, nullptr);
+        return Status::Ok();
+    }
+
+    // One unit quad in XY, its world matrix repeated per vertex: six vertices, no index buffer.
+    static void WritePanelQuad(uint8_t* out, const Float4x4& world) {
+        const float corners[6][2] = {{-0.5f, -0.5f}, {0.5f, -0.5f}, {0.5f, 0.5f},
+                                     {-0.5f, -0.5f}, {0.5f, 0.5f}, {-0.5f, 0.5f}};
+        const float uvs[6][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 1}, {1, 0}, {0, 0}};
+        for (int i = 0; i < 6; ++i) {
+            float* v = reinterpret_cast<float*>(out + static_cast<size_t>(i) * kPanelVertexStride);
+            v[0] = corners[i][0]; v[1] = corners[i][1]; v[2] = 0.0f;
+            v[3] = uvs[i][0]; v[4] = uvs[i][1];
+            std::memcpy(v + 5, world.m, 64);
+        }
     }
 
     D3D12_CPU_DESCRIPTOR_HANDLE Rtv(UINT i) const {
@@ -492,7 +701,8 @@ private:
         WaitGpu();
         for (auto& b : backBuffers_) b.Reset();
         depth_.Reset();
-        swapChain_->ResizeBuffers(kBackBuffers, w, h, kColorFormat, tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
+        if (swapChain_)
+            swapChain_->ResizeBuffers(kBackBuffers, w, h, kColorFormat, tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
         width_ = w;
         height_ = h;
         if (auto st = CreateTargets(); !st) log::Error("render", "resize: " + st.error);
@@ -558,7 +768,8 @@ private:
     }
 
     void RecordFrame(FramePacket& packet, std::vector<UploadRequest>& uploads, std::vector<GpuModel>& releases) {
-        const UINT bb = swapChain_->GetCurrentBackBufferIndex();
+        // Off-screen frames rotate the targets themselves: there is no swap chain to ask.
+        const UINT bb = swapChain_ ? swapChain_->GetCurrentBackBufferIndex() : (offscreenIndex_ = (offscreenIndex_ + 1) % kBackBuffers);
         FrameContext& frame = frames_[bb];
         if (fence_->GetCompletedValue() < frame.fence) {
             fence_->SetEventOnCompletion(frame.fence, fenceEvent_);
@@ -596,8 +807,36 @@ private:
             at += kInstanceStride;
         }
 
-        auto toRt = Transition(backBuffers_[bb].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-        list_->ResourceBarrier(1, &toRt);
+        // Panels first: filling one retargets the command list, so it cannot interleave with the
+        // frame's own target. The UI draw data is a clone, so rendering it here as well is safe.
+        if (packet.ui && uiReady_) {
+            for (const auto& pd : packet.panels) {
+                auto it = panels_.find(pd.panel);
+                if (it == panels_.end() || !pd.content) continue;
+                auto& panel = it->second;
+                auto toRt = Transition(panel.tex.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                       D3D12_RESOURCE_STATE_RENDER_TARGET);
+                list_->ResourceBarrier(1, &toRt);
+                const float panelClear[4] = {0.62f, 0.13f, 0.48f, 1.0f};
+                list_->ClearRenderTargetView(panel.rtv, panelClear, 0, nullptr);
+                list_->OMSetRenderTargets(1, &panel.rtv, FALSE, nullptr);
+                D3D12_VIEWPORT pvp{0, 0, static_cast<float>(panel.width), static_cast<float>(panel.height), 0, 1};
+                D3D12_RECT psc{0, 0, static_cast<LONG>(panel.width), static_cast<LONG>(panel.height)};
+                list_->RSSetViewports(1, &pvp);
+                list_->RSSetScissorRects(1, &psc);
+                ID3D12DescriptorHeap* panelHeaps[] = {srvHeap_.Get()};
+                list_->SetDescriptorHeaps(1, panelHeaps);
+                ImGui_ImplDX12_RenderDrawData(&packet.ui->data, list_.Get());
+                auto toSrv = Transition(panel.tex.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                list_->ResourceBarrier(1, &toSrv);
+            }
+        }
+
+        if (swapChain_) {
+            auto toRt = Transition(backBuffers_[bb].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            list_->ResourceBarrier(1, &toRt);
+        }
         const auto rtv = Rtv(bb);
         const auto dsv = dsvHeap_->GetCPUDescriptorHandleForHeapStart();
         const float clear[4] = {v.clear.x, v.clear.y, v.clear.z, v.clear.w};
@@ -640,6 +879,27 @@ private:
                 list_->DrawInstanced(41 * 4, 1, 0, 0);
                 ++drawCalls;
             }
+            if (!packet.panels.empty()) {
+                // The quads sit in the scene, so they take the 3D viewport and the depth buffer.
+                list_->SetPipelineState(panelPso_.Get());
+                list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                ID3D12DescriptorHeap* panelHeaps[] = {panelSrvHeap_.Get()};
+                list_->SetDescriptorHeaps(1, panelHeaps);
+                size_t at2 = 256 + items.size() * kInstanceStride;
+                for (const auto& pd : packet.panels) {
+                    auto it = panels_.find(pd.panel);
+                    if (it == panels_.end()) continue;
+                    const size_t bytes = size_t{kPanelVertexStride} * 6;
+                    if (at2 + bytes > kFrameUploadBytes) break;
+                    WritePanelQuad(frame.mapped + at2, pd.world);
+                    list_->SetGraphicsRootDescriptorTable(1, it->second.srv);
+                    D3D12_VERTEX_BUFFER_VIEW pvb{uploadBase + at2, static_cast<UINT>(bytes), kPanelVertexStride};
+                    list_->IASetVertexBuffers(0, 1, &pvb);
+                    list_->DrawInstanced(6, 1, 0, 0);
+                    ++drawCalls;
+                    at2 += bytes;
+                }
+            }
         }
 
         // UI over the whole window, no depth.
@@ -656,13 +916,36 @@ private:
         }
         uiCv_.notify_all();
 
-        auto toPresent = Transition(backBuffers_[bb].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-        list_->ResourceBarrier(1, &toPresent);
+        if (swapChain_) {
+            auto toPresent = Transition(backBuffers_[bb].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+            list_->ResourceBarrier(1, &toPresent);
+        }
+        if (readback_) {
+            // An off-screen frame keeps its target, so the frame it just recorded can be copied out
+            // for a test to read; a presented frame has no such surface.
+            auto toCopy = Transition(backBuffers_[bb].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                     D3D12_RESOURCE_STATE_COPY_SOURCE);
+            list_->ResourceBarrier(1, &toCopy);
+            D3D12_TEXTURE_COPY_LOCATION dst{};
+            dst.pResource = readback_.Get();
+            dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            dst.PlacedFootprint = readbackFootprint_;
+            D3D12_TEXTURE_COPY_LOCATION src{};
+            src.pResource = backBuffers_[bb].Get();
+            src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            src.SubresourceIndex = 0;
+            list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+            auto back = Transition(backBuffers_[bb].Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+                                   D3D12_RESOURCE_STATE_RENDER_TARGET);
+            list_->ResourceBarrier(1, &back);
+        }
         list_->Close();
         ID3D12CommandList* lists[] = {list_.Get()};
         queue_->ExecuteCommandLists(1, lists);
-        const HRESULT pr = swapChain_->Present(desc_.vsync ? 1 : 0, (!desc_.vsync && tearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0);
-        if (FAILED(pr)) log::Error("render", Hr("Present", pr));
+        if (swapChain_) {
+            const HRESULT pr = swapChain_->Present(desc_.vsync ? 1 : 0, (!desc_.vsync && tearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0);
+            if (FAILED(pr)) log::Error("render", Hr("Present", pr));
+        }
         frame.fence = ++fenceValue_;
         queue_->Signal(fence_.Get(), frame.fence);
 
@@ -732,7 +1015,7 @@ private:
     ComPtr<ID3D12Resource> depth_;
     ComPtr<ID3D12GraphicsCommandList> list_;
     ComPtr<ID3D12RootSignature> rootSig_;
-    ComPtr<ID3D12PipelineState> meshPso_, gridPso_;
+    ComPtr<ID3D12PipelineState> meshPso_, gridPso_, panelPso_;
     ComPtr<ID3D12Fence> fence_;
     HANDLE fenceEvent_ = nullptr;
     UINT64 fenceValue_ = 0;
@@ -740,6 +1023,21 @@ private:
     UINT rtvStride_ = 0, srvStride_ = 0;
     uint32_t width_ = 0, height_ = 0;
     bool tearing_ = false, warp_ = false, uiReady_ = false;
+    struct PanelGpu {
+        ComPtr<ID3D12Resource> tex;
+        uint32_t width = 0, height = 0;
+        D3D12_CPU_DESCRIPTOR_HANDLE rtv{}, srvCpu{};
+        D3D12_GPU_DESCRIPTOR_HANDLE srv{};
+        UINT slot = 0;
+    };
+    ComPtr<ID3D12DescriptorHeap> panelSrvHeap_, panelRtvHeap_;
+    ComPtr<ID3D12Resource> readback_;
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT readbackFootprint_{};   // where the frame lands in readback_
+    UINT panelSrvStride_ = 0, panelRtvStride_ = 0, readbackPitch_ = 0;
+    UINT64 readbackBytes_ = 0;
+    std::vector<UINT> freePanelSlots_;
+    std::unordered_map<GpuPanel, PanelGpu> panels_;
+    GpuPanel nextPanel_ = 1;
     std::string adapter_;
 
     std::mutex srvMutex_;
@@ -758,6 +1056,7 @@ private:
     std::vector<GpuModel> releases_;
     std::unordered_set<GpuModel> resident_;
     std::optional<std::pair<uint32_t, uint32_t>> resizeTo_;
+    UINT offscreenIndex_ = 0;   // rotates the off-screen targets; unused with a swap chain
     GpuModel nextModel_ = 1;
     uint64_t uiSubmitted_ = 0, uiConsumed_ = 0;
     bool stopping_ = false, recording_ = false, failed_ = false;

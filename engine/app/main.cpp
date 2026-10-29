@@ -3,16 +3,37 @@
 // render thread inside the renderer, and a job pool for asset intake.
 //
 //   scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR | --no-plugins]
-//                [--data DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync]
-//                [--hidden] [--frames N]
+//                [--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync]
+//                [--hidden] [--frames N] [--scenario FILE] [--diegetic] [--readback FILE]
+//                [--export DIR | --export-pack FILE]
+//
+// --product DIR mounts a product distribution root: <DIR>/data/plugins is the roster, <DIR>/data is
+// the content mount and sco.storage root. It is fail-closed: a refused plugin, a missing
+// data/plugins or an unusable root stops the editor with exit code 1 and prints the roster.
 //
 // --frames N renders N frames and exits: 0 when every --open model became resident and nothing
-// was logged at error level, 1 otherwise (the smoke test uses it with --warp --hidden).
+// was logged at error level, 1 otherwise (the smoke test uses it with --warp --hidden). With
+// --hidden the frames go to an off-screen target and nothing is presented, so the smoke path runs
+// where there is no desktop at all.
+//
+// --scenario FILE runs a bounded scenario (the same steps scuba-hostd accepts) against the mock
+// game before the first frame, prints each step, and exits 1 if any step did not match. The
+// Scenario dock runs one on demand from the UI.
+//
+// --diegetic draws a render-to-texture panel as a world-space quad in front of the camera; with
+// --readback FILE the frame is copied back and written as a binary PPM, and the run fails when the
+// panel's own clear colour never reached the target (a panel nobody drew is magenta, so a missing
+// quad cannot pass as a quiet frame).
+//
+// --export DIR / --export-pack FILE write a product distribution from the mounted --product root
+// and exit without creating a window: <DIR>/data (the roster included) or one .scpak of the same
+// tree. Both refuse an occupied destination and a roster folder without a plugin.ini.
 #include "scuba/asset/model_loader.h"
 #include "scuba/core/job_system.h"
 #include "scuba/core/log.h"
 #include "scuba/platform/window.h"
 #include "scuba/render/camera.h"
+#include "scuba/product/export.h"
 #include "scuba/render/picking.h"
 #include "scuba/render/renderer.h"
 #include "scuba/sco/sco_host.h"
@@ -20,6 +41,8 @@
 #include "scuba/ui/ui_layer.h"
 #include "scuba/vfs/pack.h"
 #include "scuba/vfs/virtual_file_system.h"
+
+#include "hostd/scenario_runner.h"
 
 #include "imgui.h"
 #include "sco/widgets_imgui.h"
@@ -31,6 +54,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -55,9 +79,15 @@ struct Args {
     fs::path content = SCUBA_DEFAULT_CONTENT_DIR;
     fs::path plugins = SCUBA_DEFAULT_PLUGIN_ROOT;
     fs::path data;
+    fs::path product;
+    bool contentSet = false, pluginsSet = false, dataSet = false;
     struct MountArg { std::string path, mountPoint; int priority = 10; };
     std::vector<MountArg> mounts;
     std::vector<std::string> open;
+    fs::path scenario;
+    fs::path exportDir, exportPack;
+    fs::path readback;
+    bool diegetic = false;
     bool warp = false, debugLayer = false, vsync = true, hidden = false, plugins_on = true;
     int frames = 0;
 };
@@ -83,11 +113,17 @@ std::optional<Args> ParseArgs() {
     for (size_t i = 0; i < a.size(); ++i) {
         auto next = [&]() -> std::optional<std::string> { return i + 1 < a.size() ? std::optional<std::string>(a[++i]) : std::nullopt; };
         const std::string& k = a[i];
-        if (k == "--content") { if (auto v = next()) args.content = PathFromUtf8(*v); else return std::nullopt; }
-        else if (k == "--plugins") { if (auto v = next()) args.plugins = PathFromUtf8(*v); else return std::nullopt; }
-        else if (k == "--no-plugins") args.plugins_on = false;
-        else if (k == "--data") { if (auto v = next()) args.data = PathFromUtf8(*v); else return std::nullopt; }
+        if (k == "--content") { if (auto v = next()) { args.content = PathFromUtf8(*v); args.contentSet = true; } else return std::nullopt; }
+        else if (k == "--plugins") { if (auto v = next()) { args.plugins = PathFromUtf8(*v); args.pluginsSet = true; } else return std::nullopt; }
+        else if (k == "--no-plugins") { args.plugins_on = false; args.pluginsSet = true; }
+        else if (k == "--data") { if (auto v = next()) { args.data = PathFromUtf8(*v); args.dataSet = true; } else return std::nullopt; }
+        else if (k == "--product") { if (auto v = next()) args.product = PathFromUtf8(*v); else return std::nullopt; }
         else if (k == "--open") { if (auto v = next()) args.open.push_back(*v); else return std::nullopt; }
+        else if (k == "--scenario") { if (auto v = next()) args.scenario = PathFromUtf8(*v); else return std::nullopt; }
+        else if (k == "--export") { if (auto v = next()) args.exportDir = PathFromUtf8(*v); else return std::nullopt; }
+        else if (k == "--export-pack") { if (auto v = next()) args.exportPack = PathFromUtf8(*v); else return std::nullopt; }
+        else if (k == "--readback") { if (auto v = next()) args.readback = PathFromUtf8(*v); else return std::nullopt; }
+        else if (k == "--diegetic") args.diegetic = true;
         else if (k == "--frames") { if (auto v = next()) args.frames = std::max(1, std::atoi(v->c_str())); else return std::nullopt; }
         else if (k == "--mount") {
             auto v = next();
@@ -105,6 +141,12 @@ std::optional<Args> ParseArgs() {
         else if (k == "--hidden") args.hidden = true;
         else return std::nullopt;
     }
+    // A product profile derives all three of its roots; mixing them would be ambiguous.
+    if (!args.product.empty() && (args.pluginsSet || args.dataSet || args.contentSet)) return std::nullopt;
+    // An export is a product distribution or nothing: it reads the mounted root, so it needs one,
+    // and the two destinations are different artifacts.
+    if (!args.exportDir.empty() && !args.exportPack.empty()) return std::nullopt;
+    if ((!args.exportDir.empty() || !args.exportPack.empty()) && args.product.empty()) return std::nullopt;
     return args;
 }
 
@@ -154,7 +196,16 @@ struct Editor {
 
     // panels
     bool showContent = true, showMounts = true, showScene = true, showInspector = true, showPlugins = true,
-         showLoader = true, showLog = true, showStats = true, showDemo = false;
+         showLoader = true, showLog = true, showStats = true, showScenario = false, showProduct = false,
+         showDemo = false;
+    char scenarioPath[512] = "";
+    fs::path productRoot;
+    char exportPath[512] = "";
+    std::string exportStatus;
+    bool exportPack = false;
+    std::vector<hostd::ScenarioStepResult> scenarioResults;
+    std::string scenarioStatus;
+    bool scenarioPassed = false;
     char mountPath[512] = "";
     char mountPoint[128] = "";
     int mountPriority = 10;
@@ -209,6 +260,28 @@ struct Editor {
                 }
     }
 
+    // Runs a scenario file on the game thread. The dock and --scenario both come through here, so
+    // the UI and the smoke path cannot disagree about what a scenario did.
+    void RunScenarioFile(const std::string& path) {
+        scenarioResults.clear();
+        scenarioPassed = false;
+        hostd::Json scenario;
+        std::string error;
+        if (!hostd::LoadScenario(path, scenario, error)) {
+            scenarioStatus = "load failed: " + error;
+            log::Error("scenario", path + ": " + error);
+            return;
+        }
+        scenarioPassed = hostd::RunScenario(scenario, scenarioResults);
+        size_t matched = 0;
+        for (const auto& r : scenarioResults)
+            if (r.matched) ++matched;
+        scenarioStatus = (scenarioPassed ? "pass " : "FAIL ") + std::to_string(matched) + "/" +
+                         std::to_string(scenarioResults.size()) + " step(s)";
+        if (!scenarioPassed) log::Error("scenario", path + ": " + scenarioStatus);
+        else log::Info("scenario", path + ": " + scenarioStatus);
+    }
+
     void FrameInstance(const Instance& inst) {
         if (!inst.model) return;
         auto mn = inst.model->boundsMin, mx = inst.model->boundsMax;
@@ -243,6 +316,8 @@ struct Editor {
     void DrawLoader();
     void DrawStats();
     void DrawLog();
+    void DrawScenario();
+    void DrawProduct();
 };
 
 // ---- input layers --------------------------------------------------------------------------------
@@ -352,6 +427,8 @@ void Editor::DrawMenu(bool& quit) {
         ImGui::MenuItem("Asset loader", nullptr, &showLoader);
         ImGui::MenuItem("Stats", nullptr, &showStats);
         ImGui::MenuItem("Log", nullptr, &showLog);
+        ImGui::MenuItem("Scenario", nullptr, &showScenario);
+        ImGui::MenuItem("Product", nullptr, &showProduct);
         ImGui::Separator();
         ImGui::MenuItem("ImGui demo", nullptr, &showDemo);
         ImGui::EndMenu();
@@ -539,6 +616,81 @@ void Editor::DrawLog() {
     ImGui::End();
 }
 
+void Editor::DrawScenario() {
+    if (!ImGui::Begin("Scenario", &showScenario)) { ImGui::End(); return; }
+    ImGui::TextDisabled("Bounded synthetic controls; nothing here has run in Star Citizen.");
+    ImGui::SetNextItemWidth(-90);
+    ImGui::InputTextWithHint("##scenario", "scenario .json", scenarioPath, sizeof scenarioPath);
+    ImGui::SameLine();
+    if (ImGui::Button("Run") && scenarioPath[0] != '\0') RunScenarioFile(scenarioPath);
+    if (!scenarioStatus.empty()) {
+        const ImVec4 color = scenarioPassed ? ImVec4{0.5f, 0.85f, 0.5f, 1} : ImVec4{1.0f, 0.45f, 0.4f, 1};
+        ImGui::TextColored(color, "%s", scenarioStatus.c_str());
+    }
+    if (!scenarioResults.empty()) {
+        ImGui::BeginChild("steps");
+        if (ImGui::BeginTable("steps", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+                                           ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, 28);
+            ImGui::TableSetupColumn("control");
+            ImGui::TableSetupColumn("outcome", ImGuiTableColumnFlags_WidthFixed, 64);
+            ImGui::TableSetupColumn("detail");
+            ImGui::TableHeadersRow();
+            for (size_t i = 0; i < scenarioResults.size(); ++i) {
+                const auto& r = scenarioResults[i];
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn(); ImGui::Text("%zu", i + 1);
+                ImGui::TableNextColumn(); ImGui::TextUnformatted(r.control.c_str());
+                ImGui::TableNextColumn();
+                const ImVec4 color = r.matched ? ImVec4{0.5f, 0.85f, 0.5f, 1} : ImVec4{1.0f, 0.45f, 0.4f, 1};
+                ImGui::TextColored(color, "%s", r.observed ? "ok" : "refused");
+                ImGui::TableNextColumn(); ImGui::TextUnformatted(r.detail.c_str());
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndChild();
+    }
+    ImGui::End();
+}
+
+void Editor::DrawProduct() {
+    if (!ImGui::Begin("Product", &showProduct)) { ImGui::End(); return; }
+    if (productRoot.empty()) {
+        ImGui::TextDisabled("No product profile mounted. Start the editor with --product DIR.");
+        ImGui::End();
+        return;
+    }
+    ImGui::Text("root  %s", productRoot.generic_string().c_str());
+    ImGui::TextDisabled("Writes a distribution that --product accepts again; nothing leaves this machine.");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##export", "output directory or .scpak", exportPath, sizeof exportPath);
+    if (ImGui::RadioButton("directory", !exportPack)) exportPack = false;
+    ImGui::SameLine();
+    if (ImGui::RadioButton(".scpak", exportPack)) exportPack = true;
+    ImGui::SameLine();
+    if (ImGui::Button("Export") && exportPath[0] != '\0') {
+        product::ExportReport report;
+        const fs::path out = PathFromUtf8(exportPath);
+        const Status st = exportPack ? product::ExportProductPack(productRoot, out, report)
+                                     : product::ExportProduct(productRoot, out, report);
+        if (!st) {
+            exportStatus = "failed: " + st.error;
+            log::Error("product", st.error);
+        } else {
+            exportStatus = "exported " + std::to_string(report.files) + " file(s), " +
+                           std::to_string(report.bytes) + " byte(s), " + std::to_string(report.plugins.size()) +
+                           " plugin(s) to " + out.generic_string();
+            log::Info("product", exportStatus);
+        }
+    }
+    if (!exportStatus.empty()) ImGui::TextWrapped("%s", exportStatus.c_str());
+    ImGui::SeparatorText("Roster");
+    for (const auto& p : sco.Plugins())
+        ImGui::Text("%s  %s%s%s", p.id.empty() ? p.folder.c_str() : p.id.c_str(), p.state.c_str(),
+                    p.reason.empty() ? "" : " - ", p.reason.c_str());
+    ImGui::End();
+}
+
 void Editor::DrawUi() {
     if (showContent) DrawContent();
     if (showMounts) DrawMounts();
@@ -548,11 +700,43 @@ void Editor::DrawUi() {
     if (showLoader) DrawLoader();
     if (showStats) DrawStats();
     if (showLog) DrawLog();
+    if (showScenario) DrawScenario();
+    if (showProduct) DrawProduct();
     if (showDemo) ImGui::ShowDemoWindow(&showDemo);
 }
 
 int Run(const Args& args) {
     log::SetSink(&LogSink);
+    fs::path content = args.content;
+    fs::path data = args.data;
+    std::error_code ec;
+    if (!args.product.empty()) {
+        // A product profile is the whole distribution root: data/plugins must exist before any
+        // window or GPU object is created, so a bad root fails fast instead of half-starting.
+        const fs::path dataDir = args.product / "data";
+        const fs::path pluginsDir = dataDir / "plugins";
+        if (!fs::is_directory(pluginsDir, ec) || ec) {
+            log::Error("app", "product profile requires " + pluginsDir.generic_string());
+            return 1;
+        }
+        data = dataDir;
+        content = fs::is_directory(dataDir, ec) && !ec ? dataDir : fs::path();
+    }
+    if (!args.exportDir.empty() || !args.exportPack.empty()) {
+        // An export creates no window and no GPU object: it reads the mounted root and writes the
+        // distribution, so it also works where the editor cannot open a window at all.
+        product::ExportReport report;
+        const fs::path& out = args.exportDir.empty() ? args.exportPack : args.exportDir;
+        const Status st = args.exportDir.empty() ? product::ExportProductPack(args.product, out, report)
+                                                 : product::ExportProduct(args.product, out, report);
+        if (!st) { log::Error("product", st.error); return 1; }
+        std::fprintf(stderr, "scuba-engine: exported %s: %zu file(s), %llu byte(s), %zu plugin(s)\n",
+                     out.generic_string().c_str(), report.files,
+                     static_cast<unsigned long long>(report.bytes), report.plugins.size());
+        for (const auto& plugin : report.plugins) std::fprintf(stderr, "  %s\n", plugin.c_str());
+        return 0;
+    }
+
     platform::Window window;
     platform::WindowDesc wd;
     wd.title = "scuba-engine " SCUBA_VERSION;
@@ -560,6 +744,7 @@ int Run(const Args& args) {
     if (auto st = window.Create(wd); !st) { log::Error("app", st.error); return 1; }
 
     Editor ed;
+    ed.productRoot = args.product;
     render::RendererDesc rd;
     rd.window = window.native();
     rd.width = window.width();
@@ -567,21 +752,62 @@ int Run(const Args& args) {
     rd.vsync = args.vsync;
     rd.debugLayer = args.debugLayer;
     rd.warp = args.warp;
+    // --frames is the smoke path and has to run without a desktop: a hidden window cannot host a
+    // swap chain, so the frames go to an off-screen target and nothing is presented.
+    rd.offscreen = args.frames != 0 && args.hidden;
     Status st;
     ed.renderer = render::Renderer::CreateD3D12(rd, st);
     if (!ed.renderer) { log::Error("render", st.error); return 1; }
     if (st = ed.ui.Init(window, *ed.renderer); !st) { log::Error("ui", st.error); return 1; }
 
-    if (!args.content.empty() && fs::is_directory(args.content))
-        if (auto m = MountPath(ed.vfs, args.content, "", 0); !m) log::Warn("vfs", m.error);
+    if (!content.empty() && fs::is_directory(content))
+        if (auto m = MountPath(ed.vfs, content, "", 0); !m) log::Warn("vfs", m.error);
     for (const auto& m : args.mounts)
         if (auto r = MountPath(ed.vfs, PathFromUtf8(m.path), m.mountPoint, m.priority); !r) log::Error("vfs", r.error);
     ed.loader = std::make_unique<asset::ModelLoader>(ed.vfs, ed.jobs);
 
     ScoHostOptions so;
-    if (args.plugins_on) so.pluginRoot = args.plugins;
-    so.dataRoot = args.data;
-    if (auto r = ed.sco.Start(so); !r) log::Warn("sco", r.error);   // the editor still runs without plugins
+    if (args.plugins_on && args.product.empty()) so.pluginRoot = args.plugins;
+    so.productRoot = args.product;
+    so.dataRoot = data;
+    if (auto r = ed.sco.Start(so); !r) {
+        // A product profile is fail-closed: a refused plugin or an unusable root stops the editor.
+        if (!args.product.empty()) { log::Error("sco", r.error); return 1; }
+        log::Warn("sco", r.error);   // the editor still runs without plugins
+    }
+    if (!args.product.empty()) {
+        const auto roster = ed.sco.Plugins();
+        std::fprintf(stderr, "scuba-engine: product profile %s: %zu plugin(s)\n",
+                     args.product.generic_string().c_str(), roster.size());
+        for (const auto& p : roster)
+            std::fprintf(stderr, "  %s %s%s%s\n", p.id.empty() ? p.folder.c_str() : p.id.c_str(), p.state.c_str(),
+                         p.reason.empty() ? "" : " - ", p.reason.c_str());
+    }
+
+    // The diegetic panel: one surface, filled with this frame's UI and drawn as a quad in front of
+    // the camera. Created before the first frame so its descriptors are never written mid-flight.
+    render::GpuPanel panel = 0;
+    if (args.diegetic) {
+        panel = ed.renderer->CreatePanel(512, 384);
+        if (!panel) {
+            log::Error("render", "diegetic panel creation failed");
+            return 1;
+        }
+    }
+
+    int code = 0;
+    if (!args.scenario.empty()) {
+        // Runs on the game thread before the first frame: a failing step has to be a nonzero exit,
+        // not a line in a dock nobody is looking at.
+        hostd::Json scenario;
+        std::string error;
+        if (!hostd::LoadScenario(args.scenario.generic_string(), scenario, error)) {
+            log::Error("scenario", args.scenario.generic_string() + ": " + error);
+            code = 1;
+        } else if (!hostd::RunScenario(scenario)) {
+            code = 1;
+        }
+    }
 
     for (const auto& p : args.open) ed.Spawn(p);
 
@@ -616,13 +842,36 @@ int Run(const Args& args) {
             if (!inst.gpu) continue;
             packet.items.push_back({inst.gpu, inst.transform.Matrix(), inst.material, inst.id == ed.selected});
         }
+        if (panel) {
+            // Rows of the view matrix are the camera's right, up and forward in world space: the quad
+            // is built from them so it faces the camera wherever the camera is.
+            const render::Float4x4& view = packet.view.view;
+            const float w = 2.0f, h = 1.5f, distance = 3.0f;
+            render::PanelDraw pd;
+            pd.panel = panel;
+            // The shader multiplies a row vector by this matrix, so the rows are the quad's axes:
+            // right, up and forward from the view matrix, then the centre in the last row.
+            for (int c = 0; c < 4; ++c) {
+                pd.world.m[0][c] = view.m[0][c] * w;
+                pd.world.m[1][c] = view.m[1][c] * h;
+                pd.world.m[2][c] = view.m[2][c];
+            }
+            // Row 2 of a D3D view matrix points back towards the camera, so it is both the quad's
+            // normal (the quad faces +Z) and the direction the centre is offset against.
+            const render::Float3 eye = packet.view.eye;
+            const render::Float3 back{view.m[2][0], view.m[2][1], view.m[2][2]};
+            pd.world.m[3][0] = eye.x - back.x * distance;
+            pd.world.m[3][1] = eye.y - back.y * distance;
+            pd.world.m[3][2] = eye.z - back.z * distance;
+            pd.world.m[3][3] = 1.0f;
+            packet.panels.push_back(pd);
+        }
         packet.ui = std::move(uiFrame);
         if (!window.minimized()) ed.renderer->Submit(std::move(packet));
 
         if (args.frames && ++frame >= args.frames) break;
     }
 
-    int code = 0;
     if (args.frames) {
         ed.renderer->Flush();
         ed.PumpLoader();
@@ -632,6 +881,44 @@ int Run(const Args& args) {
                 code = 1;
             }
         if (gErrors.load()) code = 1;
+        if (!args.readback.empty()) {
+            std::vector<uint8_t> rgba;
+            uint32_t w = 0, h = 0;
+            if (auto rb = ed.renderer->Readback(rgba, w, h); !rb) {
+                log::Error("render", "readback: " + rb.error);
+                code = 1;
+            } else {
+                // Binary PPM: no encoder, no dependency, and every viewer reads it.
+                std::FILE* out = std::fopen(args.readback.string().c_str(), "wb");
+                if (!out) {
+                    log::Error("render", "cannot write " + args.readback.generic_string());
+                    code = 1;
+                } else {
+                    std::fprintf(out, "P6\n%u %u\n255\n", w, h);
+                    std::vector<uint8_t> rgb(size_t{w} * h * 3);
+                    size_t panelPixels = 0;
+                    for (size_t i = 0; i < size_t{w} * h; ++i) {
+                        const uint8_t r = rgba[i * 4 + 0], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
+                        rgb[i * 3 + 0] = r;
+                        rgb[i * 3 + 1] = g;
+                        rgb[i * 3 + 2] = b;
+                        // The panel's clear colour, which only the panel surface and the quad that
+                        // samples it can put on screen.
+                        if (std::abs(int{r} - 158) <= 8 && std::abs(int{g} - 33) <= 8 && std::abs(int{b} - 122) <= 8)
+                            ++panelPixels;
+                    }
+                    std::fwrite(rgb.data(), 1, rgb.size(), out);
+                    std::fclose(out);
+                    std::fprintf(stderr, "scuba-engine: readback %s (%ux%u), panel pixels %zu\n",
+                                 args.readback.generic_string().c_str(), w, h, panelPixels);
+                    if (panelPixels < 64) {
+                        log::Error("render", "diegetic panel never reached the frame: " + std::to_string(panelPixels) +
+                                                 " panel pixel(s)");
+                        code = 1;
+                    }
+                }
+            }
+        }
         std::fprintf(stderr, "scuba-engine: %d frame(s), %zu instance(s), %d error(s) -> exit %d\n", frame, ed.scene.size(), gErrors.load(), code);
     }
 
@@ -657,7 +944,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     const auto args = ParseArgs();
     if (!args) {
         std::fprintf(stderr, "usage: scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR|--no-plugins] "
-                             "[--data DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N]\n");
+                             "[--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N] [--scenario FILE] [--diegetic] [--readback FILE] [--export DIR | --export-pack FILE]\n");
         return 2;
     }
     return Run(*args);

@@ -112,6 +112,39 @@ add_test(NAME product_profile_lifecycle COMMAND test_product_profile
   "${CMAKE_CURRENT_BINARY_DIR}/product-profile-fixture" $<TARGET_FILE:mock_game_probe>)
 set_tests_properties(product_profile_lifecycle PROPERTIES TIMEOUT 60)
 
+# Product distribution export: the tree --product accepts again, and every refusal that keeps a
+# half-written distribution from existing. Portable, so it runs everywhere the core builds.
+add_executable(test_product_export test_product_export.cpp)
+target_link_libraries(test_product_export PRIVATE scuba_engine_core)
+scuba_warnings(test_product_export)
+add_test(NAME product_export COMMAND test_product_export "${CMAKE_CURRENT_BINARY_DIR}/product-export-fixture")
+set_tests_properties(product_export PROPERTIES TIMEOUT 60)
+
+# The editor's headless path: --frames with --hidden renders off-screen and exits without a
+# desktop, so the smoke run is a real test instead of a manual check.
+if(TARGET scuba-engine)
+  add_test(NAME engine_offscreen_smoke COMMAND scuba-engine --frames 2 --warp --hidden --no-plugins)
+  set_tests_properties(engine_offscreen_smoke PROPERTIES TIMEOUT 180)
+
+  # --scenario runs the file on the game thread before the first frame; a file that cannot be
+  # loaded has to be a nonzero exit.
+  add_test(NAME engine_scenario_missing COMMAND scuba-engine --frames 1 --warp --hidden --no-plugins
+    --scenario "${CMAKE_CURRENT_BINARY_DIR}/no-such-scenario.json")
+  set_tests_properties(engine_scenario_missing PROPERTIES TIMEOUT 180 WILL_FAIL TRUE)
+
+  # The same scenario file scuba-hostd's CLI tests drive, run through the editor.
+  add_test(NAME engine_scenario_valid COMMAND scuba-engine --frames 1 --warp --hidden --no-plugins
+    --scenario "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/valid.json")
+  set_tests_properties(engine_scenario_valid PROPERTIES TIMEOUT 180)
+
+  # The diegetic panel: a render-to-texture surface drawn as a scene quad, read back from the
+  # off-screen target. The engine fails the run when the panel's own clear colour never reaches the
+  # frame, so a quad that stopped being drawn cannot pass as a quiet frame.
+  add_test(NAME engine_diegetic_panel COMMAND scuba-engine --frames 3 --warp --hidden --no-plugins --diegetic
+    --readback "${CMAKE_CURRENT_BINARY_DIR}/diegetic.ppm")
+  set_tests_properties(engine_diegetic_panel PROPERTIES TIMEOUT 300)
+endif()
+
 add_executable(test_selected_profile test_selected_profile.cpp ${CMAKE_SOURCE_DIR}/src/hostd/scenario_runner.cpp)
 target_link_libraries(test_selected_profile PRIVATE scuba_kernel)
 add_dependencies(test_selected_profile mock_game_probe)
@@ -239,4 +272,14 @@ if(TARGET scuba_engine_core)
   scuba_warnings(test_engine_core)
   add_test(NAME engine_core COMMAND test_engine_core)
   set_tests_properties(engine_core PROPERTIES TIMEOUT 60)
+endif()
+
+# The engine's product-profile path: ScoHost::Start with productRoot, fail-closed on a missing
+# data/plugins or a refused plugin, and the roster it reports.
+if(TARGET scuba_engine_sco)
+  add_executable(test_sco_host_product test_sco_host_product.cpp)
+  target_link_libraries(test_sco_host_product PRIVATE scuba_engine_sco)
+  scuba_warnings(test_sco_host_product)
+  add_test(NAME sco_host_product COMMAND test_sco_host_product "${CMAKE_CURRENT_BINARY_DIR}/product-app-fixture")
+  set_tests_properties(sco_host_product PROPERTIES TIMEOUT 60)
 endif()

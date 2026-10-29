@@ -139,6 +139,12 @@ add_library(scuba_net_sim STATIC
 target_link_libraries(scuba_net_sim PUBLIC scuba_bridge)
 scuba_warnings(scuba_net_sim)
 
+# Scenario files: the bounded synthetic controls a scenario drives. Shared by scuba-hostd (which
+# also serves them over the bridge) and the editor's scenario dock.
+add_library(scuba_scenario STATIC src/hostd/scenario_runner.cpp)
+target_link_libraries(scuba_scenario PUBLIC scuba_mock_game sco_app)
+scuba_warnings(scuba_scenario)
+
 # The sco-core kernel booted in-process with the mock game: shared by scuba-hostd and the engine.
 add_library(scuba_kernel STATIC src/hostd/kernel.cpp)
 target_link_libraries(scuba_kernel PUBLIC scuba_mock_game sco_lua_game)
@@ -147,7 +153,6 @@ scuba_warnings(scuba_kernel)
 
 add_executable(scuba-hostd
   src/hostd/main.cpp
-  src/hostd/scenario_runner.cpp
   src/hostd/modules.cpp
   src/hostd/system_handlers.cpp
   src/hostd/plugins_handlers.cpp
@@ -159,7 +164,7 @@ add_executable(scuba-hostd
 # sco_plugins, sco_widgets, sco_ui, sco_storage, sco_settings, sco_content, sco_ipc,
 # sco_net_service -> sco_net, sco_datacore_service -> sco_datacore -> sco_vfs). Lua is separate:
 # sco_lua_game links sco_lua.
-target_link_libraries(scuba-hostd PRIVATE scuba_kernel scuba_assets scuba_net_sim)
+target_link_libraries(scuba-hostd PRIVATE scuba_kernel scuba_assets scuba_net_sim scuba_scenario)
 target_compile_definitions(scuba-hostd PRIVATE
   SCUBA_VERSION="${PROJECT_VERSION}"
   SCUBA_SDK_VERSION="${SCUBA_SDK_VERSION}"

@@ -126,8 +126,9 @@ bool LoadScenario(const std::string& path, Json& scenario, std::string& error) {
     return true;
 }
 
-bool RunScenario(const Json& scenario) {
+bool RunScenario(const Json& scenario, std::vector<ScenarioStepResult>& results) {
     const Json& steps = *scenario.find("steps");
+    results.clear();
     size_t passed = 0;
     for (size_t i = 0; i < steps.size(); ++i) {
         const auto& step = steps.at(i);
@@ -170,11 +171,29 @@ bool RunScenario(const Json& scenario) {
         }
         const bool ok = reason == nullptr;
         const auto* expected = step.find("expect");
-        if (ok == (!expected || expected->as_string() == "ok")) ++passed;
-        std::printf("SCENARIO step %zu %s%s%s\n", i + 1, ok ? "ok" : "refused", reason ? " " : "", reason ? reason : "");
+        ScenarioStepResult result;
+        result.control = control;
+        result.observed = ok;
+        result.matched = ok == (!expected || expected->as_string() == "ok");
+        if (reason) result.detail = reason;
+        if (result.matched) ++passed;
+        results.push_back(std::move(result));
     }
-    std::printf("SCENARIO pass %zu/%zu\n", passed, steps.size());
-    std::fflush(stdout);
     return passed == steps.size();
+}
+
+bool RunScenario(const Json& scenario) {
+    std::vector<ScenarioStepResult> results;
+    const bool all = RunScenario(scenario, results);
+    size_t passed = 0;
+    for (size_t i = 0; i < results.size(); ++i) {
+        const auto& r = results[i];
+        if (r.matched) ++passed;
+        std::printf("SCENARIO step %zu %s%s%s\n", i + 1, r.observed ? "ok" : "refused",
+                    r.detail.empty() ? "" : " ", r.detail.c_str());
+    }
+    std::printf("SCENARIO pass %zu/%zu\n", passed, results.size());
+    std::fflush(stdout);
+    return all;
 }
 }  // namespace scuba::hostd
