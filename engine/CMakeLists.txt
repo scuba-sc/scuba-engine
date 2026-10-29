@@ -66,7 +66,7 @@ if(WIN32)
 
   add_executable(scuba-engine WIN32 app/main.cpp)
   target_include_directories(scuba-engine PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-  target_link_libraries(scuba-engine PRIVATE scuba_engine_runtime shell32)
+  target_link_libraries(scuba-engine PRIVATE scuba_engine_runtime scuba_scenario shell32)
   target_compile_definitions(scuba-engine PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE
     SCUBA_VERSION="${PROJECT_VERSION}" SCUBA_SDK_VERSION="${SCUBA_SDK_VERSION}"
     SCUBA_DEFAULT_PLUGIN_ROOT="${PROJECT_BINARY_DIR}/plugins/runtime"

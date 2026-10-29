@@ -112,6 +112,24 @@ add_test(NAME product_profile_lifecycle COMMAND test_product_profile
   "${CMAKE_CURRENT_BINARY_DIR}/product-profile-fixture" $<TARGET_FILE:mock_game_probe>)
 set_tests_properties(product_profile_lifecycle PROPERTIES TIMEOUT 60)
 
+# The editor's headless path: --frames with --hidden renders off-screen and exits without a
+# desktop, so the smoke run is a real test instead of a manual check.
+if(TARGET scuba-engine)
+  add_test(NAME engine_offscreen_smoke COMMAND scuba-engine --frames 2 --warp --hidden --no-plugins)
+  set_tests_properties(engine_offscreen_smoke PROPERTIES TIMEOUT 180)
+
+  # --scenario runs the file on the game thread before the first frame; a file that cannot be
+  # loaded has to be a nonzero exit.
+  add_test(NAME engine_scenario_missing COMMAND scuba-engine --frames 1 --warp --hidden --no-plugins
+    --scenario "${CMAKE_CURRENT_BINARY_DIR}/no-such-scenario.json")
+  set_tests_properties(engine_scenario_missing PROPERTIES TIMEOUT 180 WILL_FAIL TRUE)
+
+  # The same scenario file scuba-hostd's CLI tests drive, run through the editor.
+  add_test(NAME engine_scenario_valid COMMAND scuba-engine --frames 1 --warp --hidden --no-plugins
+    --scenario "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/valid.json")
+  set_tests_properties(engine_scenario_valid PROPERTIES TIMEOUT 180)
+endif()
+
 add_executable(test_selected_profile test_selected_profile.cpp ${CMAKE_SOURCE_DIR}/src/hostd/scenario_runner.cpp)
 target_link_libraries(test_selected_profile PRIVATE scuba_kernel)
 add_dependencies(test_selected_profile mock_game_probe)

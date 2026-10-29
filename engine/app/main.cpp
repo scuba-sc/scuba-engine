@@ -4,7 +4,7 @@
 //
 //   scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR | --no-plugins]
 //                [--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync]
-//                [--hidden] [--frames N]
+//                [--hidden] [--frames N] [--scenario FILE]
 //
 // --product DIR mounts a product distribution root: <DIR>/data/plugins is the roster, <DIR>/data is
 // the content mount and sco.storage root. It is fail-closed: a refused plugin, a missing
@@ -14,6 +14,10 @@
 // was logged at error level, 1 otherwise (the smoke test uses it with --warp --hidden). With
 // --hidden the frames go to an off-screen target and nothing is presented, so the smoke path runs
 // where there is no desktop at all.
+//
+// --scenario FILE runs a bounded scenario (the same steps scuba-hostd accepts) against the mock
+// game before the first frame, prints each step, and exits 1 if any step did not match. The
+// Scenario dock runs one on demand from the UI.
 #include "scuba/asset/model_loader.h"
 #include "scuba/core/job_system.h"
 #include "scuba/core/log.h"
@@ -26,6 +30,8 @@
 #include "scuba/ui/ui_layer.h"
 #include "scuba/vfs/pack.h"
 #include "scuba/vfs/virtual_file_system.h"
+
+#include "hostd/scenario_runner.h"
 
 #include "imgui.h"
 #include "sco/widgets_imgui.h"
@@ -66,6 +72,7 @@ struct Args {
     struct MountArg { std::string path, mountPoint; int priority = 10; };
     std::vector<MountArg> mounts;
     std::vector<std::string> open;
+    fs::path scenario;
     bool warp = false, debugLayer = false, vsync = true, hidden = false, plugins_on = true;
     int frames = 0;
 };
@@ -97,6 +104,7 @@ std::optional<Args> ParseArgs() {
         else if (k == "--data") { if (auto v = next()) { args.data = PathFromUtf8(*v); args.dataSet = true; } else return std::nullopt; }
         else if (k == "--product") { if (auto v = next()) args.product = PathFromUtf8(*v); else return std::nullopt; }
         else if (k == "--open") { if (auto v = next()) args.open.push_back(*v); else return std::nullopt; }
+        else if (k == "--scenario") { if (auto v = next()) args.scenario = PathFromUtf8(*v); else return std::nullopt; }
         else if (k == "--frames") { if (auto v = next()) args.frames = std::max(1, std::atoi(v->c_str())); else return std::nullopt; }
         else if (k == "--mount") {
             auto v = next();
@@ -165,7 +173,11 @@ struct Editor {
 
     // panels
     bool showContent = true, showMounts = true, showScene = true, showInspector = true, showPlugins = true,
-         showLoader = true, showLog = true, showStats = true, showDemo = false;
+         showLoader = true, showLog = true, showStats = true, showScenario = false, showDemo = false;
+    char scenarioPath[512] = "";
+    std::vector<hostd::ScenarioStepResult> scenarioResults;
+    std::string scenarioStatus;
+    bool scenarioPassed = false;
     char mountPath[512] = "";
     char mountPoint[128] = "";
     int mountPriority = 10;
@@ -220,6 +232,28 @@ struct Editor {
                 }
     }
 
+    // Runs a scenario file on the game thread. The dock and --scenario both come through here, so
+    // the UI and the smoke path cannot disagree about what a scenario did.
+    void RunScenarioFile(const std::string& path) {
+        scenarioResults.clear();
+        scenarioPassed = false;
+        hostd::Json scenario;
+        std::string error;
+        if (!hostd::LoadScenario(path, scenario, error)) {
+            scenarioStatus = "load failed: " + error;
+            log::Error("scenario", path + ": " + error);
+            return;
+        }
+        scenarioPassed = hostd::RunScenario(scenario, scenarioResults);
+        size_t matched = 0;
+        for (const auto& r : scenarioResults)
+            if (r.matched) ++matched;
+        scenarioStatus = (scenarioPassed ? "pass " : "FAIL ") + std::to_string(matched) + "/" +
+                         std::to_string(scenarioResults.size()) + " step(s)";
+        if (!scenarioPassed) log::Error("scenario", path + ": " + scenarioStatus);
+        else log::Info("scenario", path + ": " + scenarioStatus);
+    }
+
     void FrameInstance(const Instance& inst) {
         if (!inst.model) return;
         auto mn = inst.model->boundsMin, mx = inst.model->boundsMax;
@@ -254,6 +288,7 @@ struct Editor {
     void DrawLoader();
     void DrawStats();
     void DrawLog();
+    void DrawScenario();
 };
 
 // ---- input layers --------------------------------------------------------------------------------
@@ -363,6 +398,7 @@ void Editor::DrawMenu(bool& quit) {
         ImGui::MenuItem("Asset loader", nullptr, &showLoader);
         ImGui::MenuItem("Stats", nullptr, &showStats);
         ImGui::MenuItem("Log", nullptr, &showLog);
+        ImGui::MenuItem("Scenario", nullptr, &showScenario);
         ImGui::Separator();
         ImGui::MenuItem("ImGui demo", nullptr, &showDemo);
         ImGui::EndMenu();
@@ -550,6 +586,43 @@ void Editor::DrawLog() {
     ImGui::End();
 }
 
+void Editor::DrawScenario() {
+    if (!ImGui::Begin("Scenario", &showScenario)) { ImGui::End(); return; }
+    ImGui::TextDisabled("Bounded synthetic controls; nothing here has run in Star Citizen.");
+    ImGui::SetNextItemWidth(-90);
+    ImGui::InputTextWithHint("##scenario", "scenario .json", scenarioPath, sizeof scenarioPath);
+    ImGui::SameLine();
+    if (ImGui::Button("Run") && scenarioPath[0] != '\0') RunScenarioFile(scenarioPath);
+    if (!scenarioStatus.empty()) {
+        const ImVec4 color = scenarioPassed ? ImVec4{0.5f, 0.85f, 0.5f, 1} : ImVec4{1.0f, 0.45f, 0.4f, 1};
+        ImGui::TextColored(color, "%s", scenarioStatus.c_str());
+    }
+    if (!scenarioResults.empty()) {
+        ImGui::BeginChild("steps");
+        if (ImGui::BeginTable("steps", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+                                           ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, 28);
+            ImGui::TableSetupColumn("control");
+            ImGui::TableSetupColumn("outcome", ImGuiTableColumnFlags_WidthFixed, 64);
+            ImGui::TableSetupColumn("detail");
+            ImGui::TableHeadersRow();
+            for (size_t i = 0; i < scenarioResults.size(); ++i) {
+                const auto& r = scenarioResults[i];
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn(); ImGui::Text("%zu", i + 1);
+                ImGui::TableNextColumn(); ImGui::TextUnformatted(r.control.c_str());
+                ImGui::TableNextColumn();
+                const ImVec4 color = r.matched ? ImVec4{0.5f, 0.85f, 0.5f, 1} : ImVec4{1.0f, 0.45f, 0.4f, 1};
+                ImGui::TextColored(color, "%s", r.observed ? "ok" : "refused");
+                ImGui::TableNextColumn(); ImGui::TextUnformatted(r.detail.c_str());
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndChild();
+    }
+    ImGui::End();
+}
+
 void Editor::DrawUi() {
     if (showContent) DrawContent();
     if (showMounts) DrawMounts();
@@ -559,6 +632,7 @@ void Editor::DrawUi() {
     if (showLoader) DrawLoader();
     if (showStats) DrawStats();
     if (showLog) DrawLog();
+    if (showScenario) DrawScenario();
     if (showDemo) ImGui::ShowDemoWindow(&showDemo);
 }
 
@@ -625,6 +699,20 @@ int Run(const Args& args) {
                          p.reason.empty() ? "" : " - ", p.reason.c_str());
     }
 
+    int code = 0;
+    if (!args.scenario.empty()) {
+        // Runs on the game thread before the first frame: a failing step has to be a nonzero exit,
+        // not a line in a dock nobody is looking at.
+        hostd::Json scenario;
+        std::string error;
+        if (!hostd::LoadScenario(args.scenario.generic_string(), scenario, error)) {
+            log::Error("scenario", args.scenario.generic_string() + ": " + error);
+            code = 1;
+        } else if (!hostd::RunScenario(scenario)) {
+            code = 1;
+        }
+    }
+
     for (const auto& p : args.open) ed.Spawn(p);
 
     UiBlocker blocker(ed);
@@ -664,7 +752,6 @@ int Run(const Args& args) {
         if (args.frames && ++frame >= args.frames) break;
     }
 
-    int code = 0;
     if (args.frames) {
         ed.renderer->Flush();
         ed.PumpLoader();
@@ -699,7 +786,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     const auto args = ParseArgs();
     if (!args) {
         std::fprintf(stderr, "usage: scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR|--no-plugins] "
-                             "[--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N]\n");
+                             "[--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N] [--scenario FILE]\n");
         return 2;
     }
     return Run(*args);

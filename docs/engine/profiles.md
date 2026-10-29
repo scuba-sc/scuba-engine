@@ -52,3 +52,19 @@ mounted as content and the roster printed to stderr. The editor derives `--conte
 
 Both forms run the product's real plugin code against synthetic game services. That is still not
 native game behavior, and the snapshot, trusted-code and no-sandbox rules above apply unchanged.
+
+## Scenarios and the headless smoke run
+
+`scuba-engine --scenario FILE` runs a bounded scenario against the mock game on the game thread
+before the first frame, prints one `SCENARIO` line per step, and exits 1 if any step did not match
+its `expect`. The file format is the one `scuba-hostd --scenario` accepts (`{"steps": [...]}`, at
+most 128 steps, 65536 bytes, controls `spawn`, `teleport`, `despawn`, `pose`). The **View >
+Scenario** dock runs the same path on demand: it takes a path, runs it, and lists each step with
+its outcome and refusal reason. Both go through `scuba::hostd::RunScenario`, so the dock and the
+CLI cannot disagree about what a scenario did.
+
+`scuba-engine --frames N --hidden` renders into off-screen targets instead of a swap chain and
+presents nothing, so the smoke run works where there is no desktop (a hidden window cannot host a
+swap chain: `CreateSwapChainForHwnd` fails with `DXGI_ERROR_INVALID_CALL`). CTest registers that
+run as `engine_offscreen_smoke`, plus `engine_scenario_valid` and `engine_scenario_missing` for
+the scenario CLI. Neither is native game behavior: the mock game is synthetic throughout.
