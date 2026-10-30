@@ -4,7 +4,7 @@
 //
 //   scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR | --no-plugins]
 //                [--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync]
-//                [--hidden] [--frames N] [--scenario FILE] [--diegetic] [--readback FILE]
+//                [--hidden] [--frames N] [--scenario FILE] [--diegetic [PANEL_ID]] [--readback FILE]
 //                [--export DIR | --export-pack FILE]
 //
 // --product DIR mounts a product distribution root: <DIR>/data/plugins is the roster, <DIR>/data is
@@ -20,10 +20,9 @@
 // game before the first frame, prints each step, and exits 1 if any step did not match. The
 // Scenario dock runs one on demand from the UI.
 //
-// --diegetic draws a render-to-texture panel as a world-space quad in front of the camera; with
-// --readback FILE the frame is copied back and written as a binary PPM, and the run fails when the
-// panel's own clear colour never reached the target (a panel nobody drew is magenta, so a missing
-// quad cannot pass as a quiet frame).
+// --diegetic [PANEL_ID] draws a plugin panel in its own UI context on a world-space quad.
+// Without an ID it selects the first published panel. --readback FILE writes a binary PPM;
+// pixel statistics are descriptive, not proof that a plugin or GPU path worked.
 //
 // --export DIR / --export-pack FILE write a product distribution from the mounted --product root
 // and exit without creating a window: <DIR>/data (the roster included) or one .scpak of the same
@@ -38,6 +37,9 @@
 #include "scuba/render/renderer.h"
 #include "scuba/sco/sco_host.h"
 #include "scuba/ui/input_router.h"
+#include "scuba/ui/plugin_surface.h"
+#include "scuba/ui/designer.h"
+#include "scuba/ui/net_sandbox.h"
 #include "scuba/ui/ui_layer.h"
 #include "scuba/vfs/pack.h"
 #include "scuba/vfs/virtual_file_system.h"
@@ -88,6 +90,7 @@ struct Args {
     fs::path exportDir, exportPack;
     fs::path readback;
     bool diegetic = false;
+    std::string panelId;
     bool warp = false, debugLayer = false, vsync = true, hidden = false, plugins_on = true;
     int frames = 0;
 };
@@ -123,7 +126,10 @@ std::optional<Args> ParseArgs() {
         else if (k == "--export") { if (auto v = next()) args.exportDir = PathFromUtf8(*v); else return std::nullopt; }
         else if (k == "--export-pack") { if (auto v = next()) args.exportPack = PathFromUtf8(*v); else return std::nullopt; }
         else if (k == "--readback") { if (auto v = next()) args.readback = PathFromUtf8(*v); else return std::nullopt; }
-        else if (k == "--diegetic") args.diegetic = true;
+        else if (k == "--diegetic") {
+            args.diegetic = true;
+            if (i + 1 < a.size() && !a[i + 1].starts_with("--")) args.panelId = a[++i];
+        }
         else if (k == "--frames") { if (auto v = next()) args.frames = std::max(1, std::atoi(v->c_str())); else return std::nullopt; }
         else if (k == "--mount") {
             auto v = next();
@@ -185,7 +191,32 @@ struct Editor {
     std::unique_ptr<render::Renderer> renderer;
     ScoHost sco;
     ui::UiLayer ui;
+    // Destroy before ui: the surface borrows the main context's font atlas.
+    std::unique_ptr<ui::PluginSurface> surface;
+    ui::DesignerDock designer;
+    std::unique_ptr<ui::NetSandbox> netSandbox;
+    bool showSurface = true, showNetSandbox = false, surfaceEnabled = false;
+    bool surfaceFocused = false, surfaceDragging = false;
+    std::string surfacePanel, surfaceStatus;
     render::OrbitCamera camera;
+
+    render::Float4x4 SurfaceWorld() const {
+        const auto view = camera.View();
+        const auto eye = camera.Eye();
+        render::Float4x4 world{};
+        // View COLUMNS are world-space camera axes; quad world ROWS are its local axes.
+        for (int c = 0; c < 3; ++c) {
+            world.m[0][c] = view.m[c][0] * 2.0f;
+            world.m[1][c] = view.m[c][1] * 1.5f;
+            world.m[2][c] = view.m[c][2];
+        }
+        world.m[0][3] = world.m[1][3] = world.m[2][3] = 0;
+        world.m[3][0] = eye.x - view.m[0][2] * 3.0f;
+        world.m[3][1] = eye.y - view.m[1][2] * 3.0f;
+        world.m[3][2] = eye.z - view.m[2][2] * 3.0f;
+        world.m[3][3] = 1;
+        return world;
+    }
 
     std::vector<Instance> scene;
     uint32_t nextInstance = 1;
@@ -285,7 +316,7 @@ struct Editor {
     void FrameInstance(const Instance& inst) {
         if (!inst.model) return;
         auto mn = inst.model->boundsMin, mx = inst.model->boundsMax;
-        for (int d = 0; d < 3; ++d) {
+        for (size_t d = 0; d < 3; ++d) {
             mn[d] *= inst.transform.scale;
             mx[d] *= inst.transform.scale;
         }
@@ -318,6 +349,7 @@ struct Editor {
     void DrawLog();
     void DrawScenario();
     void DrawProduct();
+    void DrawSurface();
 };
 
 // ---- input layers --------------------------------------------------------------------------------
@@ -429,6 +461,9 @@ void Editor::DrawMenu(bool& quit) {
         ImGui::MenuItem("Log", nullptr, &showLog);
         ImGui::MenuItem("Scenario", nullptr, &showScenario);
         ImGui::MenuItem("Product", nullptr, &showProduct);
+        ImGui::MenuItem("Plugin surface", nullptr, &showSurface);
+        ImGui::MenuItem("Designer", nullptr, &designer.open);
+        ImGui::MenuItem("NetSandbox", nullptr, &showNetSandbox);
         ImGui::Separator();
         ImGui::MenuItem("ImGui demo", nullptr, &showDemo);
         ImGui::EndMenu();
@@ -691,6 +726,32 @@ void Editor::DrawProduct() {
     ImGui::End();
 }
 
+void Editor::DrawSurface() {
+    if (!ImGui::Begin("Plugin surface", &showSurface)) { ImGui::End(); return; }
+    const auto panels = sco.Panels();
+    if (panels.empty()) {
+        ImGui::TextWrapped("No plugin panels published. Load a plugin with a sco.widgets panel.");
+        surfaceEnabled = false;
+    } else {
+        ImGui::Checkbox("World-space plugin surface", &surfaceEnabled);
+        if (ImGui::BeginCombo("Panel", surfacePanel.c_str())) {
+            for (const auto& p : panels) {
+                const std::string label = (p.title.empty() ? p.id : p.title) + " [" + p.owner + "]###" + p.id;
+                if (ImGui::Selectable(label.c_str(), surfacePanel == p.id)) {
+                    surfacePanel = p.id;
+                    surfaceFocused = false;
+                    surfaceDragging = false;
+                }
+            }
+            ImGui::EndCombo();
+        }
+    }
+    ImGui::TextWrapped("512 x 384 independent plugin UI. Click the quad to focus; click outside or Escape to release. Hiding this dock does not hide the quad.");
+    ImGui::TextUnformatted(surfaceFocused ? "Surface focused" : "Editor focused");
+    if (!surfaceStatus.empty()) ImGui::TextWrapped("%s", surfaceStatus.c_str());
+    ImGui::End();
+}
+
 void Editor::DrawUi() {
     if (showContent) DrawContent();
     if (showMounts) DrawMounts();
@@ -702,6 +763,18 @@ void Editor::DrawUi() {
     if (showLog) DrawLog();
     if (showScenario) DrawScenario();
     if (showProduct) DrawProduct();
+    if (showSurface) DrawSurface();
+    // No exporter callback: the dock explicitly disables folder export; source copy works.
+    // Do not claim a folder receipt without hostd write + readback verification.
+    designer.Draw();
+    if (showNetSandbox) {
+        if (netSandbox) netSandbox->Draw(&showNetSandbox);
+        else {
+            if (ImGui::Begin("NetSandbox", &showNetSandbox))
+                ImGui::TextWrapped("Unavailable: this build has no absolute SCUBA_DEFAULT_HOSTD executable path.");
+            ImGui::End();
+        }
+    }
     if (showDemo) ImGui::ShowDemoWindow(&showDemo);
 }
 
@@ -759,6 +832,14 @@ int Run(const Args& args) {
     ed.renderer = render::Renderer::CreateD3D12(rd, st);
     if (!ed.renderer) { log::Error("render", st.error); return 1; }
     if (st = ed.ui.Init(window, *ed.renderer); !st) { log::Error("ui", st.error); return 1; }
+    ed.surface = std::make_unique<ui::PluginSurface>();
+    if (st = ed.surface->Init(ImGui::GetCurrentContext()); !st) { log::Error("ui", st.error); return 1; }
+#ifdef SCUBA_DEFAULT_HOSTD
+    const fs::path hostdExecutable = PathFromUtf8(SCUBA_DEFAULT_HOSTD);
+    if (hostdExecutable.is_absolute() && fs::is_regular_file(hostdExecutable, ec) && !ec)
+        ed.netSandbox = std::make_unique<ui::NetSandbox>(hostdExecutable);
+    else log::Warn("netsandbox", "built hostd executable unavailable: " + hostdExecutable.generic_string());
+#endif
 
     if (!content.empty() && fs::is_directory(content))
         if (auto m = MountPath(ed.vfs, content, "", 0); !m) log::Warn("vfs", m.error);
@@ -784,16 +865,19 @@ int Run(const Args& args) {
                          p.reason.empty() ? "" : " - ", p.reason.c_str());
     }
 
-    // The diegetic panel: one surface, filled with this frame's UI and drawn as a quad in front of
-    // the camera. Created before the first frame so its descriptors are never written mid-flight.
-    render::GpuPanel panel = 0;
-    if (args.diegetic) {
-        panel = ed.renderer->CreatePanel(512, 384);
-        if (!panel) {
-            log::Error("render", "diegetic panel creation failed");
-            return 1;
-        }
+    const auto publishedPanels = ed.sco.Panels();
+    ed.surfacePanel = args.panelId;
+    if (ed.surfacePanel.empty() && !publishedPanels.empty()) ed.surfacePanel = publishedPanels.front().id;
+    const bool selectedPanelExists = std::any_of(publishedPanels.begin(), publishedPanels.end(),
+        [&](const auto& p) { return p.id == ed.surfacePanel; });
+    if (args.diegetic && !selectedPanelExists) {
+        log::Error("ui", "--diegetic requires a published plugin panel: " + ed.surfacePanel);
+        return 1;
     }
+    ed.surfaceEnabled = args.diegetic;
+    // Allocate before submissions, including when enabled later from the picker dock.
+    const render::GpuPanel panel = ed.renderer->CreatePanel(512, 384);
+    if (!panel) { log::Error("render", "plugin surface creation failed"); return 1; }
 
     int code = 0;
     if (!args.scenario.empty()) {
@@ -827,9 +911,87 @@ int Run(const Args& args) {
         ed.PumpLoader();
 
         ed.ui.BeginFrame();
-        for (const auto& ev : ed.ui.Events()) router.Dispatch(ev);
+        ImGuiIO& io = ImGui::GetIO();
+        ui::SurfaceInput surfaceInput;
+        ui::PanelHit hit;
+        const bool overSurface = ed.surfaceEnabled && !ed.surfacePanel.empty() &&
+            !ed.ui.pointerOverUi() && ui::HitPanel(ed.camera, io.MousePos.x, io.MousePos.y,
+                                                  ed.ui.viewport(), ed.SurfaceWorld(), hit);
+        bool clicked = false, held = false;
+        for (int b = 0; b < 5; ++b) {
+            clicked |= io.MouseClicked[b];
+            held |= io.MouseDown[b];
+        }
+        const bool escape = ed.surfaceFocused && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        if (!ed.surfaceEnabled || escape || (clicked && !overSurface)) {
+            ed.surfaceFocused = false;
+            ed.surfaceDragging = false;
+        } else if (clicked && overSurface && !router.captured()) {
+            ed.surfaceFocused = true;
+            ed.surfaceDragging = true;
+            ImGui::SetWindowFocus(nullptr);
+        }
+        surfaceInput.focused = ed.surfaceFocused;
+        surfaceInput.pointer = overSurface;
+        if (overSurface) {
+            surfaceInput.x = hit.u * 512.0f;
+            surfaceInput.y = hit.v * 384.0f;
+        }
+        for (int b = 0; b < 5; ++b)
+            surfaceInput.buttons[b] = ed.surfaceFocused && io.MouseDown[b];
+        if (ed.surfaceFocused) {
+            if (overSurface || ed.surfaceDragging) {
+                surfaceInput.wheelX = io.MouseWheelH;
+                surfaceInput.wheelY = io.MouseWheel;
+            }
+            for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key) {
+                // Mouse aliases are generated by AddMouse*; submitting them as keys asserts.
+                if (key >= ImGuiKey_MouseLeft && key <= ImGuiKey_MouseWheelY) continue;
+                surfaceInput.keys.push_back({key, ImGui::IsKeyDown(static_cast<ImGuiKey>(key))});
+            }
+            surfaceInput.keys.push_back({ImGuiMod_Ctrl, io.KeyCtrl});
+            surfaceInput.keys.push_back({ImGuiMod_Shift, io.KeyShift});
+            surfaceInput.keys.push_back({ImGuiMod_Alt, io.KeyAlt});
+            surfaceInput.keys.push_back({ImGuiMod_Super, io.KeySuper});
+            for (ImWchar character : io.InputQueueCharacters) {
+                const unsigned c = static_cast<unsigned>(character);
+                if (c < 0x80) surfaceInput.text += static_cast<char>(c);
+                else if (c < 0x800) {
+                    surfaceInput.text += static_cast<char>(0xc0u | (c >> 6u));
+                    surfaceInput.text += static_cast<char>(0x80u | (c & 63u));
+                } else if (c < 0x10000) {
+                    surfaceInput.text += static_cast<char>(0xe0u | (c >> 12u));
+                    surfaceInput.text += static_cast<char>(0x80u | ((c >> 6u) & 63u));
+                    surfaceInput.text += static_cast<char>(0x80u | (c & 63u));
+                } else {
+                    surfaceInput.text += static_cast<char>(0xf0u | (c >> 18u));
+                    surfaceInput.text += static_cast<char>(0x80u | ((c >> 12u) & 63u));
+                    surfaceInput.text += static_cast<char>(0x80u | ((c >> 6u) & 63u));
+                    surfaceInput.text += static_cast<char>(0x80u | (c & 63u));
+                }
+            }
+        }
+        for (const auto& ev : ed.ui.Events()) {
+            if (ev.kind == ui::InputKind::KeyDown) {
+                if (ed.surfaceFocused || escape) continue;
+            } else if (!router.captured() && (overSurface || ed.surfaceDragging)) continue;
+            router.Dispatch(ev);
+        }
+        if (!held) ed.surfaceDragging = false;
         ed.DrawMenu(quit);
         ed.DrawUi();
+        surfaceInput.focused = ed.surfaceFocused;
+        render::UiFramePtr surfaceFrame;
+        if (ed.surfaceEnabled && !ed.surfacePanel.empty()) {
+            if (auto rendered = ed.surface->Render(ed.sco, ed.surfacePanel, 512, 384,
+                    io.DeltaTime, surfaceInput, surfaceFrame); !rendered) {
+                ed.surfaceStatus = rendered.error;
+                log::Error("ui", "plugin surface: " + rendered.error);
+                ed.surfaceEnabled = false;
+                ed.surfaceFocused = false;
+            } else ed.surfaceStatus.clear();
+        }
+        // Finish the surface before the main frame's texture list is handed to the renderer.
         render::UiFramePtr uiFrame = ed.ui.EndFrame();
 
         render::FramePacket packet;
@@ -842,29 +1004,12 @@ int Run(const Args& args) {
             if (!inst.gpu) continue;
             packet.items.push_back({inst.gpu, inst.transform.Matrix(), inst.material, inst.id == ed.selected});
         }
-        if (panel) {
-            // Rows of the view matrix are the camera's right, up and forward in world space: the quad
-            // is built from them so it faces the camera wherever the camera is.
-            const render::Float4x4& view = packet.view.view;
-            const float w = 2.0f, h = 1.5f, distance = 3.0f;
+        if (ed.surfaceEnabled && surfaceFrame) {
             render::PanelDraw pd;
             pd.panel = panel;
-            // The shader multiplies a row vector by this matrix, so the rows are the quad's axes:
-            // right, up and forward from the view matrix, then the centre in the last row.
-            for (int c = 0; c < 4; ++c) {
-                pd.world.m[0][c] = view.m[0][c] * w;
-                pd.world.m[1][c] = view.m[1][c] * h;
-                pd.world.m[2][c] = view.m[2][c];
-            }
-            // Row 2 of a D3D view matrix points back towards the camera, so it is both the quad's
-            // normal (the quad faces +Z) and the direction the centre is offset against.
-            const render::Float3 eye = packet.view.eye;
-            const render::Float3 back{view.m[2][0], view.m[2][1], view.m[2][2]};
-            pd.world.m[3][0] = eye.x - back.x * distance;
-            pd.world.m[3][1] = eye.y - back.y * distance;
-            pd.world.m[3][2] = eye.z - back.z * distance;
-            pd.world.m[3][3] = 1.0f;
-            packet.panels.push_back(pd);
+            pd.world = ed.SurfaceWorld();
+            pd.ui = std::move(surfaceFrame);
+            packet.panels.push_back(std::move(pd));
         }
         packet.ui = std::move(uiFrame);
         if (!window.minimized()) ed.renderer->Submit(std::move(packet));
@@ -896,26 +1041,21 @@ int Run(const Args& args) {
                 } else {
                     std::fprintf(out, "P6\n%u %u\n255\n", w, h);
                     std::vector<uint8_t> rgb(size_t{w} * h * 3);
-                    size_t panelPixels = 0;
+                    size_t clearLikePixels = 0;
                     for (size_t i = 0; i < size_t{w} * h; ++i) {
                         const uint8_t r = rgba[i * 4 + 0], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
                         rgb[i * 3 + 0] = r;
                         rgb[i * 3 + 1] = g;
                         rgb[i * 3 + 2] = b;
-                        // The panel's clear colour, which only the panel surface and the quad that
-                        // samples it can put on screen.
+                        // Descriptive only: plugin content normally covers the surface clear.
+                        // Similar-coloured scene/editor pixels are not evidence of panel rendering.
                         if (std::abs(int{r} - 158) <= 8 && std::abs(int{g} - 33) <= 8 && std::abs(int{b} - 122) <= 8)
-                            ++panelPixels;
+                            ++clearLikePixels;
                     }
                     std::fwrite(rgb.data(), 1, rgb.size(), out);
                     std::fclose(out);
-                    std::fprintf(stderr, "scuba-engine: readback %s (%ux%u), panel pixels %zu\n",
-                                 args.readback.generic_string().c_str(), w, h, panelPixels);
-                    if (panelPixels < 64) {
-                        log::Error("render", "diegetic panel never reached the frame: " + std::to_string(panelPixels) +
-                                                 " panel pixel(s)");
-                        code = 1;
-                    }
+                    std::fprintf(stderr, "scuba-engine: readback %s (%ux%u), clear-like pixels %zu (descriptive only)\n",
+                                 args.readback.generic_string().c_str(), w, h, clearLikePixels);
                 }
             }
         }
@@ -923,6 +1063,9 @@ int Run(const Args& args) {
     }
 
     ed.renderer->Flush();
+    ed.renderer->ReleasePanel(panel);
+    ed.netSandbox.reset();
+    ed.surface.reset();
     ed.ui.Shutdown();
     ed.sco.Stop();
     ed.loader.reset();   // before the job pool
@@ -944,7 +1087,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     const auto args = ParseArgs();
     if (!args) {
         std::fprintf(stderr, "usage: scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR|--no-plugins] "
-                             "[--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N] [--scenario FILE] [--diegetic] [--readback FILE] [--export DIR | --export-pack FILE]\n");
+                             "[--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync] [--hidden] [--frames N] [--scenario FILE] [--diegetic [PANEL_ID]] [--readback FILE] [--export DIR | --export-pack FILE]\n");
         return 2;
     }
     return Run(*args);

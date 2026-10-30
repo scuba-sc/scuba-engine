@@ -54,12 +54,13 @@ struct UiFrameDeleter {
 };
 using UiFramePtr = std::unique_ptr<UiFrame, UiFrameDeleter>;
 
-// A diegetic panel: an off-screen surface that is filled with the frame's UI and then drawn as one
-// world-space quad, so a plugin panel can live in the scene instead of floating over it.
+// A diegetic panel: an off-screen surface filled with its own cloned plugin UI, then sampled by
+// one world-space quad. The editor's draw list is never used as surface content.
 struct PanelDraw {
     GpuPanel panel = 0;
     Float4x4 world;      // the quad's transform: unit quad in XY, facing +Z before the transform
     bool content = true; // false leaves the surface as it is (the panel was filled earlier)
+    UiFramePtr ui;       // this surface only; never falls back to the editor draw list
 };
 
 struct FramePacket {

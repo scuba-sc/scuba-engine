@@ -23,11 +23,9 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 if(SCUBA_BUILD_ENGINE)
   include(cmake/ScubaDeps.cmake)
-  if(WIN32)
-    # The kit's host-only sco::widgets::ImGuiRenderer draws plugin panels into the engine's ImGui.
-    set(SCO_WIDGETS_IMGUI ON CACHE BOOL "" FORCE)
-    set(SCO_WIDGETS_IMGUI_INCLUDE_DIR "${SCUBA_IMGUI_DIR}" CACHE PATH "" FORCE)
-  endif()
+  # Also exercise the real host adapter in portable headless UI tests.
+  set(SCO_WIDGETS_IMGUI ON CACHE BOOL "" FORCE)
+  set(SCO_WIDGETS_IMGUI_INCLUDE_DIR "${SCUBA_IMGUI_DIR}" CACHE PATH "" FORCE)
 endif()
 include(cmake/ScubaSdk.cmake)
 include(cmake/ScubaActorStats.cmake)

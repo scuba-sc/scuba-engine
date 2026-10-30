@@ -301,7 +301,7 @@ public:
         ImGui_ImplDX12_InitInfo info;
         info.Device = device_.Get();
         info.CommandQueue = queue_.Get();
-        info.NumFramesInFlight = kBackBuffers;
+        info.NumFramesInFlight = kBackBuffers * (kPanelSlots + 1); // one upload ring slot per UI pass
         info.RTVFormat = kColorFormat;
         info.DSVFormat = DXGI_FORMAT_UNKNOWN;
         info.UserData = this;
@@ -807,12 +807,11 @@ private:
             at += kInstanceStride;
         }
 
-        // Panels first: filling one retargets the command list, so it cannot interleave with the
-        // frame's own target. The UI draw data is a clone, so rendering it here as well is safe.
+        // Independent plugin surfaces first; never copy the editor shell into a world quad.
         if (packet.ui && uiReady_) {
             for (const auto& pd : packet.panels) {
                 auto it = panels_.find(pd.panel);
-                if (it == panels_.end() || !pd.content) continue;
+                if (it == panels_.end() || !pd.content || !pd.ui) continue;
                 auto& panel = it->second;
                 auto toRt = Transition(panel.tex.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                                        D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -826,7 +825,10 @@ private:
                 list_->RSSetScissorRects(1, &psc);
                 ID3D12DescriptorHeap* panelHeaps[] = {srvHeap_.Get()};
                 list_->SetDescriptorHeaps(1, panelHeaps);
-                ImGui_ImplDX12_RenderDrawData(&packet.ui->data, list_.Get());
+                // Private contexts are gone by retirement; use this backend's live viewport.
+                pd.ui->data.OwnerViewport = ImGui::GetMainViewport();
+                ImGui_ImplDX12_RenderDrawData(&pd.ui->data, list_.Get());
+                pd.ui->data.OwnerViewport = nullptr;
                 auto toSrv = Transition(panel.tex.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
                                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                 list_->ResourceBarrier(1, &toSrv);
@@ -913,6 +915,8 @@ private:
             std::lock_guard<std::mutex> hold(mutex_);
             ++uiConsumed_;
             retiredUi_.push_back(std::move(packet.ui));
+            for (auto& panel : packet.panels)
+                if (panel.ui) retiredUi_.push_back(std::move(panel.ui));
         }
         uiCv_.notify_all();
 

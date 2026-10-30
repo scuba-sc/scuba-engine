@@ -43,17 +43,23 @@ target_compile_definitions(scuba_engine_sco PRIVATE SCUBA_VERSION="${PROJECT_VER
   SCUBA_SDK_VERSION_STRING="${SCUBA_SDK_VERSION}")
 scuba_warnings(scuba_engine_sco)
 
+add_library(scuba_imgui_core STATIC
+  "${SCUBA_IMGUI_DIR}/imgui.cpp" "${SCUBA_IMGUI_DIR}/imgui_draw.cpp"
+  "${SCUBA_IMGUI_DIR}/imgui_tables.cpp" "${SCUBA_IMGUI_DIR}/imgui_widgets.cpp")
+target_include_directories(scuba_imgui_core SYSTEM PUBLIC "${SCUBA_IMGUI_DIR}")
+add_library(scuba_native_tools STATIC src/ui/designer.cpp src/ui/net_sandbox.cpp src/ui/plugin_surface.cpp)
+target_compile_definitions(scuba_native_tools PRIVATE SCUBA_DESIGNER_IMGUI)
+target_include_directories(scuba_native_tools PUBLIC "${SCUBA_ENGINE_INCLUDE}" PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(scuba_native_tools PUBLIC scuba_imgui_core scuba_engine_sco scuba_net_sim sco_widgets_imgui)
+scuba_warnings(scuba_native_tools)
+
 if(WIN32)
   add_library(scuba_imgui STATIC
-    "${SCUBA_IMGUI_DIR}/imgui.cpp"
-    "${SCUBA_IMGUI_DIR}/imgui_draw.cpp"
-    "${SCUBA_IMGUI_DIR}/imgui_tables.cpp"
-    "${SCUBA_IMGUI_DIR}/imgui_widgets.cpp"
     "${SCUBA_IMGUI_DIR}/imgui_demo.cpp"
     "${SCUBA_IMGUI_DIR}/backends/imgui_impl_win32.cpp"
     "${SCUBA_IMGUI_DIR}/backends/imgui_impl_dx12.cpp")
   target_include_directories(scuba_imgui SYSTEM PUBLIC "${SCUBA_IMGUI_DIR}" "${SCUBA_IMGUI_DIR}/backends")
-  target_link_libraries(scuba_imgui PUBLIC d3d12 dxgi)
+  target_link_libraries(scuba_imgui PUBLIC scuba_imgui_core d3d12 dxgi)
 
   add_library(scuba_engine_runtime STATIC
     src/platform/win32_window.cpp
@@ -62,7 +68,7 @@ if(WIN32)
     src/ui/ui_layer.cpp)
   target_include_directories(scuba_engine_runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
   target_link_libraries(scuba_engine_runtime
-    PUBLIC scuba_engine_core scuba_engine_sco scuba_imgui sco_widgets_imgui
+    PUBLIC scuba_engine_core scuba_engine_sco scuba_imgui sco_widgets_imgui scuba_native_tools
     PRIVATE d3d12 dxgi d3dcompiler dxguid)
   target_compile_definitions(scuba_engine_runtime PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
   scuba_warnings(scuba_engine_runtime)
@@ -73,7 +79,9 @@ if(WIN32)
   target_compile_definitions(scuba-engine PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE
     SCUBA_VERSION="${PROJECT_VERSION}" SCUBA_SDK_VERSION="${SCUBA_SDK_VERSION}"
     SCUBA_DEFAULT_PLUGIN_ROOT="${PROJECT_BINARY_DIR}/plugins/runtime"
-    SCUBA_DEFAULT_CONTENT_DIR="${PROJECT_SOURCE_DIR}/engine/content")
+    SCUBA_DEFAULT_CONTENT_DIR="${PROJECT_SOURCE_DIR}/engine/content"
+    SCUBA_DEFAULT_HOSTD="$<TARGET_FILE:scuba-hostd>")
+  add_dependencies(scuba-engine scuba-hostd)
   scuba_warnings(scuba-engine)
   # plugins/CMakeLists.txt makes scuba-engine depend on the staged APP plugins, as scuba-hostd does.
 endif()
