@@ -1,12 +1,15 @@
 # scuba-engine architecture
 
 scuba-engine is a studio for building and testing sco-core plugins and UI without the game. It
-consumes the latest published sco-core SDK release (SDK 2.4.0 release candidate 2, tag
-`sdk-v2.4.0-rc.2`, source commit `844e136ccb280ad8cb43f73bc43c9447e8f6799d`, the
-`sco-sdk-host-source-sc-2.4.0.zip` kit) and never vendors its sources. Nothing in this repository
+consumes a verified development `sco-sdk-host-source-sc-2.4.0.zip` generated from exact
+sco-core source `e2ad885aa3027ed1162793d30292ca103c2f5b28`; it is not a published release.
+The project never vendors its sources. Nothing in this repository
 has run inside Star Citizen; it ships no game files or game data.
 
 ## Integrated subsystems
+
+The host retains its mock backing and refuses restart if core teardown fails; a
+failed start is also treated as retained because core may have exposed backing state.
 
 1. **Hostd** boots `sco_app` headless and publishes 24 synthetic service tables before external
    plugin discovery. It registers system, widgets, mock-game, designer-export, asset and plugin

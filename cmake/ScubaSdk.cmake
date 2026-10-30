@@ -1,24 +1,18 @@
-# Fetches the published sco-core host-source kit, verifies its SHA-256 and adds it to the build.
+# Verifies the supplied development sco-core host-source kit and adds it to the build.
 #
 #   SCUBA_SDK_VERSION       kit version (default 2.4.0)
-#   SCUBA_SDK_RELEASE_TAG   sco-core release tag the kit is downloaded from (default
-#                           sdk-v2.4.0-rc.2, SDK 2.4.0 release candidate 2)
-#   SCUBA_SDK_ARCHIVE_DIR   directory holding a local copy of the release assets; when set, the
-#                           archive is taken from there instead of downloaded. Either way the
-#                           archive must match SCUBA_SDK_HOST_SOURCE_SHA256 or configure fails.
+#   SCUBA_SDK_ARCHIVE_DIR   directory holding the locally generated development archive;
+#                           it must match SCUBA_SDK_HOST_SOURCE_SHA256 or configure fails.
 #
 # The kit sources are never copied into this repository: they are extracted under the build tree.
 
 set(SCUBA_SDK_VERSION "2.4.0" CACHE STRING "sco-core SDK version consumed by scuba-engine")
-set(SCUBA_SDK_RELEASE_TAG "sdk-v2.4.0-rc.2" CACHE STRING "sco-core release tag holding the kit")
-set(SCUBA_SDK_ARCHIVE_DIR "" CACHE PATH "Local directory with the ${SCUBA_SDK_RELEASE_TAG} release assets (optional)")
-set(SCUBA_SDK_HOST_SOURCE_SHA256 "3d711463f7dff3dcd372ffb70b09951ecf21f1d0e2c5f0a899cccbb9977b8201"
-    CACHE STRING "SHA-256 of sco-sdk-host-source-sc-<version>.zip (from the release SHA256SUMS)")
+set(SCUBA_SDK_ARCHIVE_DIR "" CACHE PATH "Directory containing the development host-source archive")
+set(SCUBA_SDK_HOST_SOURCE_SHA256 "e9096f7b3c13c89dc4e9b6aec4ed595aaa71778b207823caa4918978363e1cd6"
+    CACHE STRING "SHA-256 of the development sco-sdk-host-source-sc archive")
 
 set(_scuba_sdk_name "sco-sdk-host-source-sc-${SCUBA_SDK_VERSION}")
 set(_scuba_sdk_zip_name "${_scuba_sdk_name}.zip")
-set(_scuba_sdk_url
-    "https://github.com/scuba-sc/sco-core/releases/download/${SCUBA_SDK_RELEASE_TAG}/${_scuba_sdk_zip_name}")
 set(_scuba_sdk_dl_dir "${CMAKE_BINARY_DIR}/_sdk")
 set(_scuba_sdk_zip "${_scuba_sdk_dl_dir}/${_scuba_sdk_zip_name}")
 set(_scuba_sdk_src_parent "${_scuba_sdk_dl_dir}/src-${SCUBA_SDK_HOST_SOURCE_SHA256}")
@@ -45,16 +39,7 @@ if(NOT _have)
     message(STATUS "sco-core SDK: using local archive ${_local}")
     file(COPY_FILE "${_local}" "${_scuba_sdk_zip}")
   else()
-    message(STATUS "sco-core SDK: downloading ${_scuba_sdk_url}")
-    file(DOWNLOAD "${_scuba_sdk_url}" "${_scuba_sdk_zip}"
-         EXPECTED_HASH SHA256=${SCUBA_SDK_HOST_SOURCE_SHA256}
-         TLS_VERIFY ON
-         STATUS _dl_status)
-    list(GET _dl_status 0 _dl_code)
-    if(NOT _dl_code EQUAL 0)
-      file(REMOVE "${_scuba_sdk_zip}")
-      message(FATAL_ERROR "sco-core SDK download failed: ${_dl_status}")
-    endif()
+    message(FATAL_ERROR "Development host-source archive required: set SCUBA_SDK_ARCHIVE_DIR as described in README.md")
   endif()
   _scuba_sdk_hash_ok("${_scuba_sdk_zip}" _have)
   if(NOT _have)

@@ -10,6 +10,7 @@
 #include "sco_lua_game.h"
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <deque>
 #include <iostream>
 #include <mutex>
@@ -254,7 +255,11 @@ int PeerMain() {
         std::cout << result.dump() << '\n' << std::flush;
     }
     reader.join();
-    sco::app::Stop();
+    const auto stopped = sco::app::Stop();
+    if (stopped != sco::Result::Ok) {
+        std::fprintf(stderr, "net peer: core teardown refused; backing retained until process exit\n");
+        return 1;
+    }
     return 0;
 }
 } // namespace scuba::hostd::net_sim

@@ -3,10 +3,15 @@
 This inventory separates source modules, shipped defaults, SDK contracts, and live provider
 availability. It was checked against scuba-engine `56f5085`, sc-offline `96686b9`, sc-mp
 `6308ed3`, and sco-core `0c977d3` on 2026-10-29. Those are source-tree revisions. Product
-consumers still pin the published SDK 2.4.0 RC2 archive (`sco-sdk-2.4.0.zip`, SHA-256
+consumers then pinned the published SDK 2.4.0 RC2 archive (`sco-sdk-2.4.0.zip`, SHA-256
 `51a7ce266d087bcbeac39c92f26a6f905b4473883dd7ed6f0f5ca823fa88c88e`, host-source commit
 `844e136ccb280ad8cb43f73bc43c9447e8f6799d`); the current core main source is not a replacement
 published artifact.
+
+Development update, 2026-10-30: the engine now builds against a separately
+verified host-source archive from sco-core `e2ad885aa3027ed1162793d30292ca103c2f5b28`.
+That development input does not change the historical RC2 evidence below or
+turn the archive into a published release.
 
 ## Inventory
 

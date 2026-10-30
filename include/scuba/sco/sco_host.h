@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
-// The engine's sco-core boundary. ScoHost boots the published kit's host kernel (sco::app) in
+// The engine's sco-core boundary. ScoHost boots the configured kit's host kernel (sco::app) in
 // process, headless, with the synthetic game services of the mock game, and owns its lifecycle:
 //
 //   Start()  the calling thread becomes sco-core's game thread: every other ScoHost call, and
 //            every sco::widgets render, must come from it (the engine's main thread)
 //   Tick()   once per engine frame, before the UI is built: plugins run their tasks, commands
 //            and events here
-//   Stop()   plugins unload, services are withdrawn
+//   Stop()   returns false if the kernel cannot safely unload and withdraw services
 //
 // Nothing crosses this boundary but ids, strings and copies: no plugin pointer, no ImGui type.
 // Plugin UI reaches the screen only as sco.widgets panels rendered through an adapter.
@@ -47,7 +47,7 @@ public:
 
     Status Start(const ScoHostOptions& options);
     void Tick();
-    void Stop();
+    bool Stop();
     bool started() const noexcept { return started_; }
     // Why the last Start failed, when the kernel could name a reason (a refused product plugin,
     // a missing data/plugins root); empty otherwise.
@@ -63,6 +63,7 @@ public:
 
 private:
     bool started_ = false;
+    bool stopFailed_ = false;
     std::string profileError_;
     std::chrono::steady_clock::time_point start_{};
 };

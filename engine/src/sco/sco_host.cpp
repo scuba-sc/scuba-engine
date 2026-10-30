@@ -57,10 +57,12 @@ void ScoHost::Tick() {
     TheKernel().Tick(static_cast<uint32_t>(ms));
 }
 
-void ScoHost::Stop() {
-    if (!started_) return;
-    TheKernel().Stop();
+bool ScoHost::Stop() {
+    if (!started_) return !stopFailed_;
+    const bool stopped = TheKernel().Stop();
     started_ = false;
+    stopFailed_ = !stopped;
+    return stopped;
 }
 
 std::vector<ScoPlugin> ScoHost::Plugins() const {

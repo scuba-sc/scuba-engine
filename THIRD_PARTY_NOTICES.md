@@ -6,8 +6,8 @@ this project.
 
 ## sco-core SDK (GPL-3.0-only)
 
-The build downloads `sco-sdk-host-source-sc-<version>.zip` from the scuba-sc/sco-core release
-(verified by SHA-256) and links its libraries into `scuba-hostd`. The kit is GPL-3.0-only and
+The build verifies a locally generated development `sco-sdk-host-source-sc-<version>.zip`
+by SHA-256 and links its libraries into `scuba-hostd`. The kit is GPL-3.0-only and
 carries its own `THIRD_PARTY_NOTICES.md`, `LICENSES/` and SBOM; the components it builds into
 `scuba-hostd` include:
 

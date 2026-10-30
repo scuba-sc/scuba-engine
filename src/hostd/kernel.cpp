@@ -4,6 +4,7 @@
 #include "sco/app.h"
 #include "sco/log.h"
 #include "sco/plugins.h"
+#include "sco/runtime.h"
 #include "sco_lua.h"
 #include "sco_lua_game.h"
 
@@ -115,7 +116,7 @@ void RemoveStage(fs::path& stage) {
 }  // namespace
 
 bool Kernel::Start(const KernelOptions& options, LogFn log) {
-    if (started_) return false;
+    if (started_ || teardownFailed_) return false;
     profileError_.clear();
     auto pluginRoot = options.pluginRoot;
     if (options.selectiveProfile && !options.productRoot.empty()) {
@@ -171,15 +172,17 @@ bool Kernel::Start(const KernelOptions& options, LogFn log) {
     pf.pluginsEnabled = !pluginRoot.empty();
     pf.dataRoot = options.dataRoot;
     pf.scripts = options.lua ? &kLuaRuntime : nullptr;
-    const bool mockWasPublished = mock_game::Published();
     if (options.mockGame) {
         if (options.selectiveProfile) mock_game::ConfigureSelected(pf, options.profileServices, options.mockEvents);
         else mock_game::Configure(pf);
     }
     started_ = sco::app::Start(pf);
     if (!started_) {
-        if (!mockWasPublished && mock_game::Published()) mock_game::Unpublish();
-        RemoveStage(profileStage_);
+        // Start can fail after publishing retained state. It gives no cleanup
+        // proof, and Stop here could stop an unrelated already-running host.
+        teardownFailed_ = true;
+        profileError_ = "core startup failed; backing retained until process exit";
+        if (log) log(profileError_.c_str());
         return false;
     }
     if (options.selectiveProfile) {
@@ -213,9 +216,16 @@ void Kernel::Tick(uint32_t nowMs) {
     if (started_) sco::app::Tick(nowMs);
 }
 
-void Kernel::Stop() {
-    if (!started_) return;
-    sco::app::Stop();
+bool Kernel::Stop() {
+    if (!started_) return !teardownFailed_;
+    const sco::Result result = sco::app::Stop();
+    if (result != sco::Result::Ok) {
+        teardownFailed_ = true;
+        started_ = false;
+        profileError_ = std::string("core teardown refused: ") + sco::ResultName(result) + "; backing retained until process exit";
+        sco::Log("[hostd] %s", profileError_.c_str());
+        return false;
+    }
     mock_game::Unpublish();
     started_ = false;
     // A faulted or pinned native may still refer to its files. Leave the snapshot
@@ -225,6 +235,7 @@ void Kernel::Stop() {
         if (plugin.module || !plugin.pinned.empty()) retained = true;
     if (!retained) RemoveStage(profileStage_);
     else profileStage_.clear();
+    return true;
 }
 
 std::vector<KernelPluginInfo> Kernel::plugins() const {

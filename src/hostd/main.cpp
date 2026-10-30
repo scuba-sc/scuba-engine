@@ -219,8 +219,7 @@ int main(int argc, char** argv) {
 
     if (!scenarioPath.empty()) {
         const bool passed = RunScenario(scenario);
-        kernel.Stop();
-        return passed ? 0 : 1;
+        return kernel.Stop() && passed ? 0 : 1;
     }
 
     std::string error;
@@ -249,7 +248,7 @@ int main(int argc, char** argv) {
     std::printf("scuba-hostd: stopping\n");
     std::fflush(stdout);
     server.Stop();
-    kernel.Stop();
+    const bool stopped = kernel.Stop();
     g_logBroadcaster = nullptr;
-    return 0;
+    return stopped ? 0 : 1;
 }

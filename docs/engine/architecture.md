@@ -11,8 +11,8 @@ Nothing here has run inside Star Citizen. The engine uses mock game services onl
 
 ## Principles
 
-1. **sco-core is the boundary.** The engine is a host of the latest published SDK kit (SDK 2.4.0
-   release candidate 2, tag sdk-v2.4.0-rc.2, pinned by SHA-256 in `cmake/ScubaSdk.cmake`). Plugins reach the engine only through
+1. **sco-core is the boundary.** The engine hosts a source-bound development SDK kit,
+   pinned by SHA-256 in `cmake/ScubaSdk.cmake`. Plugins reach the engine only through
    SDK services and contracts. Plugin UI arrives as `sco.widgets` panels; no plugin sees an ImGui
    type, a D3D12 object or an engine pointer.
 2. **One owner per thread.** The main thread owns the window, the sco-core game thread, the UI
@@ -83,7 +83,7 @@ Renderer::Submit(N) ────────────────────
 
 ## sco-core binding (`include/scuba/sco/sco_host.h`)
 
-`ScoHost::Start` boots `sco::app` headless with the published kit, publishes the mock game's
+`ScoHost::Start` boots `sco::app` headless with the development kit, publishes the mock game's
 synthetic `game.*` tables (`scuba_kernel`, shared with `scuba-hostd`), and loads plugins from the
 staged plugin root. The calling thread becomes the game thread; `Tick` runs once per frame before
 the UI is built. Plugins appear in the Plugins panel; every `sco.widgets` panel gets a dockable

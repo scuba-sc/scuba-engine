@@ -924,7 +924,10 @@ int Run(const Args& args) {
 
     ed.renderer->Flush();
     ed.ui.Shutdown();
-    ed.sco.Stop();
+    if (!ed.sco.Stop()) {
+        log::Error("sco", "kernel stop failed; backing state is retained until process exit");
+        code = 1;
+    }
     ed.loader.reset();   // before the job pool
     ed.renderer.reset();
     log::SetSink(nullptr);

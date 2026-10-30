@@ -15,7 +15,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  development-source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: scuba-sc/sco-core
+          ref: e2ad885aa3027ed1162793d30292ca103c2f5b28
+          path: core-development
+          persist-credentials: false
+      - name: Generate and verify development host-source kit
+        run: |
+          set -eu
+          test "$(git -C core-development rev-parse HEAD)" = e2ad885aa3027ed1162793d30292ca103c2f5b28
+          mkdir -p "$RUNNER_TEMP/sdk-development"
+          python3 core-development/sdk/package.py --profile host-source-sc --out "$RUNNER_TEMP/sdk-development"
+          cd "$RUNNER_TEMP/sdk-development"
+          printf '%s  %s\n' e9096f7b3c13c89dc4e9b6aec4ed595aaa71778b207823caa4918978363e1cd6 sco-sdk-host-source-sc-2.4.0.zip | sha256sum -c -
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: host-source-development
+          path: ${{ runner.temp }}/sdk-development/*.zip
+          if-no-files-found: error
   build:
+    needs: development-source
     strategy:
       fail-fast: false
       matrix:
@@ -37,8 +60,13 @@ jobs:
         with:
           node-version: 22
 
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: host-source-development
+          path: ${{ runner.temp }}/sdk-development
+
       - name: Configure CMake
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DSCUBA_BUILD_TESTS=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DSCUBA_BUILD_TESTS=ON "-DSCUBA_SDK_ARCHIVE_DIR=${{ runner.temp }}/sdk-development"
 
       - name: Build scuba-engine
         run: cmake --build build --config ${{ matrix.config }}

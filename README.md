@@ -35,26 +35,32 @@ textures yet), CPU picking.
 
 ## Requirements
 
-- CMake 3.21+, a C++20 compiler (clang, GCC or MSVC), 64-bit
+- CMake 3.30+, a C++20 compiler (clang, GCC or MSVC), 64-bit
 - Node.js 22.12+ (24 is what CI uses) for the studio
 - Python 3 for native plugin export; Bun and Lua 5.4 for the generated-plugin CTest
-- Network access on first configure (the sco-core SDK kit is downloaded), or a local copy of the release assets
+- A locally generated, checksum-verified development host-source archive; network access is also needed for third-party dependencies on first configure
 
 ## Build scuba-hostd
 
 ```sh
-cmake -S . -B build
+cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=<development-assets>
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
 Build and CTest before running studio tests: Asset Lab's loader tests consume synthetic files generated at `build/tests/assets-fixtures`. If using another build directory, generate its fixtures and copy them to that location before `npm test`.
 
-Configure downloads `sco-sdk-host-source-sc-2.4.0.zip` from the latest sco-core [`sdk-v2.4.0-rc.2`](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0-rc.2) release (SDK 2.4.0, release candidate 2), checks its SHA-256 (`3d711463…77b8201`, the value in the release's `SHA256SUMS`) and builds it under `build/_sdk/`. The release tag points to source commit `844e136ccb280ad8cb43f73bc43c9447e8f6799d`; later `main` commits do not change the released archive bytes. A mismatched archive stops the configure. A build tree configured before the pin moved keeps its cached `SCUBA_SDK_*` values: configure a fresh tree, or add `-U "SCUBA_SDK_*"` once. To build offline from a local copy of the release assets:
-
-```sh
-cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.4.0-rc.2-assets
-```
+Generate `sco-sdk-host-source-sc-2.4.0.zip` using `sdk/package.py --profile host-source-sc`
+from a clean sco-core checkout at exact development commit
+`e2ad885aa3027ed1162793d30292ca103c2f5b28`. The archive's SHA-256 is
+`e9096f7b3c13c89dc4e9b6aec4ed595aaa71778b207823caa4918978363e1cd6`.
+Configure verifies it before extraction. It is a development input, not an SDK release;
+CI generates the same profile from that commit. A build tree configured before the pin
+moved keeps cached `SCUBA_SDK_*` values: use a fresh tree or add `-U "SCUBA_SDK_*"` once.
+For the earlier published RC2 build and its asset recipe, use scuba-engine commit
+`8373c52012d2f58fc773f796e199de81c16eb571`. An appropriate supported stable SDK can
+become the normal baseline once it includes the required contract and passes the
+cross-consumer checks; explicit source-based development remains available.
 
 On Windows add `-A x64` to the configure and `--config Release` / `-C Release` to build and ctest.
 

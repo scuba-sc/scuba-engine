@@ -38,13 +38,16 @@ public:
 
     bool Start(const KernelOptions& options, LogFn log);
     void Tick(uint32_t nowMs);
-    void Stop();
+    // False means teardown was refused or failed; backing remains retained and
+    // this Kernel cannot restart in the same process.
+    bool Stop();
     bool started() const { return started_; }
     std::vector<KernelPluginInfo> plugins() const;
     const std::string& profileError() const { return profileError_; }
 
 private:
     bool started_ = false;
+    bool teardownFailed_ = false;
     std::string profileError_;
     std::filesystem::path profileStage_;
 };

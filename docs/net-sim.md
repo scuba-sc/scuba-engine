@@ -18,11 +18,9 @@ cd ..
 ./build/scuba-hostd --studio studio/dist
 ```
 
-The foundation downloads the published `sdk-v2.4.0-rc.2` host-source kit (SDK
-2.4.0, release candidate 2, source commit
-`844e136ccb280ad8cb43f73bc43c9447e8f6799d`) and verifies
-its pinned SHA-256. For offline work, set `SCUBA_SDK_ARCHIVE_DIR` at configure
-time to a directory containing the release archive; the same hash check applies.
+The foundation verifies a local development host-source archive generated from
+`e2ad885aa3027ed1162793d30292ca103c2f5b28`. Set `SCUBA_SDK_ARCHIVE_DIR` at
+configure time as described in the root README; this is not a published release.
 
 Open the studio and select **NetSandbox**. Select a peer count and choose
 **Start sandbox**. The default synthetic chat plugin publishes a widget panel
