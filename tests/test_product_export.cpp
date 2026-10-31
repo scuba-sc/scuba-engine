@@ -3,10 +3,13 @@
 // half-written distribution from existing.
 #include "check.h"
 #include "scuba/product/export.h"
+#include "scuba/vfs/file_system.h"
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -74,6 +77,35 @@ int main(int argc, char** argv) {
         CHECK(fs::is_regular_file(out / "data" / "plugins" / "catalog_a" / "plugin.ini"));
     }
 
+    // A trailing separator still stages next to the destination and supports empty directories.
+    for (const bool existing : {false, true}) {
+        const fs::path out = base / (existing ? "trailing-empty" : "trailing-new");
+        if (existing) fs::create_directories(out);
+        ExportReport report;
+        CHECK(ExportProduct(root, fs::path(out.string() + "/"), report));
+        CHECK(fs::is_regular_file(out / "data" / "plugins" / "catalog_a" / "plugin.ini"));
+        CHECK(!fs::exists(out.string() + ".partial"));
+    }
+    {
+        const fs::path out = base / "trailing.scpak";
+        ExportReport report;
+        CHECK(ExportProductPack(root, fs::path(out.string() + "/"), report));
+        CHECK(fs::is_regular_file(out));
+        CHECK(!fs::exists(out.string() + ".partial"));
+    }
+    // A preexisting sibling stage must not be bypassed by a trailing separator.
+    for (const bool packed : {false, true}) {
+        const fs::path out = base / (packed ? "trailing-owned.scpak" : "trailing-owned");
+        const fs::path stage = out.string() + ".partial";
+        Write(stage / "keep.txt", "unrelated\n");
+        ExportReport report;
+        const fs::path withSeparator(out.string() + "/");
+        CHECK(!(packed ? ExportProductPack(root, withSeparator, report)
+                       : ExportProduct(root, withSeparator, report)));
+        CHECK(!fs::exists(out));
+        CHECK(fs::is_regular_file(stage / "keep.txt"));
+    }
+
     // A roster folder without a manifest is refused before anything is written.
     {
         fs::remove_all(root / "data" / "plugins" / "catalog_b" / "plugin.ini");
@@ -112,16 +144,137 @@ int main(int argc, char** argv) {
 
     // One .scpak of the same tree, verified, and refused when the destination exists.
     {
+        Write(root / "private-sibling.txt", "must not be exported\n");
         const fs::path pack = base / "dist.scpak";
         fs::remove(pack);
+        Write(pack.string() + ".tmp", "unrelated\n");
         ExportReport report;
         CHECK(ExportProductPack(root, pack, report));
         CHECK(report.plugins.size() == 2);
         CHECK(fs::file_size(pack) > 0);
+        CHECK(fs::file_size(pack.string() + ".tmp") == 10);
+        scuba::Status openStatus;
+        auto archive = scuba::vfs::OpenPack(pack, openStatus);
+        CHECK(archive && openStatus);
+        if (archive) {
+            CHECK(archive->Exists("data/plugins/catalog_a/plugin.ini"));
+            CHECK(!archive->Exists("private-sibling.txt"));
+        }
         ExportReport again;
         const auto st = ExportProductPack(root, pack, again);
         CHECK(!st);
         CHECK(st.error.find("exists") != std::string::npos);
+    }
+
+    // Existing sibling staging paths are not owned by the exporter and must survive both paths.
+    for (const bool packed : {false, true}) {
+        const fs::path out = base / (packed ? "owned.scpak" : "owned");
+        const fs::path stage = out.string() + ".partial";
+        Write(stage / "keep.txt", "unrelated\n");
+        ExportReport report;
+        CHECK(!(packed ? ExportProductPack(root, out, report) : ExportProduct(root, out, report)));
+        CHECK(fs::is_regular_file(stage / "keep.txt"));
+        CHECK(!fs::exists(out));
+    }
+
+    // An unrelated staging file, or a link to someone else's directory, is not ours to clean up.
+    {
+        const fs::path out = base / "stage-file";
+        const fs::path stage = out.string() + ".partial";
+        Write(stage, "keep\n");
+        ExportReport report;
+        CHECK(!ExportProduct(root, out, report));
+        CHECK(fs::is_regular_file(stage) && fs::file_size(stage) == 5);
+        CHECK(!fs::exists(out));
+    }
+    {
+        const fs::path out = base / "stage-link.scpak";
+        const fs::path stage = out.string() + ".partial";
+        const fs::path target = base / "unrelated";
+        Write(target / "keep.txt", "keep\n");
+        std::error_code ec;
+        fs::create_directory_symlink(fs::absolute(target), stage, ec);
+        if (!ec) {
+            ExportReport report;
+            CHECK(!ExportProductPack(root, out, report));
+            CHECK(fs::is_symlink(fs::symlink_status(stage)));
+            CHECK(fs::is_regular_file(target / "keep.txt"));
+            CHECK(!fs::exists(out));
+        }
+    }
+
+    // Refusal after staging is created removes only the owned stage and leaves the source intact.
+    {
+        const fs::path source = root / "data" / "oversize.bin";
+        Write(source, "");
+        std::error_code ec;
+        fs::resize_file(source, (uint64_t{256} << 20) + 1, ec);
+        if (!ec) {
+            for (const bool packed : {false, true}) {
+                const fs::path out = base / (packed ? "oversize.scpak" : "oversize");
+                ExportReport report;
+                CHECK(!(packed ? ExportProductPack(root, out, report) : ExportProduct(root, out, report)));
+                CHECK(!fs::exists(out));
+                CHECK(!fs::exists(out.string() + ".partial"));
+                CHECK(fs::file_size(source) == (uint64_t{256} << 20) + 1);
+            }
+        }
+        fs::remove(source);
+    }
+
+    // A destination within the input cannot be staged while traversing that input.
+    {
+        ExportReport report;
+        CHECK(!ExportProduct(root, root / "data" / "nested", report));
+        CHECK(!ExportProductPack(root, root / "data" / "nested.scpak", report));
+        CHECK(!fs::exists(root / "data" / "nested.partial"));
+        CHECK(!fs::exists(root / "data" / "nested.scpak.partial"));
+    }
+
+    // Concurrent exporters using the same destination must not share a staging tree or both
+    // report success. This exercises cooperating exporters, not hostile path replacement.
+    for (const bool packed : {false, true}) {
+        for (int trial = 0; trial < 8; ++trial) {
+            const fs::path out = base / ((packed ? "concurrent-pack-" : "concurrent-dir-") + std::to_string(trial));
+            std::atomic<int> ready{0};
+            std::atomic<bool> go{false};
+            bool succeeded[2] = {false, false};
+            auto run = [&](int index) {
+                ExportReport report;
+                ++ready;
+                while (!go.load()) std::this_thread::yield();
+                succeeded[index] = static_cast<bool>(packed ? ExportProductPack(root, out, report)
+                                                           : ExportProduct(root, out, report));
+            };
+            std::thread first(run, 0), second(run, 1);
+            while (ready.load() != 2) std::this_thread::yield();
+            go = true;
+            first.join();
+            second.join();
+            CHECK(succeeded[0] != succeeded[1]);
+            CHECK(!fs::exists(out.string() + ".partial"));
+            if (packed) {
+                scuba::Status openStatus;
+                auto archive = scuba::vfs::OpenPack(out, openStatus);
+                CHECK(archive && openStatus);
+                if (archive) CHECK(archive->Exists("data/plugins/catalog_a/plugin.ini"));
+            } else {
+                CHECK(fs::is_regular_file(out / "data" / "plugins" / "catalog_a" / "plugin.ini"));
+            }
+        }
+    }
+
+    // Refuse a symlink at the data root itself, not only symlinks below it.
+    {
+        const fs::path linkRoot = base / "linked-root";
+        fs::create_directories(linkRoot);
+        std::error_code ec;
+        fs::create_directory_symlink(fs::absolute(root / "data"), linkRoot / "data", ec);
+        if (!ec) {
+            ExportReport report;
+            CHECK(!ExportProduct(linkRoot, base / "linked-dist", report));
+            CHECK(!ExportProductPack(linkRoot, base / "linked-dist.scpak", report));
+        }
     }
 
     fs::remove_all(base);

@@ -1,3 +1,16 @@
+if(SCUBA_BUILD_ENGINE)
+  foreach(name native_designer native_net_sandbox plugin_surface)
+    add_executable(test_${name} test_${name}.cpp)
+    target_link_libraries(test_${name} PRIVATE scuba_native_tools)
+    target_include_directories(test_${name} PRIVATE "${PROJECT_SOURCE_DIR}/engine/src")
+    scuba_warnings(test_${name})
+  endforeach()
+  target_compile_definitions(test_native_designer PRIVATE SCUBA_DESIGNER_IMGUI)
+  add_test(NAME native_designer COMMAND test_native_designer)
+  add_test(NAME native_net_sandbox COMMAND test_native_net_sandbox $<TARGET_FILE:scuba-hostd>)
+  add_test(NAME plugin_surface COMMAND test_plugin_surface "${PROJECT_BINARY_DIR}/plugins/runtime")
+  set_tests_properties(native_designer native_net_sandbox plugin_surface PROPERTIES TIMEOUT 120)
+endif()
 foreach(test_name test_websocket test_http_json test_handlers)
   add_executable(${test_name} ${test_name}.cpp)
   target_link_libraries(${test_name} PRIVATE scuba_bridge)
@@ -137,10 +150,20 @@ if(TARGET scuba-engine)
     --scenario "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/valid.json")
   set_tests_properties(engine_scenario_valid PROPERTIES TIMEOUT 180)
 
-  # The diegetic panel: a render-to-texture surface drawn as a scene quad, read back from the
-  # off-screen target. The engine fails the run when the panel's own clear colour never reaches the
-  # frame, so a quad that stopped being drawn cannot pass as a quiet frame.
-  add_test(NAME engine_diegetic_panel COMMAND scuba-engine --frames 3 --warp --hidden --no-plugins --diegetic
+  add_executable(test_plugin_visual test_plugin_visual.cpp)
+  target_include_directories(test_plugin_visual PRIVATE "${PROJECT_SOURCE_DIR}/engine/src")
+  target_link_libraries(test_plugin_visual PRIVATE scuba_engine_runtime)
+  scuba_warnings(test_plugin_visual)
+  add_dependencies(test_plugin_visual scuba-engine)
+  add_test(NAME plugin_visual COMMAND test_plugin_visual "${PROJECT_BINARY_DIR}/plugins/runtime"
+    "${CMAKE_CURRENT_BINARY_DIR}/plugin-visual.ppm")
+  add_test(NAME plugin_visual_stress COMMAND test_plugin_visual "${PROJECT_BINARY_DIR}/plugins/runtime"
+    "${CMAKE_CURRENT_BINARY_DIR}/plugin-visual-stress.ppm" stress)
+  set_tests_properties(plugin_visual plugin_visual_stress PROPERTIES TIMEOUT 300)
+
+  # Read back the actual plugin panel rendered on a scene quad; pixel inspection remains separate.
+  add_test(NAME engine_diegetic_panel COMMAND scuba-engine --frames 12 --warp --hidden
+    --plugins "${PROJECT_BINARY_DIR}/plugins/runtime" --diegetic mp_chat.main
     --readback "${CMAKE_CURRENT_BINARY_DIR}/diegetic.ppm")
   set_tests_properties(engine_diegetic_panel PROPERTIES TIMEOUT 300)
 endif()

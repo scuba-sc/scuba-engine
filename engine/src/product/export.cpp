@@ -37,8 +37,9 @@ Status Walk(const fs::path& dir, int depth, ExportReport& report,
         const auto size = fs::file_size(path, ec);
         if (ec) return Status::Fail("cannot size " + name);
         if (++report.files > kMaxFiles) return Status::Fail("distribution exceeds 4096 files");
+        // Check before adding so a very large sparse file cannot wrap the total.
+        if (size > kMaxBytes - report.bytes) return Status::Fail("distribution exceeds 256 MiB");
         report.bytes += size;
-        if (report.bytes > kMaxBytes) return Status::Fail("distribution exceeds 256 MiB");
         if (onFile)
             if (auto st = onFile(path); !st) return st;
     }
@@ -52,6 +53,10 @@ Status Walk(const fs::path& dir, int depth, ExportReport& report,
 Status ReadRoster(const fs::path& root, ExportReport& report) {
     const fs::path plugins = root / "data" / "plugins";
     std::error_code ec;
+    for (const auto& path : {root / "data", plugins}) {
+        if (fs::is_symlink(fs::symlink_status(path, ec)) || ec)
+            return Status::Fail("symlink or inaccessible directory refused in product tree: " + path.generic_string());
+    }
     if (!fs::is_directory(plugins, ec) || ec)
         return Status::Fail("product requires " + plugins.generic_string());
     std::vector<fs::path> folders;
@@ -75,8 +80,11 @@ Status ReadRoster(const fs::path& root, ExportReport& report) {
 
 Status RefuseOccupied(const fs::path& out) {
     std::error_code ec;
-    if (!fs::exists(out, ec)) return Status::Ok();
-    if (ec) return Status::Fail("cannot inspect " + out.generic_string());
+    const auto status = fs::symlink_status(out, ec);
+    if (ec && ec != std::errc::no_such_file_or_directory)
+        return Status::Fail("cannot inspect " + out.generic_string());
+    if (status.type() == fs::file_type::not_found) return Status::Ok();
+    if (fs::is_symlink(status)) return Status::Fail("symlink destination refused: " + out.generic_string());
     if (!fs::is_directory(out, ec) || ec)
         return Status::Fail("export destination exists and is not a directory: " + out.generic_string());
     if (!fs::is_empty(out, ec) || ec)
@@ -84,23 +92,71 @@ Status RefuseOccupied(const fs::path& out) {
     return Status::Ok();
 }
 
+// A trailing separator gives path::filename() an empty component. Strip it so staging
+// remains beside the destination, and refuse paths without a concrete final name.
+Status NormalizeDestination(const fs::path& destination, fs::path& out) {
+    out = destination;
+    while (!out.empty() && out.filename().empty() && out != out.parent_path())
+        out = out.parent_path();
+    if (out.empty() || out.filename().empty() || out.filename() == "." || out.filename() == "..")
+        return Status::Fail("export destination requires a final name: " + destination.generic_string());
+    return Status::Ok();
+}
+
+// A deterministic sibling is convenient for diagnosis, but it belongs to this export only if
+// create_directory succeeds. Never delete or reuse a path left by anyone else.
+Status CreateStage(const fs::path& out, fs::path& staging) {
+    staging = out.parent_path() / (out.filename().generic_string() + ".partial");
+    std::error_code ec;
+    fs::create_directories(out.parent_path().empty() ? fs::path(".") : out.parent_path(), ec);
+    if (ec) return Status::Fail("cannot create destination parent: " + out.generic_string());
+    if (!fs::create_directory(staging, ec) || ec)
+        return Status::Fail("cannot create exclusive staging directory: " + staging.generic_string());
+    return Status::Ok();
+}
+
+Status RefuseInsideData(const fs::path& root, const fs::path& out) {
+    std::error_code ec;
+    const auto data = fs::weakly_canonical(root / "data", ec);
+    if (ec) return Status::Fail("cannot resolve product data directory");
+    const auto dest = fs::weakly_canonical(out, ec);
+    if (ec) return Status::Fail("cannot resolve export destination");
+    auto a = data.begin(), b = dest.begin();
+    for (; a != data.end() && b != dest.end() && *a == *b; ++a, ++b) {}
+    if (a == data.end()) return Status::Fail("export destination is inside product data");
+    return Status::Ok();
+}
+
+Status CopyData(const fs::path& root, const fs::path& staging, ExportReport& walked) {
+    const fs::path data = root / "data";
+    return Walk(data, 0, walked, [&](const fs::path& from) -> Status {
+        std::error_code ec;
+        const fs::path rel = fs::relative(from, data, ec);
+        if (ec) return Status::Fail("cannot relativize " + from.generic_string());
+        const fs::path to = staging / "data" / rel;
+        fs::create_directories(to.parent_path(), ec);
+        if (ec) return Status::Fail("cannot create " + to.parent_path().generic_string());
+        if (!fs::copy_file(from, to, fs::copy_options::none, ec) || ec)
+            return Status::Fail("cannot copy " + from.generic_string());
+        return Status::Ok();
+    });
+}
+
 }  // namespace
 
-Status ExportProduct(const fs::path& root, const fs::path& out, ExportReport& report) {
+Status ExportProduct(const fs::path& root, const fs::path& destination, ExportReport& report) {
     report = ExportReport{};
+    fs::path out;
+    if (auto st = NormalizeDestination(destination, out); !st) return st;
     if (auto st = ReadRoster(root, report); !st) return st;
     if (auto st = RefuseOccupied(out); !st) return st;
+    if (auto st = RefuseInsideData(root, out); !st) return st;
 
-    // Stage beside the destination and rename: a refused or interrupted export never leaves a
-    // partial distribution where --product would find it.
-    const fs::path staging = out.parent_path() / (out.filename().generic_string() + ".partial");
+    // Stage beside the destination before publication. As with cleanup, this assumes the caller
+    // controls concurrent access to these paths; portable filesystem operations do not pin them.
+    fs::path staging;
     std::error_code ec;
-    fs::remove_all(staging, ec);   // our own leftover from an interrupted run
-    ec.clear();
-    // create_directories reports false for a directory that already exists, which is not an error.
-    fs::create_directories(staging, ec);
-    if (ec || !fs::is_directory(staging, ec) || ec)
-        return Status::Fail("cannot create " + staging.generic_string());
+    if (auto st = CreateStage(out, staging); !st) return st;
 
     auto fail = [&](const Status& st) {
         std::error_code cleanup;
@@ -109,20 +165,7 @@ Status ExportProduct(const fs::path& root, const fs::path& out, ExportReport& re
     };
 
     ExportReport walked;
-    const fs::path data = root / "data";
-    if (auto st = Walk(data, 0, walked, [&](const fs::path& from) -> Status {
-            std::error_code cec;
-            const fs::path rel = fs::relative(from, data, cec);
-            if (cec) return Status::Fail("cannot relativize " + from.generic_string());
-            const fs::path to = staging / "data" / rel;
-            fs::create_directories(to.parent_path(), cec);
-            if (cec) return Status::Fail("cannot create " + to.parent_path().generic_string());
-            if (!fs::copy_file(from, to, fs::copy_options::overwrite_existing, cec) || cec)
-                return Status::Fail("cannot copy " + from.generic_string());
-            return Status::Ok();
-        });
-        !st)
-        return fail(st);
+    if (auto st = CopyData(root, staging, walked); !st) return fail(st);
 
     // The roster has to survive the copy: a plugin folder that did not make it is a broken product.
     ExportReport staged;
@@ -145,7 +188,7 @@ Status ExportProduct(const fs::path& root, const fs::path& out, ExportReport& re
         std::error_code cleanup;
         fs::remove_all(staging, cleanup);
     }
-    if (ec) return Status::Fail("cannot move the staged distribution into " + out.generic_string());
+    if (ec) return fail(Status::Fail("cannot move the staged distribution into " + out.generic_string()));
 
     report.files = walked.files;
     report.bytes = walked.bytes;
@@ -155,19 +198,39 @@ Status ExportProduct(const fs::path& root, const fs::path& out, ExportReport& re
     return Status::Ok();
 }
 
-Status ExportProductPack(const fs::path& root, const fs::path& out, ExportReport& report) {
+Status ExportProductPack(const fs::path& root, const fs::path& destination, ExportReport& report) {
     report = ExportReport{};
+    fs::path out;
+    if (auto st = NormalizeDestination(destination, out); !st) return st;
     if (auto st = ReadRoster(root, report); !st) return st;
     std::error_code ec;
-    if (fs::exists(out, ec)) return Status::Fail("export destination exists: " + out.generic_string());
-    ExportReport walked;
-    if (auto st = Walk(root, 0, walked, nullptr); !st) return st;
-    if (auto st = vfs::WritePackFromDirectory(out, root); !st) return st;
-    if (auto st = vfs::VerifyPack(out); !st) {
+    const auto status = fs::symlink_status(out, ec);
+    if ((ec && ec != std::errc::no_such_file_or_directory) || status.type() != fs::file_type::not_found)
+        return Status::Fail("export destination exists or cannot be inspected: " + out.generic_string());
+    if (auto st = RefuseInsideData(root, out); !st) return st;
+    fs::path staging;
+    if (auto st = CreateStage(out, staging); !st) return st;
+    auto fail = [&](const Status& st) {
         std::error_code cleanup;
-        fs::remove(out, cleanup);
-        return Status::Fail("packed distribution did not verify: " + st.error);
-    }
+        fs::remove_all(staging, cleanup);
+        return st;
+    };
+    ExportReport walked;
+    if (auto st = CopyData(root, staging, walked); !st) return fail(st);
+    ExportReport staged;
+    if (auto st = ReadRoster(staging, staged); !st) return fail(st);
+    if (staged.plugins != report.plugins) return fail(Status::Fail("exported roster does not match the source roster"));
+    const fs::path archive = staging / "product.scpak";
+    if (auto st = vfs::WritePackFromDirectory(archive, staging); !st) return fail(st);
+    if (auto st = vfs::VerifyPack(archive); !st)
+        return fail(Status::Fail("packed distribution did not verify: " + st.error));
+    ec.clear();
+    // Linking in the same parent filesystem does not replace a destination that appeared since
+    // preflight. A filesystem that cannot create the link fails closed.
+    fs::create_hard_link(archive, out, ec);
+    if (ec) return fail(Status::Fail("cannot publish packed distribution into " + out.generic_string()));
+    std::error_code cleanup;
+    fs::remove_all(staging, cleanup);
     report.files = walked.files;
     report.bytes = walked.bytes;
     log::Info("product", "exported " + out.generic_string() + ": " + std::to_string(report.files) + " file(s), " +
