@@ -86,7 +86,7 @@ describe('widgets view (sco.widgets 1.0)', () => {
 
   it('sends SLIDER values in range and drops out-of-range ones', () => {
     const s = findNode(findNode(view, byNode(5))!, byTag('input'))!;
-    expect(s.attrs).toMatchObject({ type: 'range', min: '0', max: '1', value: '0.5' });
+    expect(s.attrs).toMatchObject({ type: 'range', min: '0', max: '1', step: 'any', value: '0.5' });
     expect(s.on?.change?.(state('0.25'))).toEqual({ panel: 'demo.main', node_id: 5, kind: 'slider', value: 0.25 });
     expect(s.on?.change?.(state('2'))).toBeNull();
     expect(s.on?.change?.(state('nope'))).toBeNull();
@@ -107,6 +107,31 @@ describe('widgets view (sco.widgets 1.0)', () => {
   it('masks password inputs', () => {
     const input = findNode(findNode(view, byNode(9))!, byTag('input'))!;
     expect(input.attrs).toMatchObject({ type: 'password', value: '' });
+  });
+});
+
+describe('widgets view (sco.widgets 1.3 numeric presentation)', () => {
+  for (const presentation of [1, 2] as const) {
+    it(`uses integer values for presentation ${presentation}`, () => {
+      const slider = node('slider', { id: 1, label: 'Level', minimum: -10, maximum: 100, value: 50, presentation });
+      const v = findNode(renderPanelView(panel([slider])), byNode(1))!;
+      const input = findNode(v, byTag('input'))!;
+      expect(input.attrs).toMatchObject({ type: 'range', min: '-10', max: '100', step: '1', value: '50' });
+      expect(texts(v, 'output')).toEqual([presentation === 2 ? '50%' : '50']);
+      expect(input.attrs?.['aria-valuetext']).toBe(presentation === 2 ? '50%' : undefined);
+      expect(input.on?.change?.(state('73'))).toEqual({ panel: 'demo.main', node_id: 1, kind: 'slider', value: 73 });
+      expect(input.on?.change?.(state('-10'))?.value).toBe(-10);
+      expect(input.on?.change?.(state('100'))?.value).toBe(100);
+      expect(input.on?.change?.(state('50.5'))).toBeNull();
+      expect(input.on?.change?.(state('101'))).toBeNull();
+    });
+  }
+
+  it('keeps fractional values for explicit NUMBER presentation', () => {
+    const slider = node('slider', { id: 1, minimum: 0, maximum: 1, value: 0.5, presentation: 0 });
+    const input = findNode(renderPanelView(panel([slider])), byTag('input'))!;
+    expect(input.attrs?.step).toBe('any');
+    expect(input.on?.change?.(state('0.25'))?.value).toBe(0.25);
   });
 });
 

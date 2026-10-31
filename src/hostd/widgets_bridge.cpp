@@ -12,6 +12,21 @@ namespace scuba::hostd {
 
 namespace {
 
+// The C header alone is insufficient: older host snapshots may omit the field.
+template<class Node>
+constexpr bool NumericPresentationSupported() {
+#if defined(SCO_WIDGETS_VERSION_1_3) && defined(SCO_WIDGETS_FEATURE_NUMERIC_PRESENTATION)
+    return requires(const Node& node) { node.presentation; };
+#else
+    return false;
+#endif
+}
+
+template<class Node>
+void AddPresentation(Json& json, const Node& node) {
+    if constexpr (NumericPresentationSupported<Node>()) json.set("presentation", node.presentation);
+}
+
 struct KindName {
     uint32_t kind;
     const char* name;
@@ -83,6 +98,7 @@ Json WidgetPanelToJson(const sco::widgets::Panel& panel, uint64_t revision) {
         node.set("value", n.value);
         node.set("minimum", n.minimum);
         node.set("maximum", n.maximum);
+        AddPresentation(node, n);
         node.set("index", n.index);
         Json items = Json::MakeArray();
         for (const auto& item : n.items) items.push_back(item);
@@ -111,6 +127,8 @@ Json WidgetCapabilitiesJson() {
     for (const char* f : { "update_nodes", "remove_nodes", "severity", "tooltip", "paging", "event_row",
                            "coalesced_render", "stable_tags" })
         features.push_back(f);
+    constexpr bool numericPresentation = NumericPresentationSupported<sco::widgets::Node>();
+    if (numericPresentation) features.push_back("numeric_presentation");
     Json limits = Json::MakeObject();
     limits.set("max_panels", SCO_WIDGETS_MAX_PANELS);
     limits.set("max_nodes", SCO_WIDGETS_MAX_NODES);
@@ -124,7 +142,7 @@ Json WidgetCapabilitiesJson() {
     for (const char* e : { "button", "toggle", "slider", "combo", "list", "text_input", "page" }) events.push_back(e);
     Json out = Json::MakeObject();
     out.set("service", SCO_WIDGETS_NAME);
-    out.set("version", "1.2");
+    out.set("version", numericPresentation ? "1.3" : "1.2");
     out.set("features", std::move(features));
     out.set("limits", std::move(limits));
     out.set("events", std::move(events));
@@ -207,6 +225,11 @@ void CheckWidgetEvent(const Json& panel, const sco::widgets::Event& event) {
         case SCO_WIDGET_SLIDER:
             if (event.value < NumberOf(*node, "minimum") || event.value > NumberOf(*node, "maximum"))
                 BadParams("slider value is outside [minimum, maximum]");
+            // Absent metadata is the legacy NUMBER mode. The wire values match
+            // sco_widget_node_1_3: 0 NUMBER, 1 INTEGER, 2 INTEGER_PERCENT.
+            if ((NumberOf(*node, "presentation") == 1 || NumberOf(*node, "presentation") == 2) &&
+                std::trunc(event.value) != event.value)
+                BadParams("integer slider value must be an integer");
             break;
         case SCO_WIDGET_COMBO:
         case SCO_WIDGET_LIST:
