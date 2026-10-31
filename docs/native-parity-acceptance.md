@@ -42,6 +42,14 @@ The first isolated readback exposed a production defect: ImGui CreateContext res
 
 The four-surface test renders 240 WARP/debug-layer-requested frames, shares the real atlas, wraps buffered uploads, resizes the offscreen target 1024×768 → 1280×960 → 1024×768, and releases/recreates all four panel targets twice. Final images show plugin controls and the draft on all four surfaces. Debug-layer availability and hardware validation are not implied by requesting the layer. This proves bounded offscreen resize/retirement, not desktop DPI or minimize/restore.
 
+The 91/91 result above is a handoff claim tied to the original Windows scratch evidence;
+that evidence is not available in the cloud checkout. Hosted Windows CI run 41158980350,
+job 124412035137, passed 88/88 including both visual tests on merge commit `40b7d7a`;
+its tree is identical to PR head `6b9c53c`. A subsequent test change compares
+before/after readbacks inside each panel quad. It checks for visible pixel differences,
+not readable text, and needs a fresh Windows D3D/WARP run to validate and calibrate its
+threshold. The earlier result does not cover that change.
+
 ## Remaining Windows/platform and manual acceptance
 
 1. Visible Windows interaction: select mp_chat, click draft on world quad, enter/edit/send text, toggle/slider/list/scroll controls in other plugins; verify owning plugin state. Outside/Escape focus transfer, keyboard release, drag release off-surface, camera suppression and subsequent recovery, dock overlap. Test panel replacement while focused, panel disappearance and reopen.
