@@ -73,11 +73,25 @@ jobs:
         os: [macos-latest, ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+      - name: Download and verify published plugin SDK archive
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p sdk-plugin-artifacts
+          curl --fail --silent --show-error --location \
+            https://github.com/scuba-sc/sco-core/releases/download/sdk-v2.4.0-rc.2/sco-sdk-2.4.0.zip \
+            --output sdk-plugin-artifacts/sco-sdk-2.4.0.zip
+          echo "51a7ce266d087bcbeac39c92f26a6f905b4473883dd7ed6f0f5ca823fa88c88e  sdk-plugin-artifacts/sco-sdk-2.4.0.zip" \
+            | sha256sum --check
       - name: Configure (downloads and verifies the sco-core host-source kit)
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             cmake -S . -B build -A x64
+          elif [ "$RUNNER_OS" = "Linux" ]; then
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+              -DSCUBA_TEST_PLUGIN_SDK_CONSUMER=ON \
+              -DSCUBA_PLUGIN_SDK_ARCHIVE_PATH="$GITHUB_WORKSPACE/sdk-plugin-artifacts/sco-sdk-2.4.0.zip"
           else
             cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           fi

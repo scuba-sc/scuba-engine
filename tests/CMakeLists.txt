@@ -52,6 +52,46 @@ add_test(NAME plugin_sdk_root_mode_rejected_early
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_root_plugin_sdk_mode_rejected.cmake")
 set_tests_properties(plugin_sdk_root_mode_rejected_early PROPERTIES TIMEOUT 120)
 
+if(SCUBA_TEST_PLUGIN_SDK_CONSUMER)
+  set(plugin_sdk_consumer_args
+    "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+    "-DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-sdk-consumer"
+    "-DGENERATOR=${CMAKE_GENERATOR}")
+  if(SCUBA_PLUGIN_SDK_ARCHIVE_PATH)
+    list(APPEND plugin_sdk_consumer_args "-DARCHIVE_PATH=${SCUBA_PLUGIN_SDK_ARCHIVE_PATH}")
+  endif()
+  if(CMAKE_GENERATOR_PLATFORM)
+    list(APPEND plugin_sdk_consumer_args "-DPLATFORM=${CMAKE_GENERATOR_PLATFORM}")
+  endif()
+  if(CMAKE_GENERATOR_TOOLSET)
+    list(APPEND plugin_sdk_consumer_args "-DTOOLSET=${CMAKE_GENERATOR_TOOLSET}")
+  endif()
+  if(NOT CMAKE_GENERATOR MATCHES "Visual Studio|Xcode")
+    list(APPEND plugin_sdk_consumer_args "-DC_COMPILER=${CMAKE_C_COMPILER}")
+    list(APPEND plugin_sdk_consumer_args "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}")
+  endif()
+  if(CMAKE_BUILD_TYPE)
+    list(APPEND plugin_sdk_consumer_args "-DBUILD_CONFIG=${CMAKE_BUILD_TYPE}")
+  endif()
+  if(CMAKE_CONFIGURATION_TYPES)
+    list(APPEND plugin_sdk_consumer_args "-DBUILD_CONFIG=$<CONFIG>")
+  endif()
+  add_test(NAME plugin_sdk_public_archive_consumer
+    COMMAND "${CMAKE_COMMAND}" ${plugin_sdk_consumer_args}
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_sdk_public_archive.cmake")
+  set_tests_properties(plugin_sdk_public_archive_consumer PROPERTIES
+    LABELS "plugin-sdk-integration" TIMEOUT 600)
+  set(plugin_sdk_archive_preserved_args
+    "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+    "-DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-sdk-archive-input-regression"
+    "-DGENERATOR=${CMAKE_GENERATOR}")
+  add_test(NAME plugin_sdk_archive_input_preserved
+    COMMAND "${CMAKE_COMMAND}" ${plugin_sdk_archive_preserved_args}
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_plugin_sdk_archive_preserved.cmake")
+  set_tests_properties(plugin_sdk_archive_input_preserved PROPERTIES
+    LABELS "plugin-sdk-integration" TIMEOUT 30)
+endif()
+
 foreach(test_name test_websocket test_http_json test_handlers)
   add_executable(${test_name} ${test_name}.cpp)
   target_link_libraries(${test_name} PRIVATE scuba_bridge)

@@ -22,6 +22,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(SCUBA_BUILD_TESTS "Build the scuba-engine tests and register them with CTest" ON)
 option(SCUBA_WERROR "Treat warnings in scuba-engine's own code as errors" ON)
 option(SCUBA_BUILD_ENGINE "Build the native engine: core, VFS and assets everywhere; the scuba-engine app on Windows" ON)
+option(SCUBA_TEST_PLUGIN_SDK_CONSUMER
+  "Register the published plugin-SDK-only configure, build, and checker CTest" OFF)
+set(SCUBA_PLUGIN_SDK_ARCHIVE_PATH "" CACHE FILEPATH
+  "Optional local sco-sdk-2.4.0.zip for the plugin-SDK-only CTest (otherwise it downloads the pinned RC2 asset)")
 
 find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)

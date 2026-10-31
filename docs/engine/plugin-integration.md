@@ -58,6 +58,13 @@ contains plugin headers, CMake helpers, and `sco-plugin-check`, but not `sco_app
 clearly if `SCUBA_BUILD_TESTS` is enabled. Omit `SCUBA_PLUGIN_SDK_ROOT` to retain the default
 host-source kit build and its host tests.
 
+The positive consumer check is an opt-in root CTest so the normal suite stays unchanged. Configure
+with `-DSCUBA_TEST_PLUGIN_SDK_CONSUMER=ON`; set `SCUBA_PLUGIN_SDK_ARCHIVE_PATH` to a local zip for
+offline runs. If no local path is set, CTest downloads the RC2 asset and checks the same SHA-256
+before extracting it. The test configures the standalone plugin project with tests off, builds the
+four modules and checker, then checks each module with full and short tables. Run it with
+`ctest --test-dir build -R '^plugin_sdk_public_archive_consumer$' --output-on-failure`.
+
 ### sc-offline
 
 The offline owner confirmed the 11 native folders in the release staging roster:
