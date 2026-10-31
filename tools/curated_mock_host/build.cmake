@@ -31,6 +31,12 @@ function(scuba_curated_target name entry)
   endif()
 endfunction()
 scuba_curated_target(scuba-reserved-hostd "${PROJECT_SOURCE_DIR}/src/hostd/reserved_main.cpp")
+if(MSVC)
+  # PE executables do not carry the full symbol inventory used by the ELF
+  # audit. Emit a linker map for the production executable only.
+  target_link_options(scuba-reserved-hostd PRIVATE
+    "/MAP:$<TARGET_FILE_DIR:scuba-reserved-hostd>/$<TARGET_FILE_BASE_NAME:scuba-reserved-hostd>.map")
+endif()
 if(SCUBA_BUILD_TESTS)
   enable_testing()
   scuba_curated_target(test_reserved_mock_host "${PROJECT_SOURCE_DIR}/tests/test_reserved_mock_host.cpp")
@@ -45,12 +51,12 @@ if(SCUBA_BUILD_TESTS)
   # executable. The normal host retains the uninstrumented authority library.
   add_library(scuba_copy_test_authority STATIC "${SCUBA_SDK_SOURCE_DIR}/src/reserved_session.cpp")
   target_include_directories(scuba_copy_test_authority PUBLIC "${SCUBA_SDK_SOURCE_DIR}/include")
-  target_compile_definitions(scuba_copy_test_authority PRIVATE SCO_CURATED_DRAIN_TESTING)
+  target_compile_definitions(scuba_copy_test_authority PRIVATE SCO_RESERVED_DRAIN_TESTING)
   target_link_libraries(scuba_copy_test_authority PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
   scuba_curated_target(test_reserved_output_copy "${PROJECT_SOURCE_DIR}/tests/test_reserved_output_copy.cpp"
     scuba_copy_test_authority)
   target_include_directories(test_reserved_output_copy PRIVATE "${PROJECT_SOURCE_DIR}/tests")
-  target_compile_definitions(test_reserved_output_copy PRIVATE SCUBA_RESERVED_COPY_TESTING)
+  target_compile_definitions(test_reserved_output_copy PRIVATE SCUBA_RESERVED_COPY_TESTING SCO_RESERVED_DRAIN_TESTING)
   foreach(mode return unwind early_return early_unwind)
     add_test(NAME reserved_copy_${mode} COMMAND test_reserved_output_copy ${mode})
     set_tests_properties(reserved_copy_${mode} PROPERTIES TIMEOUT 15)
@@ -61,5 +67,11 @@ if(SCUBA_BUILD_TESTS)
     add_test(NAME reserved_host_binary_composition COMMAND "${Python3_EXECUTABLE}"
       "${PROJECT_SOURCE_DIR}/tools/curated_mock_host/audit_binary.py"
       "${SCUBA_NM}" "${SCUBA_READELF}" "$<TARGET_FILE:scuba-reserved-hostd>")
+  elseif(WIN32 AND MSVC)
+    find_program(SCUBA_DUMPBIN NAMES dumpbin REQUIRED)
+    add_test(NAME reserved_host_binary_composition COMMAND "${Python3_EXECUTABLE}"
+      "${PROJECT_SOURCE_DIR}/tools/curated_mock_host/audit_windows.py"
+      --dumpbin "${SCUBA_DUMPBIN}" --exe "$<TARGET_FILE:scuba-reserved-hostd>"
+      --map "$<TARGET_FILE_DIR:scuba-reserved-hostd>/$<TARGET_FILE_BASE_NAME:scuba-reserved-hostd>.map")
   endif()
 endif()

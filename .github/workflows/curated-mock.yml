@@ -1,0 +1,73 @@
+name: curated mock host
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: curated-mock-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  curated:
+    name: curated mock (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      CORE_COMMIT: 0bac7b79729671d3a98a6adb27c2f3e7fd061605
+      CORE_KIT_SHA256: 54f685c623e2bbb4a8e9d9db5ee07456050ec10043bef1355b91878a257e4502
+    steps:
+      - name: Keep checkout bytes unchanged
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: scuba-sc/sco-core
+          ref: 0bac7b79729671d3a98a6adb27c2f3e7fd061605
+          path: curated-core
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
+      - name: Package and verify exact host-source inputs
+        shell: bash
+        run: |
+          test "$(git -C curated-core rev-parse HEAD)" = "$CORE_COMMIT"
+          test -z "$(git -C curated-core status --porcelain --untracked-files=no)"
+          python tools/package_dev_sdk.py curated-core curated-artifacts
+          python tools/curated_mock_host/verify_archive.py \
+            curated-artifacts/sco-sdk-host-source-sc-2.4.0.zip "$CORE_KIT_SHA256" "$CORE_COMMIT"
+      - name: Configure curated composition
+        shell: bash
+        run: |
+          cmake_args=(-DCMAKE_BUILD_TYPE=Release -DSCUBA_RESERVED_MOCK_HOST_ONLY=ON \
+            "-DSCUBA_RESERVED_CORE_COMMIT=$CORE_COMMIT" \
+            "-DSCUBA_SDK_ARCHIVE_DIR=$GITHUB_WORKSPACE/curated-artifacts" \
+            "-DSCUBA_SDK_HOST_SOURCE_SHA256=$CORE_KIT_SHA256")
+          if [ "$RUNNER_OS" = "Windows" ]; then cmake_args+=(-A x64); fi
+          cmake -S . -B build-curated "${cmake_args[@]}"
+      - name: Build curated host and tests
+        run: cmake --build build-curated --config Release --parallel
+      - name: Test lifecycle, output copy, negative controls and composition
+        run: ctest --test-dir build-curated -C Release --output-on-failure --output-junit ctest.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: curated-test-evidence-${{ matrix.os }}
+          path: |
+            build-curated/ctest.xml
+            build-curated/Release/scuba-reserved-hostd.map
+          if-no-files-found: warn

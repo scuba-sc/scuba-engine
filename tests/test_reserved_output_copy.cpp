@@ -10,10 +10,6 @@
 #include <string>
 #include <thread>
 
-namespace sco::reserved::curated_testing {
-bool ReaderDrainObserved() noexcept;
-}
-
 namespace {
 using namespace std::chrono_literals;
 using namespace scuba::hostd;
@@ -60,9 +56,9 @@ bool shouldThrow = false;
 
 void WaitForReaderDrain() {
     const auto deadline = std::chrono::steady_clock::now() + kWait;
-    while (!curated_testing::ReaderDrainObserved() && std::chrono::steady_clock::now() < deadline)
+    while (!sco::reserved::testing::ReaderDrainObserved() && std::chrono::steady_clock::now() < deadline)
         std::this_thread::yield();
-    Require(curated_testing::ReaderDrainObserved(), "retirement observed a reader while closing");
+    Require(sco::reserved::testing::ReaderDrainObserved(), "retirement observed a reader while closing");
 }
 
 template<class T> void RequireReady(std::future<T>& result, const char* description) {
@@ -98,7 +94,7 @@ void Run() {
         // EntityJson. The detector must observe retirement completing at the gate.
         RequireReady(retirement, "negative control retires while name copy is blocked");
         Require(retirement.get() == RetireResult::QuiescedRetained, "negative control quiesced while copy blocked");
-        Require(!curated_testing::ReaderDrainObserved(), "negative control did not observe a reader");
+        Require(!sco::reserved::testing::ReaderDrainObserved(), "negative control did not observe a reader");
     } else {
         WaitForReaderDrain();
         Require(retirement.wait_for(0s) == std::future_status::timeout,

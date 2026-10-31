@@ -7,17 +7,17 @@ retires the session. This is an incremental consumer slice toward the core
 roadmap's milestone 2, products and studio on the SDK. It uses the held core
 host-source contract, not the released plugin SDK ABI.
 
-The candidate is pinned to core `ebb147a6d4b9b44498c087f7474c399a6cf22267`,
-bootstrap 3, mock table 5, graph 1. Its host-source archive has 979 members and
-SHA-256 `44201578423e8a714c400aa108288620fbf272f14a0ee5bdee966a0eebff3c98`.
+The candidate is pinned to core `0bac7b79729671d3a98a6adb27c2f3e7fd061605`,
+bootstrap 3, mock table 5, graph 1. Its host-source archive has 982 members and
+SHA-256 `54f685c623e2bbb4a8e9d9db5ee07456050ec10043bef1355b91878a257e4502`.
 Build from engine source based on main `f005372bd74967e53fdb8ed4cf3f4707ab3b20fa`:
 
 ```sh
 cmake -S . -B build-curated -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DSCUBA_RESERVED_MOCK_HOST_ONLY=ON \
-  -DSCUBA_RESERVED_CORE_COMMIT=ebb147a6d4b9b44498c087f7474c399a6cf22267 \
-  -DSCUBA_SDK_ARCHIVE_DIR=/workspace/engine-rc3-kit-ebb147 \
-  -DSCUBA_SDK_HOST_SOURCE_SHA256=44201578423e8a714c400aa108288620fbf272f14a0ee5bdee966a0eebff3c98
+  -DSCUBA_RESERVED_CORE_COMMIT=0bac7b79729671d3a98a6adb27c2f3e7fd061605 \
+  -DSCUBA_SDK_ARCHIVE_DIR=/workspace/engine-rc3-kit-0bac7b \
+  -DSCUBA_SDK_HOST_SOURCE_SHA256=54f685c623e2bbb4a8e9d9db5ee07456050ec10043bef1355b91878a257e4502
 cmake --build build-curated
 ctest --test-dir build-curated --output-on-failure --output-junit ctest.xml
 ```
@@ -65,6 +65,13 @@ self-retirement failure and restart refusal, actual stdio requests with exact
 check verifies one authority definition, absence of named legacy implementations,
 no project exports or loader overrides, and reviewed system dependencies. This
 bounded check cannot certify arbitrary code, unmanaged modules or Windows.
+The dedicated `curated mock host` workflow builds this exact source/kit profile
+on Linux and Windows. MSVC emits a production linker map; the Windows composition
+check reviews its public code authority symbol and named legacy/test symbols,
+PE imports and exports using `dumpbin`. Map symbols and imports do not establish
+complete code closure or exclude arbitrary runtime-loaded code. The workflow
+preserves CTest XML and the Windows map as evidence; its actual result must be
+checked for the consumer commit being qualified.
 
 Four additional fresh-process tests pause the actual entity handler during JSON
 name copying. A separate retirement thread must observe a live reader inside the
@@ -79,7 +86,7 @@ refusal. Gates and promises establish ordering; wall-clock limits bound test
 failure rather than supply the evidence of waiting.
 
 Only the separate test executable compiles the SDK's observation-only
-`SCO_CURATED_DRAIN_TESTING` branch and consumer copy probes. It builds from the
+`SCO_RESERVED_DRAIN_TESTING` branch and consumer copy probes. It builds from the
 same verified extracted SDK source without changing core files or retirement
 verdicts. The normal host uses the uninstrumented authority; its binary check
 also rejects reader-observer and consumer-probe symbols. This exercises one
