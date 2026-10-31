@@ -16,6 +16,8 @@ if len(authority) != 1:
     sys.exit("expected exactly one executable authority definition")
 if re.search(r"sco::(?:app|plugins|hook|host|game)::|\bsco_(?:query|provide|raw|tasks|events|commands)", symbols):
     sys.exit("unexpected legacy implementation in curated host")
+if "ReaderDrainObserved" in symbols or "reserved_copy_probe::" in symbols:
+    sys.exit("test-only output-copy instrumentation in production host")
 dynamic = output(readelf, "-d", executable)
 if re.search(r"\((?:RPATH|RUNPATH|AUDIT|DEPAUDIT)\)", dynamic):
     sys.exit("unexpected dynamic search path or audit loader")

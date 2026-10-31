@@ -18,7 +18,11 @@ function(scuba_curated_target name entry)
   target_include_directories(${name} PRIVATE "${PROJECT_SOURCE_DIR}/src")
   # The authority contains the complete reserved path. Do not pull in legacy
   # runtime, scanner, app, plugin loader or native hook implementations.
-  target_link_libraries(${name} PRIVATE sco_authority)
+  if(ARGC GREATER 2)
+    target_link_libraries(${name} PRIVATE ${ARGV2})
+  else()
+    target_link_libraries(${name} PRIVATE sco_authority)
+  endif()
   target_compile_definitions(${name} PRIVATE SCUBA_RESERVED_CORE_COMMIT="${SCUBA_RESERVED_CORE_COMMIT}")
   if(MSVC)
     target_compile_options(${name} PRIVATE /W4 /WX /utf-8)
@@ -37,6 +41,20 @@ if(SCUBA_BUILD_TESTS)
   add_test(NAME reserved_host_stdio COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/tests/test_reserved_mock_stdio.py" "$<TARGET_FILE:scuba-reserved-hostd>")
   set_tests_properties(reserved_host_stdio PROPERTIES TIMEOUT 15)
+  # Observation-only core instrumentation is confined to this separate test
+  # executable. The normal host retains the uninstrumented authority library.
+  add_library(scuba_copy_test_authority STATIC "${SCUBA_SDK_SOURCE_DIR}/src/reserved_session.cpp")
+  target_include_directories(scuba_copy_test_authority PUBLIC "${SCUBA_SDK_SOURCE_DIR}/include")
+  target_compile_definitions(scuba_copy_test_authority PRIVATE SCO_CURATED_DRAIN_TESTING)
+  target_link_libraries(scuba_copy_test_authority PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+  scuba_curated_target(test_reserved_output_copy "${PROJECT_SOURCE_DIR}/tests/test_reserved_output_copy.cpp"
+    scuba_copy_test_authority)
+  target_include_directories(test_reserved_output_copy PRIVATE "${PROJECT_SOURCE_DIR}/tests")
+  target_compile_definitions(test_reserved_output_copy PRIVATE SCUBA_RESERVED_COPY_TESTING)
+  foreach(mode return unwind early_return early_unwind)
+    add_test(NAME reserved_copy_${mode} COMMAND test_reserved_output_copy ${mode})
+    set_tests_properties(reserved_copy_${mode} PROPERTIES TIMEOUT 15)
+  endforeach()
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(SCUBA_NM nm REQUIRED)
     find_program(SCUBA_READELF readelf REQUIRED)

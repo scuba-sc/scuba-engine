@@ -4,9 +4,15 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <utility>
+
+#ifdef SCUBA_RESERVED_COPY_TESTING
+#include "reserved_copy_probe.h"
+#include <exception>
+#endif
 
 namespace scuba::hostd {
 namespace {
@@ -52,10 +58,23 @@ Json VectorJson(const double (&v)[3]) {
     for (double item : v) out.push_back(item);
     return out;
 }
-Json EntityJson(const MockEntity& e) {
+Json EntityJson(const MockEntity& e
+#ifdef SCUBA_RESERVED_COPY_TESTING
+                , bool probe = false
+#endif
+                ) {
     Json out = Json::MakeObject();
     out.set("id", std::to_string(e.id)).set("zone", std::to_string(e.zone))
-        .set("position", VectorJson(e.position)).set("flags", e.flags).set("name", e.name);
+        .set("position", VectorJson(e.position)).set("flags", e.flags)
+#ifdef SCUBA_RESERVED_COPY_TESTING
+        ;
+    if (probe) reserved_copy_probe::BeforeNameCopy();
+    out.set("name", e.name);
+    if (probe && reserved_copy_probe::ThrowAfterCopy())
+        throw HandlerError(rpc_error::kHandlerFailed, "copy failed: " + out.find("name")->as_string(), out);
+#else
+        .set("name", e.name);
+#endif
     return out;
 }
 Json ZoneJson(const MockZone& z) {
@@ -99,9 +118,23 @@ void ReservedMockHost::RegisterHandlers() {
         return EntityJson(entity);
     });
     registry_.register_handler("mock.entity_get", [this](const Json& p, const CallContext&) {
-        CallPin pin; Check(TryEnter(session_, pin));
+        std::optional<CallPin> pin(std::in_place); Check(TryEnter(session_, *pin));
+#ifdef SCUBA_RESERVED_COPY_TESTING
+        struct UnwindProbe {
+            int exceptions = std::uncaught_exceptions();
+            ~UnwindProbe() { if (std::uncaught_exceptions() > exceptions) reserved_copy_probe::DuringUnwind(); }
+        } unwindProbe;
+#endif
         const auto id = Integer<uint64_t>(Field(p, "id")); MockEntity entity{};
-        const auto& t = table(); Check(t.get_entity(t.context, id, &entity)); return EntityJson(entity);
+        const auto& t = table(); Check(t.get_entity(t.context, id, &entity));
+#ifdef SCUBA_RESERVED_COPY_TESTING
+        if (reserved_copy_probe::ReleasePinEarly()) pin.reset();
+#endif
+        return EntityJson(entity
+#ifdef SCUBA_RESERVED_COPY_TESTING
+                          , true
+#endif
+                          );
     });
     registry_.register_handler("mock.entity_remove", [this](const Json& p, const CallContext&) {
         CallPin pin; Check(TryEnter(session_, pin));

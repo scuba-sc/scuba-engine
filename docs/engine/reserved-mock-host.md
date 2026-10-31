@@ -66,6 +66,25 @@ check verifies one authority definition, absence of named legacy implementations
 no project exports or loader overrides, and reviewed system dependencies. This
 bounded check cannot certify arbitrary code, unmanaged modules or Windows.
 
+Four additional fresh-process tests pause the actual entity handler during JSON
+name copying. A separate retirement thread must observe a live reader inside the
+core authority while admission is closed and remain pending until the handler
+releases its pin. The exception case also pauses a destructor during unwind and
+requires retirement to remain pending there. Both return data and exception
+message/data are inspected after retirement, when they are independently owned.
+The two negative controls reset the actual handler pin early: retirement must
+then complete while the copy remains blocked, demonstrating the missing
+protection. Each case checks retained phase, cached-handler refusal and restart
+refusal. Gates and promises establish ordering; wall-clock limits bound test
+failure rather than supply the evidence of waiting.
+
+Only the separate test executable compiles the SDK's observation-only
+`SCO_CURATED_DRAIN_TESTING` branch and consumer copy probes. It builds from the
+same verified extracted SDK source without changing core files or retirement
+verdicts. The normal host uses the uninstrumented authority; its binary check
+also rejects reader-observer and consumer-probe symbols. This exercises one
+entity handler's copy/unwind path, not a census of every future handler.
+
 Remaining adoption gates: the core owner's qualification of the exact held
 contract/composition, Windows compile/runtime and artifact audit, editor transport
 and scene integration, complete mock services, reviewed plugin/UI callback
