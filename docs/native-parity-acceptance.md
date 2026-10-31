@@ -45,10 +45,12 @@ The four-surface test renders 240 WARP/debug-layer-requested frames, shares the 
 The 91/91 result above is a handoff claim tied to the original Windows scratch evidence;
 that evidence is not available in the cloud checkout. Hosted Windows CI run 41158980350,
 job 124412035137, passed 88/88 including both visual tests on merge commit `40b7d7a`;
-its tree is identical to PR head `6b9c53c`. A subsequent test change compares
-before/after readbacks inside each panel quad. It checks for visible pixel differences,
-not readable text, and needs a fresh Windows D3D/WARP run to validate and calibrate its
-threshold. The earlier result does not cover that change.
+its tree is identical to PR head `6b9c53c`. A subsequent test change reports before/after
+pixel differences inside each panel quad. The default test checks draw-data structure,
+readback dimensions, and plugin input, but does not enforce a pixel threshold. Pass
+`--pixel-delta-gate` after the normal arguments to opt into the experimental threshold;
+it needs a fresh Windows D3D/WARP run and calibration. Pixel differences can have other
+causes and do not establish readable text. The earlier result does not cover this change.
 
 ## Remaining Windows/platform and manual acceptance
 
