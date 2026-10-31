@@ -21,6 +21,14 @@ option(SCUBA_BUILD_ENGINE "Build the native engine: core, VFS and assets everywh
 find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+# Development-only curated composition. Select before adding the legacy app,
+# plugin loader, network server, native providers or shared log callbacks.
+option(SCUBA_RESERVED_MOCK_HOST_ONLY "Build only the candidate reserved mock host" OFF)
+if(SCUBA_RESERVED_MOCK_HOST_ONLY)
+  include(tools/curated_mock_host/build.cmake)
+  return()
+endif()
+
 if(SCUBA_BUILD_ENGINE)
   include(cmake/ScubaDeps.cmake)
   # Also exercise the real host adapter in portable headless UI tests.
