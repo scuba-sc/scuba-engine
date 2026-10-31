@@ -9,6 +9,11 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "scuba-engine is 64-bit only (sco-core is). On Windows configure with -A x64.")
 endif()
 
+if(SCUBA_PLUGIN_SDK_ROOT)
+  message(FATAL_ERROR
+    "SCUBA_PLUGIN_SDK_ROOT is only supported with -S plugins; the full scuba-engine build requires the host-source kit.")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -17,6 +22,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(SCUBA_BUILD_TESTS "Build the scuba-engine tests and register them with CTest" ON)
 option(SCUBA_WERROR "Treat warnings in scuba-engine's own code as errors" ON)
 option(SCUBA_BUILD_ENGINE "Build the native engine: core, VFS and assets everywhere; the scuba-engine app on Windows" ON)
+option(SCUBA_TEST_PLUGIN_SDK_CONSUMER
+  "Register the published plugin-SDK-only configure, build, and checker CTest" OFF)
+set(SCUBA_PLUGIN_SDK_ARCHIVE_PATH "" CACHE FILEPATH
+  "Optional local sco-sdk-2.4.0.zip for the plugin-SDK-only CTest (otherwise it downloads the pinned RC2 asset)")
 
 find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
