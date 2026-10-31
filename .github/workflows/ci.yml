@@ -21,8 +21,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      CORE_COMMIT: 571fe8e2c911d7c63c372103724896feaabe58f2
-      CORE_KIT_SHA256: 065e5dbc0377bd51e1cf09a3282f3a63c0ec69f502ef512c371469120089b8e9
+      CORE_COMMIT: 1b6782bc5c8b7d189cdff4c83e81957f09af35d7
+      CORE_KIT_SHA256: 9db31895ffc0806e663fca36be4bbad2d25c231cf9ae894008743d345e78ae3e
     steps:
       # The hosted Windows default can rewrite LF files. This runner is ephemeral;
       # disable conversion before both checkouts so the source bytes stay exact.
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: scuba-sc/sco-core
-          ref: 571fe8e2c911d7c63c372103724896feaabe58f2
+          ref: 1b6782bc5c8b7d189cdff4c83e81957f09af35d7
           path: coordinated-core
           persist-credentials: false
       - uses: actions/setup-python@v5

@@ -23,7 +23,7 @@ Canonical cross-repo runbook: sco-core branch `handoff/core-integration-20261030
 ## Coordinated source-development dependency
 
 For source integration, use sco-core PR #304 commit
-`571fe8e2c911d7c63c372103724896feaabe58f2`. Generate a development
+`1b6782bc5c8b7d189cdff4c83e81957f09af35d7`. Generate a development
 `host-source-sc` archive from that clean checkout using the engine checkout's
 `python tools/package_dev_sdk.py <core-checkout> <archive-dir>`; on Windows,
 configure `core.autocrlf=false` before checking out core. The adapter preserves
@@ -31,9 +31,9 @@ Git executable modes on both platforms. On Linux, core's unmodified
 `python3 sdk/package.py --profile host-source-sc --out <archive-dir>` produces
 the same bytes when run from the core checkout.
 The archive `sco-sdk-host-source-sc-2.4.0.zip` has SHA-256
-`065e5dbc0377bd51e1cf09a3282f3a63c0ec69f502ef512c371469120089b8e9`.
+`9db31895ffc0806e663fca36be4bbad2d25c231cf9ae894008743d345e78ae3e`.
 Configure the engine with `-DSCUBA_SDK_ARCHIVE_DIR=<archive-dir>` and
-`-DSCUBA_SDK_HOST_SOURCE_SHA256=065e5dbc0377bd51e1cf09a3282f3a63c0ec69f502ef512c371469120089b8e9`.
+`-DSCUBA_SDK_HOST_SOURCE_SHA256=9db31895ffc0806e663fca36be4bbad2d25c231cf9ae894008743d345e78ae3e`.
 The default remains the published RC2 archive until a published replacement is
 available. Separate `coordinated core` CI jobs generate the development kit on
 Linux and Windows, check the checkout commit, archive hash, embedded source
