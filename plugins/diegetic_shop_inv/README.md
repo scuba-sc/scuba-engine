@@ -19,20 +19,20 @@ From the repository root:
 ```sh
 cmake -S plugins -B build-app4
 cmake --build build-app4 --target test_shop -j 12
-ctest --test-dir build-app4 --output-on-failure
-build-app4/diegetic_shop_inv/sco-plugin-check build-app4/diegetic_shop_inv/root/diegetic_shop_inv
-build-app4/diegetic_shop_inv/sco-plugin-check build-app4/diegetic_shop_inv/root/diegetic_shop_inv --short-tables
+ctest --test-dir build-app4 -R '^shop_' --output-on-failure
+build-app4/sco-plugin-check build-app4/diegetic_shop_inv/root/diegetic_shop_inv
+build-app4/sco-plugin-check build-app4/diegetic_shop_inv/root/diegetic_shop_inv --short-tables
 ```
 
-`plugins/CMakeLists.txt` is a standalone configure entry point as well as an
-add-subdirectory registry. It reuses `cmake/ScubaSdk.cmake` to download the
-published `sdk-v2.4.0-rc.1` host-source kit (SDK 2.4.0, release candidate 1) and
-verify SHA-256
-`5ca76ff9dac6bbaa183c6f308d610e08d9c1b0daf6ebda6458e222277406dfc6`.
+`plugins/CMakeLists.txt` is included by the repository root and is also a
+standalone configure entry point. It reuses `cmake/ScubaSdk.cmake` to download
+the published `sdk-v2.4.0-rc.2` host-source kit (SDK 2.4.0, release candidate 2)
+and verify SHA-256
+`3d711463f7dff3dcd372ffb70b09951ecf21f1d0e2c5f0a899cccbb9977b8201`.
 For offline development, add `-DSCUBA_SDK_ARCHIVE_DIR=<release-payload-directory>`
 to the configure command; this option still verifies the archive hash.
-No root CMake or hostd files are changed in this lane. An integrating lane
-that builds plugins through the repository's root must add `add_subdirectory(plugins)`.
+The repository root already includes `plugins/`. A different parent project
+must include it with `add_subdirectory(plugins)` after setting up the SDK.
 
 The kit's `sco_add_plugin` helper builds
 `build-app4/diegetic_shop_inv/root/diegetic_shop_inv/{plugin.ini,diegetic_shop_inv.dll}`.
