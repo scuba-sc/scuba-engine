@@ -1,10 +1,15 @@
 # mp_chat: a native sco plugin built with the kit's sdk/cmake/sco-plugin.cmake.
 # The plugin folder is laid out under <build>/root/mp_chat/ (plugin.ini + mp_chat.dll), the shape
 # sco-plugin-check, sco-host-sim and the host loader read.
-if(NOT SCUBA_SDK_SOURCE_DIR)
-  message(FATAL_ERROR "mp_chat: configure through plugins/CMakeLists.txt or a parent that includes cmake/ScubaSdk.cmake")
+if(NOT SCUBA_PLUGIN_SDK_CMAKE_FILE)
+  if(NOT SCUBA_SDK_SOURCE_DIR)
+    message(FATAL_ERROR "mp_chat: configure through plugins/CMakeLists.txt or a parent that includes cmake/ScubaSdk.cmake")
+  endif()
+  set(SCUBA_PLUGIN_SDK_CMAKE_FILE "${SCUBA_SDK_SOURCE_DIR}/sdk/cmake/sco-plugin.cmake")
+  set(SCUBA_PLUGIN_SDK_INCLUDE_DIR "${SCUBA_SDK_SOURCE_DIR}/include")
+  set(SCUBA_PLUGIN_SDK_CHECKER_SOURCE "${SCUBA_SDK_SOURCE_DIR}/sdk/tools/sco-plugin-check.c")
 endif()
-include("${SCUBA_SDK_SOURCE_DIR}/sdk/cmake/sco-plugin.cmake")
+include("${SCUBA_PLUGIN_SDK_CMAKE_FILE}")
 
 set(MP_CHAT_ROOT "${CMAKE_CURRENT_BINARY_DIR}/root")
 sco_add_plugin(mp_chat SOURCES src/mp_chat.c src/chat_model.c INI plugin.ini)
@@ -33,8 +38,8 @@ add_test(NAME mp_chat_model COMMAND mp_chat_model_test)
 # The kit's stand-in host, built the way sdk/CMakeLists.txt builds it (the kit defines this target
 # only with its own tests on).
 if(NOT TARGET sco-plugin-check)
-  add_executable(sco-plugin-check EXCLUDE_FROM_ALL "${SCUBA_SDK_SOURCE_DIR}/sdk/tools/sco-plugin-check.c")
-  target_include_directories(sco-plugin-check PRIVATE "${SCO_SDK_INCLUDE_DIR}")
+  add_executable(sco-plugin-check EXCLUDE_FROM_ALL "${SCUBA_PLUGIN_SDK_CHECKER_SOURCE}")
+  target_include_directories(sco-plugin-check PRIVATE "${SCUBA_PLUGIN_SDK_INCLUDE_DIR}")
   set_target_properties(sco-plugin-check PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
   if(MSVC)
     target_compile_options(sco-plugin-check PRIVATE /W4 /WX /wd5105 /D_CRT_SECURE_NO_WARNINGS)

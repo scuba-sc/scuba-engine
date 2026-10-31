@@ -31,6 +31,33 @@ product DLL platform; the checked Linux build is a synthetic host/module run.
 The engine ships an SDK `actor_stats_probe` example when the pinned kit has it. It is a test
 fixture, not a first-party product plugin.
 
+### Build the plugins with the published plugin SDK only
+
+To compile the four first-party modules without the host-source SDK kit, extract the published
+`sco-sdk-2.4.0.zip` from the
+[`sdk-v2.4.0-rc.2` sco-core release](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0-rc.2)
+and point `SCUBA_PLUGIN_SDK_ROOT` at the extracted `sco-sdk-2.4.0` directory:
+
+```sh
+cmake -S plugins -B build-plugin-sdk \
+  -DSCUBA_PLUGIN_SDK_ROOT=/path/to/sco-sdk-2.4.0 \
+  -DSCUBA_BUILD_TESTS=OFF
+cmake --build build-plugin-sdk --target scuba_plugins sco-plugin-check
+for plugin in mp_chat org_social diegetic_asop diegetic_shop_inv; do
+  build-plugin-sdk/sco-plugin-check "build-plugin-sdk/runtime/$plugin"
+  build-plugin-sdk/sco-plugin-check "build-plugin-sdk/runtime/$plugin" --short-tables
+done
+```
+
+For the RC2 archive, verify SHA-256
+`51a7ce266d087bcbeac39c92f26a6f905b4473883dd7ed6f0f5ca823fa88c88e` before extraction. CMake
+checks the supplied directory's SDK version and required file layout; it does not verify archive
+provenance, and `VERSION` alone cannot distinguish release candidates. The published package
+contains plugin headers, CMake helpers, and `sco-plugin-check`, but not `sco_app` or
+`sco-host-sim`. This mode therefore supports plugin builds and checker runs only; configure fails
+clearly if `SCUBA_BUILD_TESTS` is enabled. Omit `SCUBA_PLUGIN_SDK_ROOT` to retain the default
+host-source kit build and its host tests.
+
 ### sc-offline
 
 The offline owner confirmed the 11 native folders in the release staging roster:

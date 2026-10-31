@@ -11,6 +11,47 @@ if(SCUBA_BUILD_ENGINE)
   add_test(NAME plugin_surface COMMAND test_plugin_surface "${PROJECT_BINARY_DIR}/plugins/runtime")
   set_tests_properties(native_designer native_net_sandbox plugin_surface PROPERTIES TIMEOUT 120)
 endif()
+
+# Plugin-SDK-only builds intentionally do not provide sco_app or sco-host-sim. Keep the
+# unsupported test-enabled combination an explicit configure error rather than letting missing
+# host targets produce misleading build or CTest results.
+set(plugin_sdk_mode_test_args
+  "-DPLUGIN_SOURCE_DIR=${PROJECT_SOURCE_DIR}/plugins"
+  "-DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-sdk-tests-enabled-rejected"
+  "-DGENERATOR=${CMAKE_GENERATOR}")
+if(CMAKE_GENERATOR_PLATFORM)
+  list(APPEND plugin_sdk_mode_test_args "-DPLATFORM=${CMAKE_GENERATOR_PLATFORM}")
+endif()
+if(CMAKE_GENERATOR_TOOLSET)
+  list(APPEND plugin_sdk_mode_test_args "-DTOOLSET=${CMAKE_GENERATOR_TOOLSET}")
+endif()
+if(NOT CMAKE_GENERATOR MATCHES "Visual Studio|Xcode")
+  list(APPEND plugin_sdk_mode_test_args "-DC_COMPILER=${CMAKE_C_COMPILER}")
+  list(APPEND plugin_sdk_mode_test_args "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}")
+endif()
+add_test(NAME plugin_sdk_tests_require_host_source
+  COMMAND "${CMAKE_COMMAND}" ${plugin_sdk_mode_test_args}
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_plugin_sdk_tests_rejected.cmake")
+set_tests_properties(plugin_sdk_tests_require_host_source PROPERTIES TIMEOUT 120)
+set(root_plugin_sdk_mode_test_args
+  "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+  "-DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}/root-plugin-sdk-mode-rejected"
+  "-DGENERATOR=${CMAKE_GENERATOR}")
+if(CMAKE_GENERATOR_PLATFORM)
+  list(APPEND root_plugin_sdk_mode_test_args "-DPLATFORM=${CMAKE_GENERATOR_PLATFORM}")
+endif()
+if(CMAKE_GENERATOR_TOOLSET)
+  list(APPEND root_plugin_sdk_mode_test_args "-DTOOLSET=${CMAKE_GENERATOR_TOOLSET}")
+endif()
+if(NOT CMAKE_GENERATOR MATCHES "Visual Studio|Xcode")
+  list(APPEND root_plugin_sdk_mode_test_args "-DC_COMPILER=${CMAKE_C_COMPILER}")
+  list(APPEND root_plugin_sdk_mode_test_args "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}")
+endif()
+add_test(NAME plugin_sdk_root_mode_rejected_early
+  COMMAND "${CMAKE_COMMAND}" ${root_plugin_sdk_mode_test_args}
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_root_plugin_sdk_mode_rejected.cmake")
+set_tests_properties(plugin_sdk_root_mode_rejected_early PROPERTIES TIMEOUT 120)
+
 foreach(test_name test_websocket test_http_json test_handlers)
   add_executable(${test_name} ${test_name}.cpp)
   target_link_libraries(${test_name} PRIVATE scuba_bridge)

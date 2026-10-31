@@ -9,6 +9,11 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "scuba-engine is 64-bit only (sco-core is). On Windows configure with -A x64.")
 endif()
 
+if(SCUBA_PLUGIN_SDK_ROOT)
+  message(FATAL_ERROR
+    "SCUBA_PLUGIN_SDK_ROOT is only supported with -S plugins; the full scuba-engine build requires the host-source kit.")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

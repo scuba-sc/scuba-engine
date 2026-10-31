@@ -3,6 +3,8 @@
 # Built from a parent project that has already included cmake/ScubaSdk.cmake, or on its own:
 #   cmake -S plugins -B build-plugins [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0-rc.2 assets>]
 #   cmake --build build-plugins && ctest --test-dir build-plugins --output-on-failure
+# For a plugin-only build from an extracted public package, set SCUBA_PLUGIN_SDK_ROOT and
+# SCUBA_BUILD_TESTS=OFF; that package does not include the host-source test dependencies.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   cmake_minimum_required(VERSION 3.21)
   project(scuba_plugins LANGUAGES C CXX)
@@ -14,12 +16,37 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(CMAKE_CXX_EXTENSIONS OFF)
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
   option(SCUBA_BUILD_TESTS "Build the plugin tests and register them with CTest" ON)
+  set(SCUBA_PLUGIN_SDK_ROOT "" CACHE PATH
+      "Root of an extracted published sco-sdk-2.4.0 plugin SDK (plugin-only build)")
   find_package(Threads REQUIRED)
-  include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ScubaSdk.cmake")
-  include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ScubaActorStats.cmake")
+  if(SCUBA_PLUGIN_SDK_ROOT)
+    if(SCUBA_BUILD_TESTS)
+      message(FATAL_ERROR
+        "SCUBA_PLUGIN_SDK_ROOT is a plugin-only build mode; the published package does not include "
+        "the host-source sco_app or sco-host-sim required by SCUBA_BUILD_TESTS. Reconfigure with "
+        "-DSCUBA_BUILD_TESTS=OFF, or omit SCUBA_PLUGIN_SDK_ROOT to use the host-source kit and its tests.")
+    endif()
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ScubaPluginSdk.cmake")
+  else()
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ScubaSdk.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ScubaActorStats.cmake")
+    set(SCUBA_PLUGIN_SDK_CMAKE_FILE "${SCUBA_SDK_SOURCE_DIR}/sdk/cmake/sco-plugin.cmake")
+    set(SCUBA_PLUGIN_SDK_INCLUDE_DIR "${SCUBA_SDK_SOURCE_DIR}/include")
+    set(SCUBA_PLUGIN_SDK_CHECKER_SOURCE "${SCUBA_SDK_SOURCE_DIR}/sdk/tools/sco-plugin-check.c")
+  endif()
   if(SCUBA_BUILD_TESTS)
     enable_testing()
   endif()
+elseif(SCUBA_PLUGIN_SDK_ROOT)
+  message(FATAL_ERROR
+    "SCUBA_PLUGIN_SDK_ROOT is only supported with -S plugins; the full scuba-engine build requires the host-source kit.")
+else()
+  if(NOT SCUBA_SDK_SOURCE_DIR)
+    message(FATAL_ERROR "A parent project must include cmake/ScubaSdk.cmake before plugins/")
+  endif()
+  set(SCUBA_PLUGIN_SDK_CMAKE_FILE "${SCUBA_SDK_SOURCE_DIR}/sdk/cmake/sco-plugin.cmake")
+  set(SCUBA_PLUGIN_SDK_INCLUDE_DIR "${SCUBA_SDK_SOURCE_DIR}/include")
+  set(SCUBA_PLUGIN_SDK_CHECKER_SOURCE "${SCUBA_SDK_SOURCE_DIR}/sdk/tools/sco-plugin-check.c")
 endif()
 
 # Reuse the engine's warning policy when included by another project; standalone plugin builds
@@ -28,13 +55,13 @@ if(NOT COMMAND scuba_warnings)
   include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ScubaWarnings.cmake")
 endif()
 
-include("${SCUBA_SDK_SOURCE_DIR}/sdk/cmake/sco-plugin.cmake")
+include("${SCUBA_PLUGIN_SDK_CMAKE_FILE}")
 
 # The kit builds sco-plugin-check only with its own tests on (SCO_BUILD_TESTS), which scuba-engine
 # turns off, so build it here from the kit's source, the way the kit's sdk/CMakeLists.txt does.
-if(SCUBA_BUILD_TESTS AND NOT TARGET sco-plugin-check)
-  add_executable(sco-plugin-check "${SCUBA_SDK_SOURCE_DIR}/sdk/tools/sco-plugin-check.c")
-  target_include_directories(sco-plugin-check PRIVATE "${SCO_SDK_INCLUDE_DIR}")
+if((SCUBA_BUILD_TESTS OR SCUBA_PLUGIN_SDK_ROOT) AND NOT TARGET sco-plugin-check)
+  add_executable(sco-plugin-check "${SCUBA_PLUGIN_SDK_CHECKER_SOURCE}")
+  target_include_directories(sco-plugin-check PRIVATE "${SCUBA_PLUGIN_SDK_INCLUDE_DIR}")
   set_target_properties(sco-plugin-check PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON MSVC_RUNTIME_LIBRARY "MultiThreaded")
   if(MSVC)
