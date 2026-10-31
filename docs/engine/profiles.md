@@ -62,9 +62,12 @@ native game behavior, and the snapshot, trusted-code and no-sandbox rules above 
 `--product` accepts again: `<OUT>/data` holds the roster and the storage root, and the export
 refuses an occupied destination, a roster folder without `plugin.ini`, a symlink or special file,
 and the same 4096-entry / 32-level / 256 MiB ceilings the profile snapshot uses. The tree is staged
-beside the destination and renamed into place only when it is complete, so a refused export never
-leaves a partial distribution behind. `--export-pack FILE` writes the same tree as one `.scpak` and
-verifies it before returning. Both run without creating a window, so they work on a build host.
+beside the destination and published only when it is complete. An existing `.partial` sibling is
+left untouched and causes refusal. `--export-pack FILE` writes the same `data` tree as one `.scpak`,
+verifies it before publication, and requires filesystem hard-link support to avoid overwriting an
+existing destination. Both run without creating a window, so they work on a build host. Callers
+must prevent other processes from replacing the staging or destination paths during export; these
+filesystem operations do not provide a hostile-concurrency boundary.
 
 The **View > Product** dock does the same from a mounted product profile and lists the roster it
 exported. An export is a local file operation: nothing is uploaded and no game data is included

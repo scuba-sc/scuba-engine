@@ -3,6 +3,7 @@
 // half-written distribution from existing.
 #include "check.h"
 #include "scuba/product/export.h"
+#include "scuba/vfs/file_system.h"
 
 #include <filesystem>
 #include <fstream>
@@ -112,16 +113,59 @@ int main(int argc, char** argv) {
 
     // One .scpak of the same tree, verified, and refused when the destination exists.
     {
+        Write(root / "private-sibling.txt", "must not be exported\n");
         const fs::path pack = base / "dist.scpak";
         fs::remove(pack);
+        Write(pack.string() + ".tmp", "unrelated\n");
         ExportReport report;
         CHECK(ExportProductPack(root, pack, report));
         CHECK(report.plugins.size() == 2);
         CHECK(fs::file_size(pack) > 0);
+        CHECK(fs::file_size(pack.string() + ".tmp") == 10);
+        scuba::Status openStatus;
+        auto archive = scuba::vfs::OpenPack(pack, openStatus);
+        CHECK(archive && openStatus);
+        if (archive) {
+            CHECK(archive->Exists("data/plugins/catalog_a/plugin.ini"));
+            CHECK(!archive->Exists("private-sibling.txt"));
+        }
         ExportReport again;
         const auto st = ExportProductPack(root, pack, again);
         CHECK(!st);
         CHECK(st.error.find("exists") != std::string::npos);
+    }
+
+    // Existing sibling staging paths are not owned by the exporter and must survive both paths.
+    for (const bool packed : {false, true}) {
+        const fs::path out = base / (packed ? "owned.scpak" : "owned");
+        const fs::path stage = out.string() + ".partial";
+        Write(stage / "keep.txt", "unrelated\n");
+        ExportReport report;
+        CHECK(!(packed ? ExportProductPack(root, out, report) : ExportProduct(root, out, report)));
+        CHECK(fs::is_regular_file(stage / "keep.txt"));
+        CHECK(!fs::exists(out));
+    }
+
+    // A destination within the input cannot be staged while traversing that input.
+    {
+        ExportReport report;
+        CHECK(!ExportProduct(root, root / "data" / "nested", report));
+        CHECK(!ExportProductPack(root, root / "data" / "nested.scpak", report));
+        CHECK(!fs::exists(root / "data" / "nested.partial"));
+        CHECK(!fs::exists(root / "data" / "nested.scpak.partial"));
+    }
+
+    // Refuse a symlink at the data root itself, not only symlinks below it.
+    {
+        const fs::path linkRoot = base / "linked-root";
+        fs::create_directories(linkRoot);
+        std::error_code ec;
+        fs::create_directory_symlink(fs::absolute(root / "data"), linkRoot / "data", ec);
+        if (!ec) {
+            ExportReport report;
+            CHECK(!ExportProduct(linkRoot, base / "linked-dist", report));
+            CHECK(!ExportProductPack(linkRoot, base / "linked-dist.scpak", report));
+        }
     }
 
     fs::remove_all(base);

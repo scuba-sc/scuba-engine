@@ -2,8 +2,9 @@
 #pragma once
 // Product distribution export: takes a mounted product root (`--product DIR`: `<DIR>/data/plugins`
 // is the roster, `<DIR>/data` is the storage root) and writes a distribution that `--product`
-// accepts again. The tree is staged next to the destination and renamed into place only after it
-// is complete, so a refused or failed export never leaves a half-written distribution behind.
+// accepts again. The tree is staged next to the destination before publication. These filesystem
+// operations assume other processes do not concurrently replace the staging or destination paths;
+// they do not establish a hostile-concurrency boundary.
 #include "scuba/core/status.h"
 
 #include <cstdint>
@@ -22,11 +23,13 @@ struct ExportReport {
 // <root>/data is copied to <out>/data. Fail-closed: data/plugins must exist and carry at least one
 // folder, every folder must have a readable plugin.ini, <out> must not exist or be an empty
 // directory, and symlinks, special files or the size/entry/level limits refuse the whole export.
+// An existing sibling <out>.partial is never reused or removed. Destinations inside data are refused.
 Status ExportProduct(const std::filesystem::path& root, const std::filesystem::path& out,
                      ExportReport& report);
 
 // The same tree as one .scpak, paths relative to <root>, so `--product` can be pointed at a mount
-// of it. Refuses an existing file.
+// of it. Only <root>/data is included. Refuses an existing destination and requires hard-link
+// support for publication without overwriting a concurrently created destination.
 Status ExportProductPack(const std::filesystem::path& root, const std::filesystem::path& out,
                          ExportReport& report);
 
