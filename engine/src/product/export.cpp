@@ -92,6 +92,17 @@ Status RefuseOccupied(const fs::path& out) {
     return Status::Ok();
 }
 
+// A trailing separator gives path::filename() an empty component. Strip it so staging
+// remains beside the destination, and refuse paths without a concrete final name.
+Status NormalizeDestination(const fs::path& destination, fs::path& out) {
+    out = destination;
+    while (!out.empty() && out.filename().empty() && out != out.parent_path())
+        out = out.parent_path();
+    if (out.empty() || out.filename().empty() || out.filename() == "." || out.filename() == "..")
+        return Status::Fail("export destination requires a final name: " + destination.generic_string());
+    return Status::Ok();
+}
+
 // A deterministic sibling is convenient for diagnosis, but it belongs to this export only if
 // create_directory succeeds. Never delete or reuse a path left by anyone else.
 Status CreateStage(const fs::path& out, fs::path& staging) {
@@ -133,8 +144,10 @@ Status CopyData(const fs::path& root, const fs::path& staging, ExportReport& wal
 
 }  // namespace
 
-Status ExportProduct(const fs::path& root, const fs::path& out, ExportReport& report) {
+Status ExportProduct(const fs::path& root, const fs::path& destination, ExportReport& report) {
     report = ExportReport{};
+    fs::path out;
+    if (auto st = NormalizeDestination(destination, out); !st) return st;
     if (auto st = ReadRoster(root, report); !st) return st;
     if (auto st = RefuseOccupied(out); !st) return st;
     if (auto st = RefuseInsideData(root, out); !st) return st;
@@ -185,8 +198,10 @@ Status ExportProduct(const fs::path& root, const fs::path& out, ExportReport& re
     return Status::Ok();
 }
 
-Status ExportProductPack(const fs::path& root, const fs::path& out, ExportReport& report) {
+Status ExportProductPack(const fs::path& root, const fs::path& destination, ExportReport& report) {
     report = ExportReport{};
+    fs::path out;
+    if (auto st = NormalizeDestination(destination, out); !st) return st;
     if (auto st = ReadRoster(root, report); !st) return st;
     std::error_code ec;
     const auto status = fs::symlink_status(out, ec);

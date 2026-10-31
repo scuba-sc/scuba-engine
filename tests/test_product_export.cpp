@@ -77,6 +77,35 @@ int main(int argc, char** argv) {
         CHECK(fs::is_regular_file(out / "data" / "plugins" / "catalog_a" / "plugin.ini"));
     }
 
+    // A trailing separator still stages next to the destination and supports empty directories.
+    for (const bool existing : {false, true}) {
+        const fs::path out = base / (existing ? "trailing-empty" : "trailing-new");
+        if (existing) fs::create_directories(out);
+        ExportReport report;
+        CHECK(ExportProduct(root, fs::path(out.string() + "/"), report));
+        CHECK(fs::is_regular_file(out / "data" / "plugins" / "catalog_a" / "plugin.ini"));
+        CHECK(!fs::exists(out.string() + ".partial"));
+    }
+    {
+        const fs::path out = base / "trailing.scpak";
+        ExportReport report;
+        CHECK(ExportProductPack(root, fs::path(out.string() + "/"), report));
+        CHECK(fs::is_regular_file(out));
+        CHECK(!fs::exists(out.string() + ".partial"));
+    }
+    // A preexisting sibling stage must not be bypassed by a trailing separator.
+    for (const bool packed : {false, true}) {
+        const fs::path out = base / (packed ? "trailing-owned.scpak" : "trailing-owned");
+        const fs::path stage = out.string() + ".partial";
+        Write(stage / "keep.txt", "unrelated\n");
+        ExportReport report;
+        const fs::path withSeparator(out.string() + "/");
+        CHECK(!(packed ? ExportProductPack(root, withSeparator, report)
+                       : ExportProduct(root, withSeparator, report)));
+        CHECK(!fs::exists(out));
+        CHECK(fs::is_regular_file(stage / "keep.txt"));
+    }
+
     // A roster folder without a manifest is refused before anything is written.
     {
         fs::remove_all(root / "data" / "plugins" / "catalog_b" / "plugin.ini");

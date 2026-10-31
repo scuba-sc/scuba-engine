@@ -19,3 +19,17 @@ Canonical cross-repo runbook: sco-core branch `handoff/core-integration-20261030
 ## Pending elsewhere
 - SDK pin stays rc.2. Engine #37 (Linux eight-peer zero-loss) needs a published 2.4.0 archive/hash plus a fresh Linux run.
 - There is a separate dirty tree in the original local parity checkout; this branch is the committed version of that work.
+
+## Coordinated source-development dependency
+
+For source integration, use sco-core PR #304 commit
+`571fe8e2c911d7c63c372103724896feaabe58f2`. Generate a development
+`host-source-sc` archive from that clean checkout with
+`python3 sdk/package.py --profile host-source-sc --out <archive-dir>`.
+The archive `sco-sdk-host-source-sc-2.4.0.zip` has SHA-256
+`065e5dbc0377bd51e1cf09a3282f3a63c0ec69f502ef512c371469120089b8e9`.
+Configure the engine with `-DSCUBA_SDK_ARCHIVE_DIR=<archive-dir>` and
+`-DSCUBA_SDK_HOST_SOURCE_SHA256=065e5dbc0377bd51e1cf09a3282f3a63c0ec69f502ef512c371469120089b8e9`.
+The default remains the published RC2 archive until a published replacement is
+available; CI using that default does not test the coordinated development source.
+This local development archive is not a release or game acceptance evidence.
