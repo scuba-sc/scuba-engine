@@ -14,6 +14,7 @@ export type WidgetKind =
   | 'column';
 
 export type WidgetSeverity = 'none' | 'info' | 'warning' | 'error';
+export type WidgetNumericPresentation = 0 | 1 | 2;
 
 export interface WidgetNode {
   id: number;
@@ -27,6 +28,8 @@ export interface WidgetNode {
   value: number;
   minimum: number;
   maximum: number;
+  // Absent in snapshots from hosts predating numeric presentation (NUMBER).
+  presentation?: WidgetNumericPresentation;
   index: number;
   items: string[];
   columns: number;
