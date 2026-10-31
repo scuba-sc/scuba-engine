@@ -1,7 +1,7 @@
 # scuba-engine plugins: one add_subdirectory per plugin folder.
 #
 # Built from a parent project that has already included cmake/ScubaSdk.cmake, or on its own:
-#   cmake -S plugins -B build-plugins [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0-rc.1 assets>]
+#   cmake -S plugins -B build-plugins [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0-rc.2 assets>]
 #   cmake --build build-plugins && ctest --test-dir build-plugins --output-on-failure
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   cmake_minimum_required(VERSION 3.21)
@@ -20,6 +20,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   if(SCUBA_BUILD_TESTS)
     enable_testing()
   endif()
+endif()
+
+# Reuse the engine's warning policy when included by another project; standalone plugin builds
+# need the same helper and default -Werror setting as the root build.
+if(NOT COMMAND scuba_warnings)
+  include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ScubaWarnings.cmake")
 endif()
 
 include("${SCUBA_SDK_SOURCE_DIR}/sdk/cmake/sco-plugin.cmake")
