@@ -5,9 +5,11 @@
 #include "scuba/product/export.h"
 #include "scuba/vfs/file_system.h"
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -146,6 +148,51 @@ int main(int argc, char** argv) {
         CHECK(!fs::exists(out));
     }
 
+    // An unrelated staging file, or a link to someone else's directory, is not ours to clean up.
+    {
+        const fs::path out = base / "stage-file";
+        const fs::path stage = out.string() + ".partial";
+        Write(stage, "keep\n");
+        ExportReport report;
+        CHECK(!ExportProduct(root, out, report));
+        CHECK(fs::is_regular_file(stage) && fs::file_size(stage) == 5);
+        CHECK(!fs::exists(out));
+    }
+    {
+        const fs::path out = base / "stage-link.scpak";
+        const fs::path stage = out.string() + ".partial";
+        const fs::path target = base / "unrelated";
+        Write(target / "keep.txt", "keep\n");
+        std::error_code ec;
+        fs::create_directory_symlink(fs::absolute(target), stage, ec);
+        if (!ec) {
+            ExportReport report;
+            CHECK(!ExportProductPack(root, out, report));
+            CHECK(fs::is_symlink(fs::symlink_status(stage)));
+            CHECK(fs::is_regular_file(target / "keep.txt"));
+            CHECK(!fs::exists(out));
+        }
+    }
+
+    // Refusal after staging is created removes only the owned stage and leaves the source intact.
+    {
+        const fs::path source = root / "data" / "oversize.bin";
+        Write(source, "");
+        std::error_code ec;
+        fs::resize_file(source, (uint64_t{256} << 20) + 1, ec);
+        if (!ec) {
+            for (const bool packed : {false, true}) {
+                const fs::path out = base / (packed ? "oversize.scpak" : "oversize");
+                ExportReport report;
+                CHECK(!(packed ? ExportProductPack(root, out, report) : ExportProduct(root, out, report)));
+                CHECK(!fs::exists(out));
+                CHECK(!fs::exists(out.string() + ".partial"));
+                CHECK(fs::file_size(source) == (uint64_t{256} << 20) + 1);
+            }
+        }
+        fs::remove(source);
+    }
+
     // A destination within the input cannot be staged while traversing that input.
     {
         ExportReport report;
@@ -153,6 +200,39 @@ int main(int argc, char** argv) {
         CHECK(!ExportProductPack(root, root / "data" / "nested.scpak", report));
         CHECK(!fs::exists(root / "data" / "nested.partial"));
         CHECK(!fs::exists(root / "data" / "nested.scpak.partial"));
+    }
+
+    // Concurrent exporters using the same destination must not share a staging tree or both
+    // report success. This exercises cooperating exporters, not hostile path replacement.
+    for (const bool packed : {false, true}) {
+        for (int trial = 0; trial < 8; ++trial) {
+            const fs::path out = base / ((packed ? "concurrent-pack-" : "concurrent-dir-") + std::to_string(trial));
+            std::atomic<int> ready{0};
+            std::atomic<bool> go{false};
+            bool succeeded[2] = {false, false};
+            auto run = [&](int index) {
+                ExportReport report;
+                ++ready;
+                while (!go.load()) std::this_thread::yield();
+                succeeded[index] = static_cast<bool>(packed ? ExportProductPack(root, out, report)
+                                                           : ExportProduct(root, out, report));
+            };
+            std::thread first(run, 0), second(run, 1);
+            while (ready.load() != 2) std::this_thread::yield();
+            go = true;
+            first.join();
+            second.join();
+            CHECK(succeeded[0] != succeeded[1]);
+            CHECK(!fs::exists(out.string() + ".partial"));
+            if (packed) {
+                scuba::Status openStatus;
+                auto archive = scuba::vfs::OpenPack(out, openStatus);
+                CHECK(archive && openStatus);
+                if (archive) CHECK(archive->Exists("data/plugins/catalog_a/plugin.ini"));
+            } else {
+                CHECK(fs::is_regular_file(out / "data" / "plugins" / "catalog_a" / "plugin.ini"));
+            }
+        }
     }
 
     // Refuse a symlink at the data root itself, not only symlinks below it.

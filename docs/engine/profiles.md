@@ -66,8 +66,8 @@ beside the destination and published only when it is complete. An existing `.par
 left untouched and causes refusal. `--export-pack FILE` writes the same `data` tree as one `.scpak`,
 verifies it before publication, and requires filesystem hard-link support to avoid overwriting an
 existing destination. Both run without creating a window, so they work on a build host. Callers
-must prevent other processes from replacing the staging or destination paths during export; these
-filesystem operations do not provide a hostile-concurrency boundary.
+must prevent other processes from changing the source tree or replacing the staging or destination
+paths during export; these filesystem operations do not provide a hostile-concurrency boundary.
 
 The **View > Product** dock does the same from a mounted product profile and lists the roster it
 exported. An export is a local file operation: nothing is uploaded and no game data is included

@@ -3,8 +3,8 @@
 // Product distribution export: takes a mounted product root (`--product DIR`: `<DIR>/data/plugins`
 // is the roster, `<DIR>/data` is the storage root) and writes a distribution that `--product`
 // accepts again. The tree is staged next to the destination before publication. These filesystem
-// operations assume other processes do not concurrently replace the staging or destination paths;
-// they do not establish a hostile-concurrency boundary.
+// operations assume other processes do not concurrently change the source tree or replace the
+// staging or destination paths; they do not establish a hostile-concurrency boundary.
 #include "scuba/core/status.h"
 
 #include <cstdint>

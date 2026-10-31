@@ -37,8 +37,9 @@ Status Walk(const fs::path& dir, int depth, ExportReport& report,
         const auto size = fs::file_size(path, ec);
         if (ec) return Status::Fail("cannot size " + name);
         if (++report.files > kMaxFiles) return Status::Fail("distribution exceeds 4096 files");
+        // Check before adding so a very large sparse file cannot wrap the total.
+        if (size > kMaxBytes - report.bytes) return Status::Fail("distribution exceeds 256 MiB");
         report.bytes += size;
-        if (report.bytes > kMaxBytes) return Status::Fail("distribution exceeds 256 MiB");
         if (onFile)
             if (auto st = onFile(path); !st) return st;
     }
