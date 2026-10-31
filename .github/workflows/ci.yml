@@ -13,6 +13,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  coordinated-core:
+    name: coordinated core (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      CORE_COMMIT: 571fe8e2c911d7c63c372103724896feaabe58f2
+      CORE_KIT_SHA256: 065e5dbc0377bd51e1cf09a3282f3a63c0ec69f502ef512c371469120089b8e9
+    steps:
+      # The hosted Windows default can rewrite LF files. This runner is ephemeral;
+      # disable conversion before both checkouts so the source bytes stay exact.
+      - name: Keep checkout bytes unchanged
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: scuba-sc/sco-core
+          ref: 571fe8e2c911d7c63c372103724896feaabe58f2
+          path: coordinated-core
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - name: Build and verify exact development host-source kit
+        shell: bash
+        run: |
+          test "$(git -C coordinated-core rev-parse HEAD)" = "$CORE_COMMIT"
+          test -z "$(git -C coordinated-core status --porcelain --untracked-files=no)"
+          python tools/package_dev_sdk.py coordinated-core sdk-artifacts
+          python tools/verify_dev_sdk.py sdk-artifacts/sco-sdk-host-source-sc-2.4.0.zip "$CORE_KIT_SHA256" "$CORE_COMMIT"
+      - name: Configure against coordinated core kit
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmake -S . -B build-coordinated -A x64 \
+              -DSCUBA_SDK_ARCHIVE_DIR:PATH="$GITHUB_WORKSPACE/sdk-artifacts" \
+              -DSCUBA_SDK_HOST_SOURCE_SHA256="$CORE_KIT_SHA256"
+          else
+            cmake -S . -B build-coordinated -DCMAKE_BUILD_TYPE=Release \
+              -DSCUBA_SDK_ARCHIVE_DIR:PATH="$GITHUB_WORKSPACE/sdk-artifacts" \
+              -DSCUBA_SDK_HOST_SOURCE_SHA256="$CORE_KIT_SHA256"
+          fi
+      - name: Build
+        run: cmake --build build-coordinated --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build-coordinated -C Release --output-on-failure
+
   native:
     name: native (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
