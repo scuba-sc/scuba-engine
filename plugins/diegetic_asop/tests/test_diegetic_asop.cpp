@@ -309,6 +309,44 @@ void TestAsopSection() {
     CHECK(g_fake.calls.size() == 2);
     CHECK(AnyLabelContains(t.Tree(), "Claim timeout: 30 s; shard persisted: yes"));
 
+    // A read can be the first operation after revocation. Its fresh refusal
+    // remains visible instead of being replaced by the stale-value marker.
+    g_fake.caps.erase(diegetic_asop::kCapClaimTimeout);
+    g_fake.calls.clear();
+    CHECK(t.ReadAsop().result == SCO_UNAVAILABLE);
+    CHECK(g_fake.calls.size() == 1 && g_fake.calls[0] == "shard_persisted");
+    CHECK(AnyLabelContains(t.Tree(), "Claim timeout: unavailable; shard persisted: yes"));
+    g_fake.caps.insert(diegetic_asop::kCapClaimTimeout);
+    CHECK(t.ReadAsop().ok());
+
+    // Revocation invalidates only the affected observation and the old success
+    // message. Re-enabling it must not resurrect the previous value.
+    g_fake.caps.erase(diegetic_asop::kCapClaimTimeout);
+    g_fake.calls.clear();
+    CHECK(t.Refresh() == SCO_OK);
+    CHECK(g_fake.calls.empty());
+    CHECK(AnyLabelContains(t.Tree(), "Claim timeout: not read; shard persisted: yes"));
+    CHECK(AnyLabelContains(t.Tree(), "ASOP availability changed; read again"));
+    g_fake.caps.insert(diegetic_asop::kCapClaimTimeout);
+    CHECK(t.Refresh() == SCO_OK);
+    CHECK(AnyLabelContains(t.Tree(), "Claim timeout: not read; shard persisted: yes"));
+    CHECK(t.ReadAsop().ok());
+
+    // A withdrawn table has the same invalidation effect when republished.
+    g_fake.asopPublished = false;
+    CHECK(t.Refresh() == SCO_OK);
+    CHECK(!t.Asop().active);
+    g_fake.asopPublished = true;
+    CHECK(t.Refresh() == SCO_OK);
+    CHECK(AnyLabelContains(t.Tree(), "Claim timeout: not read; shard persisted: not read"));
+    CHECK(t.ReadAsop().ok());
+    g_asop.shard_persisted = nullptr;
+    CHECK(t.Refresh() == SCO_OK);
+    CHECK(AnyLabelContains(t.Tree(), "Claim timeout: 30 s; shard persisted: not read"));
+    g_asop.shard_persisted = FakeShardPersisted;
+    CHECK(t.Refresh() == SCO_OK);
+    CHECK(AnyLabelContains(t.Tree(), "Claim timeout: 30 s; shard persisted: not read"));
+
     // A failing read carries last_error's text.
     g_fake.asopResult = SCO_NOT_FOUND;
     g_fake.lastError = "insurance configuration not loaded";

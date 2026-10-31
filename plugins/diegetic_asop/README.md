@@ -49,6 +49,11 @@ is pressed. Each value shows its own result, and a capability that is off leaves
 when both reads succeed. Both capabilities are off by default in the game pack. scuba-engine's mock
 game publishes the table with synthetic values: 30 s and persisted.
 
+On refresh, a capability or callable member that becomes unavailable invalidates its last value;
+republishing it leaves the value `not read` until another read succeeds. The prior successful ASOP
+message is also cleared. Refresh happens on `game.ready` and terminal actions; this is not a
+continuous capability monitor.
+
 ## Build and test
 
 From the scuba-engine root (the plugin is part of the default build):
