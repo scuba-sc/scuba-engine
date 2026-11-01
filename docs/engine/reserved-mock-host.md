@@ -109,9 +109,12 @@ The 4c09 input was generated from the exact core source. The core-source
 archive (442 members) and host-source archive (985 members) passed package and
 provenance audits. The engine workflow packaging wrapper reproduced the exact
 host-source SHA-256. The Clang 19.1.7 Linux Release consumer build passed all
-nine registered tests, including the binary-composition audit. This local
-result is Linux-only; the dedicated workflow must provide hosted Windows/MSVC
-evidence for the consumer commit being qualified. The separate e4ba ASan/UBSan
+nine registered tests, including the binary-composition audit. Hosted run
+[41288580618](https://github.com/scuba-sc/scuba-engine/actions/runs/41288580618)
+passed the same nine tests on Ubuntu and Windows for engine source commit
+`0b294e9fcd433b50dd2a06658d2bab4a17d740fb`; both jobs regenerated and verified
+the exact 4c09 host-source archive. These results qualify only this bounded
+mock-host source and its CI composition checks. The separate e4ba ASan/UBSan
 result (eight runtime tests passed with leak detection; the unchanged composition
 audit rejected the sanitizer's `libresolv` dependency) applies only to e4ba
 and is not evidence for 4c09. Hostd's legacy startup, its peer process and
