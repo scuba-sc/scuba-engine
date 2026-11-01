@@ -46,7 +46,7 @@ export const TOOLS = [
   spec('mock_list_services', 'List synthetic game services and their published flags.', object({}),
     'mock_game.services.list', () => ({}), true),
   spec('mock_spawn_entity', 'Spawn a synthetic entity in the sandbox scene.',
-    object({ class: string, zone: integer, pos: vector(3), actor: { type: 'boolean' } }, ['class', 'zone']),
+    object({ class: string, zone: integer, pos: vector(3), actor: { type: 'boolean' } }, ['class', 'zone', 'pos']),
     'mock_game.entity.spawn', a => a),
   spec('mock_move_entity', 'Move a synthetic entity to a position in a streamed zone.',
     object({ id: integer, zone: integer, pos: vector(3) }, ['id', 'pos']),
