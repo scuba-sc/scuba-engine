@@ -54,7 +54,10 @@ cmake/ScubaDeps.cmake       Dear ImGui (docking) and miniz, pinned by SHA-256
 tests/test_engine_core.cpp  VFS, overlay, jobs, loader, picking (no GPU)
 ```
 
-| Target | Platforms | Contains | Links |
+The table lists supported/tested product targets for the pinned SDK release. It does not claim
+that isolated utility sources cannot compile on other platforms.
+
+| Target | Supported/tested targets | Contains | Links |
 |---|---|---|---|
 | `scuba_engine_core` | Linux, Windows | jobs, log, VFS backends and stack, model decode and loader, camera and picking math | `sco_vfs`, `scuba_assets` (bounded OBJ/CGF readers), miniz |
 | `scuba_engine_sco` | Linux, Windows | `ScoHost`: kernel boot, tick, plugins, widget panels | `scuba_kernel` (sco::app + mock game) |
