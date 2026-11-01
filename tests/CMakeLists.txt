@@ -52,6 +52,31 @@ add_test(NAME plugin_sdk_root_mode_rejected_early
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_root_plugin_sdk_mode_rejected.cmake")
 set_tests_properties(plugin_sdk_root_mode_rejected_early PROPERTIES TIMEOUT 120)
 
+if(SCUBA_CORE_LIFECYCLE_CANDIDATE AND
+   "${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}" STREQUAL "6106fa3639cbcc28f78a1ded8de2707de019f4d3" AND
+   "${SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256}" STREQUAL "a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c")
+  set(unchecked_stable_rejected_args
+    "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+    "-DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/unchecked-stable-lifecycle-rejected"
+    "-DGENERATOR=${CMAKE_GENERATOR}"
+    "-DCMAKE_EXECUTABLE=${CMAKE_COMMAND}"
+    "-DSDK_ARCHIVE_DIR=${PROJECT_BINARY_DIR}/_sdk")
+  if(CMAKE_GENERATOR_PLATFORM)
+    list(APPEND unchecked_stable_rejected_args "-DPLATFORM=${CMAKE_GENERATOR_PLATFORM}")
+  endif()
+  if(CMAKE_GENERATOR_TOOLSET)
+    list(APPEND unchecked_stable_rejected_args "-DTOOLSET=${CMAKE_GENERATOR_TOOLSET}")
+  endif()
+  if(NOT CMAKE_GENERATOR MATCHES "Visual Studio|Xcode")
+    list(APPEND unchecked_stable_rejected_args "-DC_COMPILER=${CMAKE_C_COMPILER}")
+    list(APPEND unchecked_stable_rejected_args "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}")
+  endif()
+  add_test(NAME stable_sdk_requires_checked_lifecycle
+    COMMAND "${CMAKE_COMMAND}" ${unchecked_stable_rejected_args}
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_unchecked_stable_lifecycle_rejected.cmake")
+  set_tests_properties(stable_sdk_requires_checked_lifecycle PROPERTIES TIMEOUT 120)
+endif()
+
 if(SCUBA_TEST_PLUGIN_SDK_CONSUMER)
   set(plugin_sdk_consumer_args
     "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"

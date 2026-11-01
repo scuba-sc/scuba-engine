@@ -26,6 +26,8 @@ option(SCUBA_TEST_PLUGIN_SDK_CONSUMER
   "Register the published plugin-SDK-only configure, build, and checker CTest" OFF)
 option(SCUBA_CORE_LIFECYCLE_CANDIDATE
   "Use checked sco-core startup and shutdown results for the pinned SDK" ON)
+option(SCUBA_ALLOW_UNCHECKED_DEV_REHEARSAL
+  "Allow the exact local bf56 development SDK to use its unchecked lifecycle API" OFF)
 set(SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT "6106fa3639cbcc28f78a1ded8de2707de019f4d3" CACHE STRING
   "Exact sco-core source commit expected by the checked lifecycle profile")
 set(SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256 "a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c" CACHE STRING
@@ -51,6 +53,25 @@ if(SCUBA_BUILD_ENGINE)
   set(SCO_WIDGETS_IMGUI_INCLUDE_DIR "${SCUBA_IMGUI_DIR}" CACHE PATH "" FORCE)
 endif()
 include(cmake/ScubaSdk.cmake)
+if(NOT SCUBA_CORE_LIFECYCLE_CANDIDATE)
+  if(SCUBA_ALLOW_UNCHECKED_DEV_REHEARSAL)
+    if(NOT "${SCUBA_SDK_RELEASE_TAG}" STREQUAL
+           "source-bf56d2879393b2b5a603256347fc1d3cf9a1a751-unpublished" OR
+       NOT "${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}" STREQUAL
+           "bf56d2879393b2b5a603256347fc1d3cf9a1a751" OR
+       NOT "${SCUBA_SDK_HOST_SOURCE_SHA256}" STREQUAL
+           "d41724ce46e34fa05a3ebfebc89ec3c16e6a2996061a183281dd17bcaa7fe0a8" OR
+       "${SCUBA_SDK_ARCHIVE_DIR}" STREQUAL "")
+      message(FATAL_ERROR
+        "Unchecked development rehearsal requires the exact local bf56 SDK archive, tag and explicit opt-in")
+    endif()
+  elseif(NOT "${SCUBA_SDK_RELEASE_TAG}" STREQUAL "sdk-v2.4.0-rc.2" OR
+         NOT "${SCUBA_SDK_HOST_SOURCE_SHA256}" STREQUAL
+             "3d711463f7dff3dcd372ffb70b09951ecf21f1d0e2c5f0a899cccbb9977b8201")
+    message(FATAL_ERROR
+      "Unchecked lifecycle profile is restricted to the exact sdk-v2.4.0-rc.2 archive; the stable SDK requires checked lifecycle")
+  endif()
+endif()
 if(SCUBA_CORE_LIFECYCLE_CANDIDATE)
   string(LENGTH "${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}" _scuba_core_commit_length)
   string(LENGTH "${SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256}" _scuba_core_hash_length)

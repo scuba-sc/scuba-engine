@@ -9,7 +9,10 @@ its checksum inventory and embedded source identity, then builds and tests on Li
 
 The RC2 compatibility build remains available by explicitly disabling
 `SCUBA_CORE_LIFECYCLE_CANDIDATE`; that older SDK exposes only void shutdown and cannot provide the
-checked stop result used by the default profile.
+checked stop result used by the default profile. The unchecked profile is accepted only with the
+exact RC2 tag and host-source archive hash below. Disabling checked lifecycle while selecting the
+stable `sdk-v2.4.0` kit is a configure error, so the switch cannot silently discard the stable
+SDK's shutdown result.
 
 To select RC2 in a separate compatibility build, pin its archived bytes explicitly:
 
@@ -34,6 +37,12 @@ cmake -S . -B build-kernel-lifecycle -G Ninja \
 cmake --build build-kernel-lifecycle
 ctest --test-dir build-kernel-lifecycle --output-on-failure
 ```
+
+The separate unpublished `bf56` issue-37 rehearsal also uses an unchecked core API. It is accepted
+only through the `core-main-bf56-rehearsal` preset with an explicitly supplied local archive
+directory, exact unpublished tag and archive hash, and `SCUBA_ALLOW_UNCHECKED_DEV_REHEARSAL=ON`.
+This exception is only for that offline development rehearsal; it does not relax the stable
+profile or provide checked shutdown semantics.
 
 The candidate Kernel calls `sco::app::StartDetailed` and classifies its return before the caller
 can treat startup as successful. Validation or staging failure before the core call cleans up and
