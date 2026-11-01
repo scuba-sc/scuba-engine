@@ -21,8 +21,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      CORE_COMMIT: 4c09ab2f73caa3d1103214adc56193d2434a8795
-      CORE_KIT_SHA256: d043bd459b6570bd49b072014e96e6844a58c7078af7c5852a0825d736f30e39
+      CORE_COMMIT: 44ffd1290e261e12684b38ac862ec0c4f08921df
+      CORE_KIT_SHA256: 799511bfa08a7bf77a46fcf8262d3cac4a5f0e6a0ef04a28f53e6e624c01e8a0
     steps:
       - name: Keep checkout bytes unchanged
         run: git config --global core.autocrlf false
@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: scuba-sc/sco-core
-          ref: 4c09ab2f73caa3d1103214adc56193d2434a8795
+          ref: 44ffd1290e261e12684b38ac862ec0c4f08921df
           path: curated-core
           persist-credentials: false
       - uses: actions/setup-python@v5

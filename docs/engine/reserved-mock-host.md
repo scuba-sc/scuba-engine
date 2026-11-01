@@ -7,21 +7,21 @@ retires the session. This is an incremental consumer slice toward the core
 roadmap's milestone 2, products and studio on the SDK. It uses the held core
 host-source contract, not the released plugin SDK ABI.
 
-This local rehearsal uses held core #315 source
-`4c09ab2f73caa3d1103214adc56193d2434a8795`, bootstrap 3, mock table 5,
+This rehearsal uses RC3 candidate core source
+`44ffd1290e261e12684b38ac862ec0c4f08921df`, bootstrap 3, mock table 5,
 graph 1. Its host-source archive has 985 members and SHA-256
-`d043bd459b6570bd49b072014e96e6844a58c7078af7c5852a0825d736f30e39`.
+`799511bfa08a7bf77a46fcf8262d3cac4a5f0e6a0ef04a28f53e6e624c01e8a0`.
 The paired core-source archive has 442 members and SHA-256
-`19e80a7d1661475a86aaed80d1827cec8c5e4868d990bca27b089ff8e6d5ed07`;
-the engine consumes the host-source profile. Build from the PR branch; its
-current hosted-check base is main `5419da119879a41a8e09a1dcc58a43d90e2fd6bd`:
+`807a322eab2b3d8c25e10c3582008ec3ec50b6b536bc947f2b28cf4b63095c22`;
+the engine consumes the host-source profile. Core #313 remains open, so the
+final release source may advance. Build from the PR branch:
 
 ```sh
 cmake -S . -B build-curated -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DSCUBA_RESERVED_MOCK_HOST_ONLY=ON \
-  -DSCUBA_RESERVED_CORE_COMMIT=4c09ab2f73caa3d1103214adc56193d2434a8795 \
-  -DSCUBA_SDK_ARCHIVE_DIR=/workspace/engine-core-kit-4c09 \
-  -DSCUBA_SDK_HOST_SOURCE_SHA256=d043bd459b6570bd49b072014e96e6844a58c7078af7c5852a0825d736f30e39
+  -DSCUBA_RESERVED_CORE_COMMIT=44ffd1290e261e12684b38ac862ec0c4f08921df \
+  -DSCUBA_SDK_ARCHIVE_DIR=/path/to/verified-candidate-archives \
+  -DSCUBA_SDK_HOST_SOURCE_SHA256=799511bfa08a7bf77a46fcf8262d3cac4a5f0e6a0ef04a28f53e6e624c01e8a0
 cmake --build build-curated
 ctest --test-dir build-curated --output-on-failure --output-junit ctest.xml
 ```
@@ -105,7 +105,15 @@ candidate. Native/PAK/game activation remains unavailable pending product-owned
 reader and instruction exclusion proof. No gameplay or visual acceptance is
 established here. No core implementation is changed by this consumer.
 
-The 4c09 input was generated from the exact core source. The core-source
+The 44ffd host-source archive from candidate workflow 41332377573 passed its
+checksum, inventory, provenance and SPDX audits. Regenerating it from that
+exact clean source with the engine packaging wrapper produced the same hash.
+On Linux, the local combined engine branch passed all nine curated tests against
+the candidate archive. Check the dedicated workflow for results on the PR's
+synthetic merge commit and both hosted platforms; the earlier 4c09 runs do not
+establish hosted evidence for 44ffd.
+
+Previously, the 4c09 input was generated from the exact core source. The core-source
 archive (442 members) and host-source archive (985 members) passed package and
 provenance audits. The engine workflow packaging wrapper reproduced the exact
 host-source SHA-256. The Clang 19.1.7 Linux Release consumer build passed all
