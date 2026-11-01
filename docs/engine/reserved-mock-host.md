@@ -8,17 +8,20 @@ roadmap's milestone 2, products and studio on the SDK. It uses the held core
 host-source contract, not the released plugin SDK ABI.
 
 This local rehearsal uses held core #315 source
-`f76eed986135a94f7283efb29ee412979a60275a`, bootstrap 3, mock table 5,
+`4c09ab2f73caa3d1103214adc56193d2434a8795`, bootstrap 3, mock table 5,
 graph 1. Its host-source archive has 985 members and SHA-256
-`9fe105779b1d5cfaf9b494da8cc620708f97b1e6ea17836dfb9cc1b676a01a6e`.
-Build from engine source based on main `de13577bb91526036c8dd6c037c161c59f77c590`:
+`d043bd459b6570bd49b072014e96e6844a58c7078af7c5852a0825d736f30e39`.
+The paired core-source archive has 442 members and SHA-256
+`19e80a7d1661475a86aaed80d1827cec8c5e4868d990bca27b089ff8e6d5ed07`;
+the engine consumes the host-source profile. Build from the PR branch; its
+current hosted-check base is main `5419da119879a41a8e09a1dcc58a43d90e2fd6bd`:
 
 ```sh
 cmake -S . -B build-curated -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DSCUBA_RESERVED_MOCK_HOST_ONLY=ON \
-  -DSCUBA_RESERVED_CORE_COMMIT=f76eed986135a94f7283efb29ee412979a60275a \
-  -DSCUBA_SDK_ARCHIVE_DIR=/workspace/engine-core-kit-f76 \
-  -DSCUBA_SDK_HOST_SOURCE_SHA256=9fe105779b1d5cfaf9b494da8cc620708f97b1e6ea17836dfb9cc1b676a01a6e
+  -DSCUBA_RESERVED_CORE_COMMIT=4c09ab2f73caa3d1103214adc56193d2434a8795 \
+  -DSCUBA_SDK_ARCHIVE_DIR=/workspace/engine-core-kit-4c09 \
+  -DSCUBA_SDK_HOST_SOURCE_SHA256=d043bd459b6570bd49b072014e96e6844a58c7078af7c5852a0825d736f30e39
 cmake --build build-curated
 ctest --test-dir build-curated --output-on-failure --output-junit ctest.xml
 ```
@@ -102,16 +105,18 @@ candidate. Native/PAK/game activation remains unavailable pending product-owned
 reader and instruction exclusion proof. No gameplay or visual acceptance is
 established here. No core implementation is changed by this consumer.
 
-The held `f76eed9` input was generated twice from the exact core source and
-passed the source-package and provenance audits. The Clang 19.1.7 Linux Release
-build passed all nine registered tests, including the binary-composition audit.
-This is local Linux evidence only; it does not establish hosted Windows/MSVC,
-native/game or visual acceptance. The separate e4ba ASan/UBSan result (eight
-runtime tests passed with leak detection; the unchanged composition audit
-rejected the sanitizer's `libresolv` dependency) applies only to e4ba and is not
-evidence for f76. Hostd's legacy startup, its peer process and editor ownership
-remain separate adoption work. This rehearsal does not qualify them to use core
-#315.
+The 4c09 input was generated from the exact core source. The core-source
+archive (442 members) and host-source archive (985 members) passed package and
+provenance audits. The engine workflow packaging wrapper reproduced the exact
+host-source SHA-256. The Clang 19.1.7 Linux Release consumer build passed all
+nine registered tests, including the binary-composition audit. This local
+result is Linux-only; the dedicated workflow must provide hosted Windows/MSVC
+evidence for the consumer commit being qualified. The separate e4ba ASan/UBSan
+result (eight runtime tests passed with leak detection; the unchanged composition
+audit rejected the sanitizer's `libresolv` dependency) applies only to e4ba
+and is not evidence for 4c09. Hostd's legacy startup, its peer process and
+editor ownership remain separate adoption work. This rehearsal does not qualify
+them to use core #315.
 
 The legacy host cannot gain owned-session safety merely by switching to
 `app::StartDetailed`: it refuses a non-null shutdown owner, and an active
