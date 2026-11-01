@@ -39,7 +39,8 @@ The kit's `sco_add_plugin` helper builds
 The `.dll` suffix is intentional on all platforms. Installation through CMake
 puts it under `data/plugins/diegetic_shop_inv`.
 With tests disabled, build target `diegetic_shop_inv` instead of `test_shop`.
-For multi-config generators, build with `--config Release` and test with `-C Release`.
+For a Visual Studio generator, configure with `-A x64`, build with `--config Release`, test with
+`-C Release`, and use `build-app4/Release/sco-plugin-check.exe` for the checker commands above.
 
 ## Commands
 

@@ -1,19 +1,19 @@
 # Local current-main SDK upgrade rehearsal
 
-This is a local development-input rehearsal, not a published SDK upgrade or
-release acceptance. Engine main is `f005372bd74967e53fdb8ed4cf3f4707ab3b20fa`;
-the local batch builds on UDP diagnostic commit
-`5a992e932a9a1948b6557f9a6844eb2ac2446d64`. Only an opt-in preset and isolated
-consumer test configuration/declaration are added. Runtime sources, the default
-RC2 pin, remote branches, releases and security settings are unchanged.
+This records a development-input rehearsal, not a published SDK upgrade or
+release acceptance. The original local batch used engine main
+`f005372bd74967e53fdb8ed4cf3f4707ab3b20fa` and UDP diagnostic commit
+`5a992e932a9a1948b6557f9a6844eb2ac2446d64`; it was subsequently merged into engine
+main in #51. The preset remains opt-in and the published RC2 default pin is unchanged.
 
 ## Exact selected inputs
 
-Core remote main was verified as `bf56d2879393b2b5a603256347fc1d3cf9a1a751`.
+At the time of this rehearsal, core remote main was verified as
+`bf56d2879393b2b5a603256347fc1d3cf9a1a751`.
 It contains upstream #289's receive-buffer fix. Relative to `1b6782b`, the
 changes are nine requirements-checker, packaging, documentation and CI files;
-`include/`, `src/` and contract files are unchanged. Thus current main is the
-appropriate reviewed development baseline; older archive bytes are not reused
+`include/`, `src/` and contract files are unchanged. Thus bf56 was the reviewed
+development baseline for this rehearsal; older archive bytes are not reused
 under its identity. Held core #305 is not part of this rehearsal.
 
 | Profile generated from clean bf56 source | SHA-256 | Members |
@@ -113,35 +113,31 @@ Both failures are preserved; no checker policy, symlink or system setting was
 changed. This requires a supported toolchain/container or core-owner review of
 OS symlink handling. The 8/8 engine plugin checks do not repair that SDK gate.
 
-Consumer inventory found no frozen C ABI/table-coordinate change (48 catalogue
-tables, 231 method mappings match RC2), but these gaps remain:
+The original consumer inventory found no frozen C ABI/table-coordinate change (48 catalogue
+tables, 231 method mappings match RC2). Its original coverage gaps and subsequent work are:
 
-- ASOP selection gained busy constants/callback semantics; the engine mock's
-  rows and commit conflict behavior do not exercise that new behavior.
-- Actor-stats headers enable its mock, but the archive omits actor_stats_probe.c,
-  so the conditional `mock_actor_stats` test is absent. 85/85 is not proof of that
-  skipped consumer fixture. The main product ASOP plugin uses game.asop rather
+- The original 85/85 run did not exercise ASOP selection busy rows and commit conflicts,
+  or the actor-stats probe omitted from the host-source archive. The later
+  [mock coverage follow-up](mock-coverage-followup.md) adds those synthetic tests using
+  the matching combined archive. The main product ASOP plugin uses game.asop rather
   than game.asop.selection.
 - Host-source app/mock/ImGui adapters are separate from plugin ABI checks. The
   plugin archive check does not establish the legacy host's ownership closure.
-- Windows/MSVC and macOS validation of this exact local batch is unrun. The
-  selected executor is Linux; fresh hosted validation would require publication
-  or dispatch outside this local-only authorization. Earlier Windows results for
-  1b/held-305 inputs cannot substitute for this bf56 source/artifact batch.
+- The original local batch had no Windows/MSVC or macOS execution. The later published
+  #51 hosted checks ran the bf56 development profile on Linux and Windows; that does not
+  make the original Linux receipt a Windows result or establish game acceptance.
 - Core main also has a failed release-candidate readiness workflow
   `41195084699`; no release eligibility or release approval is inferred here.
 
-## Rollback and next publication decision
+## Rollback and subsequent publication
 
 Unset SCUBA_DEV_SDK_ARCHIVE_DIR and configure a fresh ordinary build directory
 to return to the unchanged published RC2 path. Keep separate build directories;
 do not mix objects/headers or hot-swap live SDK instances across profiles.
 No release/tag restoration or remote pin rollback is needed because none changed.
 
-The concrete local batch is ready for review as an **opt-in development profile**.
-Before default dependency promotion or coordinated integration, resolve the SDK
-package gate, obtain exact-batch Windows evidence and explicitly accept/fix the
-mock/packaged-fixture coverage gaps. A later authorization could publish this
-profile and test configuration for hosted checks while keeping published RC2
-separate; it must not relabel development bytes as a release. Nothing was
-published or dispatched during this rehearsal.
+The original local batch was subsequently published and merged in #51 as an **opt-in
+development profile**, with the follow-up mock coverage and hosted checks. Those later
+results do not replace the original failed local SDK gate documented above. Default
+dependency promotion and release acceptance remain separate decisions; development
+archive bytes are not a published SDK release.
