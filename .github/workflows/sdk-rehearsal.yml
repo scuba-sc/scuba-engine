@@ -30,6 +30,8 @@ jobs:
       HOST_SHA256: d41724ce46e34fa05a3ebfebc89ec3c16e6a2996061a183281dd17bcaa7fe0a8
       SCUBA_DEV_SDK_ARCHIVE_DIR: ${{ github.workspace }}/sdk-artifacts
       PYTHON: python
+      CC: ${{ runner.os == 'Linux' && 'clang' || 'cl' }}
+      CXX: ${{ runner.os == 'Linux' && 'clang++' || 'cl' }}
     steps:
       - name: Keep checkout bytes unchanged
         run: git config --global core.autocrlf false
@@ -80,6 +82,17 @@ jobs:
               --plugin-archive sdk-artifacts/sco-sdk-2.4.0.zip \
               --plugin-root sdk-extracted/sco-sdk-2.4.0 --source "$CORE_COMMIT"
           } 2>&1 | tee evidence/archives.log
+      - name: Validate comparison harness negative controls
+        run: python -m unittest discover -s tests -p test_compare_udp_bounds.py -v
+      - name: Check declared static SDK requirements
+        if: ${{ !cancelled() && steps.verify.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          python -I sdk-extracted/sco-sdk-2.4.0/tools/sdk_consumer_requirements.py \
+            --requirements tests/sdk_archive_plugins/consumer-requirements.json \
+            --catalogue sdk-extracted/sco-sdk-2.4.0/sdk-catalogue.json \
+            --registry sdk-extracted/sco-sdk-2.4.0/status_registry.json \
+            | tee evidence/static-requirements.json
       - name: Configure and build engine
         id: engine_build
         if: ${{ !cancelled() && steps.verify.outcome == 'success' }}

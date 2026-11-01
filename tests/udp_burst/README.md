@@ -51,6 +51,23 @@ python tools/compare_udp_bounds.py \
 
 The runner alternates baseline/candidate serially and records every result,
 binary/archive hash, embedded SDK source identity, timestamp and full log. It
+requires matching declared SDK compatibility coordinates and the same regression
+binary hash in both inputs. Use `--test-binary /path/to/test_net_sim` to explicitly
+run one regression executable with both hostd builds when build-local test
+binaries differ. Pair checks do not authenticate arbitrary build provenance;
+retain the separate verified archive and build receipts.
+Baseline crash, startup/API failure, process timeout or malformed diagnostics are
+inconclusive. Reproduced loss requires the expected nonzero exit and a valid
+eight-member probe diagnostic with 32 sends, 224 reliable receives, and fewer
+than 224 unreliable receives. Candidate success requires all eight unique slot
+results with the full counts; exit zero alone does not qualify.
+Failed CHECK/assertion output also disqualifies the result, including logs from
+older test binaries that returned zero after recording a failed check. The
+network test now returns CheckExit so those failures also fail CTest directly.
+The no-network synthetic classifier tests exercise crash, mismatch and startup
+negative controls; they are not runtime UDP evidence.
+
+The runner
 refuses an existing output directory. Its 120-second default matches CTest;
 timeouts are marked and cannot establish delivery loss. SIGINT/SIGTERM cleanup
 kills the test's process group and records interruption. Linux UDP counter

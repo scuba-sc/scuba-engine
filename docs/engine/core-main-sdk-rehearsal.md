@@ -90,10 +90,17 @@ Raw receipts/logs are under `/workspace/engine-sdk-rehearsal-evidence` and
 not individual-socket attribution. These runs do not prove universal stability.
 Unlike the earlier 1b rehearsal, this candidate was freshly built in another
 source/build directory and its test executable hash differs from the archived
-RC2 executable. The test source/assertions are unchanged; these paired results
+RC2 executable. The test source/assertions were unchanged in those earlier runs; these paired results
 qualify the complete current-main consumer profile rather than isolate one
 binary delta. The separate socket burst and source comparison support the
 receive-buffer diagnosis.
+The stricter comparison runner now refuses different regression executables by
+default. An explicit shared `--test-binary` can be used for a new controlled
+comparison of those hostd builds. The earlier raw profile observations remain
+preserved; they are not relabelled as identical-binary evidence.
+Subsequent review added CheckExit to the network test so recorded CHECK failures
+also produce a failing exit status in new builds. The assertion predicates were
+not relaxed, and the older receipts remain evidence for their original sources.
 
 ## Package gate, compatibility gaps and remaining evidence
 
