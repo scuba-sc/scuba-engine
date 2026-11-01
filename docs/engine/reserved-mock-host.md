@@ -110,3 +110,21 @@ the sanitizer-instrumented binary failed the unchanged composition audit because
 the Clang sanitizer runtime adds `libresolv`. The audit was not waived.
 Hostd's legacy startup, its peer process and editor ownership remain separate
 adoption work. This rehearsal does not qualify them to use core #315.
+
+The legacy host cannot gain owned-session safety merely by switching to
+`app::StartDetailed`: it refuses a non-null shutdown owner, and an active
+reserved session blocks legacy app admission. The current owned host capsule
+also excludes the builtin and capability callbacks used by the existing mock
+providers. Engine-side code alone cannot turn those callbacks and cached legacy
+tables into a reserved session. A future supported composition needs a
+core-coordinated ownership and admission route before logging or mock
+configuration. It must strongly own backing and callback code and hold admission
+through provider calls, output copying and unwind. Unknown plugin and native
+paths need their own callback and worker lifetime proof before activation.
+
+The engine must also preserve process-lifetime state after
+`RetainDependencies` or a non-`Ok` stop, refuse restart in its bounded first
+implementation, and treat `RefusedBeforeExposure` as applying only to that
+invocation. Hostd logging and server contexts, mock scene/TLS state, peer
+shutdown acknowledgement and staged files require explicit ownership. A
+reserved retained verdict is not a successful `app::Stop`.
