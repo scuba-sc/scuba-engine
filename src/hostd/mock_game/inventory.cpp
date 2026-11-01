@@ -38,7 +38,13 @@ sco_result Snapshot(sco_plugin*, sc_inventory_snapshot* out) {
         result.flags = total > written ? SC_INVENTORY_FLAG_TRUNCATED : 0;
         result.total_seen = static_cast<uint32_t>(std::min<size_t>(total, std::numeric_limits<uint32_t>::max()));
     }
-    std::memcpy(out, &result, std::min<size_t>(callerSize, sizeof(result)));
+    out->count = result.count;
+    out->generation = result.generation;
+    std::memcpy(out->ports, result.ports, written * sizeof(result.ports[0]));
+    if (callerSize >= sizeof(sc_inventory_snapshot)) {
+        out->flags = result.flags;
+        out->total_seen = result.total_seen;
+    }
     return SCO_OK;
 }
 
