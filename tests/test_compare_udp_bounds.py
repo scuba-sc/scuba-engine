@@ -51,9 +51,17 @@ class ClassifierTests(unittest.TestCase):
 
 
 class MetadataTests(unittest.TestCase):
+    def test_identical_host_binary_is_rejected(self):
+        inputs = {name: {'sdk_compatibility': COMPAT, 'test_binary': {'sha256': 'same-test'},
+                         'hostd': {'sha256': 'same-host'}}
+                  for name in ('baseline', 'candidate')}
+        with self.assertRaisesRegex(ValueError, 'hostd binaries have identical SHA-256'):
+            harness.validate_inputs(inputs)
+
     def test_valid_source_coordinates_can_differ(self):
         candidate = dict(COMPAT, source_commits={'core': 'c' * 40, 'game-sc': 'd' * 40})
-        inputs = {name: {'sdk_compatibility': compat, 'test_binary': {'sha256': 'same'}}
+        inputs = {name: {'sdk_compatibility': compat, 'test_binary': {'sha256': 'same'},
+                         'hostd': {'sha256': name}}
                   for name, compat in [('baseline', COMPAT), ('candidate', candidate)]}
         harness.validate_inputs(inputs)
 
@@ -68,7 +76,8 @@ class MetadataTests(unittest.TestCase):
         ]
         for change in changes:
             compat = dict(COMPAT, **change)
-            inputs = {name: {'sdk_compatibility': compat, 'test_binary': {'sha256': 'same'}}
+            inputs = {name: {'sdk_compatibility': compat, 'test_binary': {'sha256': 'same'},
+                             'hostd': {'sha256': name}}
                       for name in ('baseline', 'candidate')}
             with self.subTest(change=change), self.assertRaises(ValueError):
                 harness.validate_inputs(inputs)
@@ -84,7 +93,7 @@ class HarnessTests(unittest.TestCase):
         for build in (self.base, self.candidate):
             (build / '_sdk').mkdir(parents=True)
             (build / 'tests').mkdir()
-            (build / 'scuba-hostd').write_text('synthetic host')
+            (build / 'scuba-hostd').write_text('synthetic host: ' + build.name)
             self.write_sdk(build, COMPAT)
         self.set_binary('''import sys\nprint('kernel start failed')\nsys.exit(1)\n''')
         self.count = 0
@@ -165,6 +174,15 @@ class HarnessTests(unittest.TestCase):
         result, receipt = self.run_harness()
         self.assertEqual(result.returncode, 1)
         self.assertEqual(receipt['result'], 'failure')
+
+    def test_identical_runtime_rejects_success_shaped_comparison_before_execution(self):
+        (self.candidate / 'scuba-hostd').write_bytes((self.base / 'scuba-hostd').read_bytes())
+        self.set_binary('import sys\nif "baseline" in sys.argv[1]:\n print(' + repr(LOSS) + '); sys.exit(1)\nprint(' + repr(SLOTS) + ')\n')
+        result, receipt = self.run_harness()
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(receipt['result'], 'inconclusive')
+        self.assertIn('hostd binaries have identical SHA-256', receipt['reason'])
+        self.assertEqual(receipt['runs'], [])
 
 
 if __name__ == '__main__':

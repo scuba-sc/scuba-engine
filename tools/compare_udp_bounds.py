@@ -76,6 +76,8 @@ def validate_inputs(inputs):
             raise ValueError(f'incompatible SDK {key}')
     if baseline['test_binary']['sha256'] != candidate['test_binary']['sha256']:
         raise ValueError('selected test binaries have different SHA-256 values')
+    if baseline['hostd']['sha256'] == candidate['hostd']['sha256']:
+        raise ValueError('hostd binaries have identical SHA-256 values; no runtime change to compare')
 
 
 SLOT = re.compile(r'^slot=([1-8]) reliable_received=224 unreliable_received=224 unreliable_loss=0$')

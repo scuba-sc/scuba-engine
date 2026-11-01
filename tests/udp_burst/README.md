@@ -52,7 +52,9 @@ python tools/compare_udp_bounds.py \
 The runner alternates baseline/candidate serially and records every result,
 binary/archive hash, embedded SDK source identity, timestamp and full log. It
 requires matching declared SDK compatibility coordinates and the same regression
-binary hash in both inputs. Use `--test-binary /path/to/test_net_sim` to explicitly
+binary hash in both inputs, and distinct hostd binary hashes. Comparing an
+identical runtime with itself is inconclusive even if its two runs differ.
+Use `--test-binary /path/to/test_net_sim` to explicitly
 run one regression executable with both hostd builds when build-local test
 binaries differ. Pair checks do not authenticate arbitrary build provenance;
 retain the separate verified archive and build receipts.

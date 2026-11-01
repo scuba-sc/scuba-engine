@@ -30,8 +30,8 @@ jobs:
       HOST_SHA256: d41724ce46e34fa05a3ebfebc89ec3c16e6a2996061a183281dd17bcaa7fe0a8
       SCUBA_DEV_SDK_ARCHIVE_DIR: ${{ github.workspace }}/sdk-artifacts
       PYTHON: python
-      CC: ${{ runner.os == 'Linux' && 'clang' || 'cl' }}
-      CXX: ${{ runner.os == 'Linux' && 'clang++' || 'cl' }}
+      CC: ${{ matrix.os == 'ubuntu-24.04' && 'clang' || 'cl' }}
+      CXX: ${{ matrix.os == 'ubuntu-24.04' && 'clang++' || 'cl' }}
     steps:
       - name: Keep checkout bytes unchanged
         run: git config --global core.autocrlf false
