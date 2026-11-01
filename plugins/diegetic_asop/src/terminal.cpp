@@ -107,9 +107,23 @@ scosdk::PanelTree Terminal::Build() {
     return b.Build();
 }
 
+void Terminal::SyncAsopStatus() {
+    const AsopStatus nextAsop = asopClient_.Status();
+    // Values are observations, not defaults. Once a gate closes, a later
+    // reopening must not make an old observation look current again.
+    if (asop_.claimTimeout && !nextAsop.claimTimeout) claimText_ = "not read";
+    if (asop_.shardPersisted && !nextAsop.shardPersisted) shardText_ = "not read";
+    if (lastWasAsopRead_ && last_.ok() &&
+        ((asop_.claimTimeout && !nextAsop.claimTimeout) ||
+         (asop_.shardPersisted && !nextAsop.shardPersisted))) {
+        last_ = Outcome{SCO_UNAVAILABLE, "ASOP availability changed; read again"};
+    }
+    asop_ = nextAsop;
+}
+
 sco_result Terminal::Refresh() noexcept {
     try {
-        asop_ = asopClient_.Status();
+        SyncAsopStatus();
         scosdk::PanelTree next = Build();
         if (!next) {
             buildError_ = next.Error();
@@ -127,8 +141,9 @@ sco_result Terminal::Refresh() noexcept {
     }
 }
 
-Outcome Terminal::Record(Outcome outcome) {
+Outcome Terminal::Record(Outcome outcome, bool asopRead) {
     last_ = outcome;
+    lastWasAsopRead_ = asopRead;
     (void)Refresh();
     return outcome;
 }
@@ -157,6 +172,8 @@ Outcome Terminal::CancelAtc(std::string_view atc) {
 Outcome Terminal::LastError() { return Record(client_.LastError()); }
 
 Outcome Terminal::ReadAsop() {
+    // Invalidate older observations before recording the results of this read.
+    SyncAsopStatus();
     int32_t seconds = 0;
     bool persisted = false;
     const Outcome claim = asopClient_.ClaimTimeout(seconds);
@@ -164,9 +181,9 @@ Outcome Terminal::ReadAsop() {
     claimText_ = claim.ok() ? std::to_string(seconds) + " s" : ResultName(claim.result);
     shardText_ = shard.ok() ? (persisted ? "yes" : "no") : ResultName(shard.result);
     // Both reads succeed or the first failure is the outcome; its message carries the reason.
-    if (!claim.ok()) return Record(claim);
-    if (!shard.ok()) return Record(shard);
-    return Record(Outcome{SCO_OK, claim.message + "; " + shard.message});
+    if (!claim.ok()) return Record(claim, true);
+    if (!shard.ok()) return Record(shard, true);
+    return Record(Outcome{SCO_OK, claim.message + "; " + shard.message}, true);
 }
 
 }  // namespace diegetic_asop

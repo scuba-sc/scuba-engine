@@ -156,6 +156,55 @@ void InventoryAndGameRulesTests() {
     CHECK(snapshot.ports[0].valid && snapshot.ports[0].item_class_id == 0x1234);
     CHECK(snapshot.ports[1].valid == 0);
 
+    // A caller owns the unused ports and any future extension bytes. Filling a
+    // bounded snapshot must not overwrite either, including at zero capacity.
+    struct ExtendedSnapshot {
+        sc_inventory_snapshot value;
+        unsigned char future[16];
+    };
+    ExtendedSnapshot bounded{};
+    std::memset(&bounded, 0xa5, sizeof(bounded));
+    bounded.value.size = sizeof(bounded);
+    bounded.value.count = 1;
+    const ExtendedSnapshot oneBefore = bounded;
+    CHECK(inventory->snapshot(nullptr, &bounded.value) == SCO_OK);
+    CHECK(bounded.value.size == sizeof(bounded) && bounded.value.count == 1 &&
+          bounded.value.generation == mg::GetScene().inventoryGeneration &&
+          bounded.value.flags == SC_INVENTORY_FLAG_TRUNCATED && bounded.value.total_seen == 3);
+    CHECK(bounded.value.ports[0].valid && bounded.value.ports[0].item_class_id == 0x1234);
+    CHECK(std::memcmp(&bounded.value.ports[1], &oneBefore.value.ports[1],
+                      sizeof(bounded.value.ports) - sizeof(bounded.value.ports[0])) == 0);
+    CHECK(std::memcmp(bounded.future, oneBefore.future, sizeof(bounded.future)) == 0);
+
+    std::memset(&bounded, 0xa5, sizeof(bounded));
+    bounded.value.size = sizeof(bounded.value);
+    bounded.value.count = 0;
+    const ExtendedSnapshot zeroBefore = bounded;
+    CHECK(inventory->snapshot(nullptr, &bounded.value) == SCO_OK);
+    CHECK(bounded.value.count == 0 && bounded.value.generation == mg::GetScene().inventoryGeneration &&
+          bounded.value.flags == SC_INVENTORY_FLAG_TRUNCATED && bounded.value.total_seen == 3);
+    CHECK(std::memcmp(bounded.value.ports, zeroBefore.value.ports, sizeof(bounded.value.ports)) == 0);
+    CHECK(std::memcmp(bounded.future, zeroBefore.future, sizeof(bounded.future)) == 0);
+
+    std::memset(&bounded, 0xa5, sizeof(bounded));
+    bounded.value.size = SC_INVENTORY_SNAPSHOT_SIZE_1_0;
+    bounded.value.count = 1;
+    const ExtendedSnapshot legacyBefore = bounded;
+    CHECK(inventory->snapshot(nullptr, &bounded.value) == SCO_OK && bounded.value.count == 1);
+    CHECK(std::memcmp(&bounded.value.ports[1], &legacyBefore.value.ports[1],
+                      sizeof(bounded.value.ports) - sizeof(bounded.value.ports[0])) == 0);
+    CHECK(bounded.value.flags == legacyBefore.value.flags && bounded.value.total_seen == legacyBefore.value.total_seen);
+    CHECK(std::memcmp(bounded.future, legacyBefore.future, sizeof(bounded.future)) == 0);
+
+    std::memset(&bounded, 0xa5, sizeof(bounded));
+    bounded.value.size = sizeof(bounded.value);
+    bounded.value.count = 1;
+    const ExtendedSnapshot refusedBefore = bounded;
+    mg::GetScene().inventoryAvailable = false;
+    CHECK(inventory->snapshot(nullptr, &bounded.value) == SCO_UNAVAILABLE);
+    CHECK(std::memcmp(&bounded, &refusedBefore, sizeof(bounded)) == 0);
+    mg::GetScene().inventoryAvailable = true;
+
     mg::GetScene().inventoryPorts.push_back(sc_inventory_port{ sizeof(sc_inventory_port), 0, 0, 0 });
     ++mg::GetScene().inventoryGeneration;
     snapshot.count = SC_INVENTORY_MAX_PORTS + 1;
