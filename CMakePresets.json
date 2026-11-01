@@ -1,0 +1,40 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "core-main-bf56-rehearsal",
+      "displayName": "Unpublished core main bf56 SDK rehearsal",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-core-main-bf56",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{SCUBA_DEV_SDK_ARCHIVE_DIR}",
+        "rhs": ""
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SCUBA_BUILD_ENGINE": "ON",
+        "SCUBA_BUILD_TESTS": "ON",
+        "SCUBA_WERROR": "ON",
+        "SCUBA_SDK_RELEASE_TAG": "source-bf56d2879393b2b5a603256347fc1d3cf9a1a751-unpublished",
+        "SCUBA_SDK_ARCHIVE_DIR": "$env{SCUBA_DEV_SDK_ARCHIVE_DIR}",
+        "SCUBA_SDK_HOST_SOURCE_SHA256": "d41724ce46e34fa05a3ebfebc89ec3c16e6a2996061a183281dd17bcaa7fe0a8"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "core-main-bf56-rehearsal",
+      "configurePreset": "core-main-bf56-rehearsal",
+      "jobs": 4
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "core-main-bf56-rehearsal",
+      "configurePreset": "core-main-bf56-rehearsal",
+      "output": { "outputOnFailure": true },
+      "execution": { "jobs": 1 }
+    }
+  ]
+}

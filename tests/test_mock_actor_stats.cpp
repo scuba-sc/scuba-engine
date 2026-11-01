@@ -25,9 +25,9 @@ namespace {
 void Log(const char* line) { std::puts(line); }
 
 template<class T>
-const T* Query(const char* name) {
+const T* Query(const char* name, uint32_t minVersion = 0x10000u) {
     const void* out = nullptr;
-    if (sco::host::BuildApi({ "scuba actor stats test" })->query_service(name, 0x10000u, &out) != SCO_OK || !out)
+    if (sco::host::BuildApi({ "scuba actor stats test" })->query_service(name, minVersion, &out) != SCO_OK || !out)
         throw std::runtime_error(std::string("missing table ") + name);
     return static_cast<const T*>(out);
 }
@@ -56,7 +56,6 @@ void ReadTests(const sc_actor_stats_v1* stats, uint64_t player) {
     }
     CHECK(stats->read(0, kHunger, &v) == SCO_BAD_ARG && v == 0.0f);
     CHECK(stats->read(player, 0, &v) == SCO_BAD_ARG);
-    CHECK(stats->read(player, 10, &v) == SCO_BAD_ARG);
     CHECK(stats->read(player, kHunger, nullptr) == SCO_BAD_ARG);
     CHECK(stats->read(0xdeadbeef, kHunger, &v) == SCO_NOT_FOUND);
     CHECK(stats->read(player, kHunger, &v) == SCO_OK);
@@ -67,6 +66,17 @@ void ReadTests(const sc_actor_stats_v1* stats, uint64_t player) {
     CHECK(stats->read(player, kHunger, &v) == SCO_UNAVAILABLE);
     CHECK(mg::SetCapability("game.actor_stats.read", true));
     CHECK(sc_actor_stats_read(nullptr, player, kHunger, &v) == SCO_UNAVAILABLE);
+}
+
+void ExtendedReadTests(const sc_actor_stats_v1* stats, uint64_t player) {
+    float v = -1.0f;
+    for (uint32_t s = SC_ACTOR_STAT_LAST_1_0 + 1; s <= SC_ACTOR_STAT_LAST_1_1; ++s) {
+        CHECK(stats->read(player, s, &v) == SCO_OK && v == 0.0f);
+    }
+    CHECK(stats->read(player, SC_ACTOR_STAT_LAST_1_1 + 1, &v) == SCO_BAD_ARG);
+    mg::ActorStats().missing[SC_ACTOR_STAT_HYGIENE - 1] = true;
+    CHECK(stats->read(player, SC_ACTOR_STAT_HYGIENE, &v) == SCO_NOT_FOUND);
+    mg::ActorStats().missing[SC_ACTOR_STAT_HYGIENE - 1] = false;
 }
 
 void WriteTests(const sc_actor_stats_write_v1* w, const sc_actor_stats_v1* stats, sco_plugin* self, uint64_t player) {
@@ -87,6 +97,21 @@ void WriteTests(const sc_actor_stats_write_v1* w, const sc_actor_stats_v1* stats
     CHECK(w->adjust(self, player, kHunger, 5.0f, &after) == SCO_UNAVAILABLE);
     CHECK(stats->read(player, kHunger, &now) == SCO_OK && now == 20.0f);
     mg::ActorStats().offlineAdmission = true;
+
+    // The 1.1 read-only IDs are never accepted by the 1.0 write table, even when
+    // capability, admission and synthetic authority would permit a 1.0 write.
+    for (uint32_t s = SC_ACTOR_STAT_LAST_1_0 + 1; s <= SC_ACTOR_STAT_LAST_1_1; ++s) {
+        mg::ActorStats().mode[s - 1] = SC_ACTOR_STAT_WRITE_AUTHORITATIVE;
+        float before = -1.0f;
+        CHECK(stats->read(player, s, &before) == SCO_OK);
+        after = -1.0f;
+        CHECK(w->adjust(self, player, s, 1.0f, &after) == SCO_BAD_ARG && after == 0.0f);
+        after = -1.0f;
+        CHECK(w->set(self, player, s, 1.0f, &after) == SCO_BAD_ARG && after == 0.0f);
+        mode = 99;
+        CHECK(w->mode(self, player, s, &mode) == SCO_BAD_ARG && mode == SC_ACTOR_STAT_WRITE_DISCARDED);
+        CHECK(stats->read(player, s, &now) == SCO_OK && now == before);
+    }
 
     // A fresh read-back value is returned after the write, and matches a read.
     CHECK(w->adjust(self, player, kHunger, 5.0f, &after) == SCO_OK && after == 25.0f);
@@ -214,15 +239,17 @@ int main(int argc, char** argv) {
             if (s.name == "game.actor_stats" || s.name == "game.actor_stats_write") published = s.published;
         CHECK(published);
         const auto* stats = Query<sc_actor_stats_v1>(SC_ACTOR_STATS_NAME);
+        const auto* stats11 = Query<sc_actor_stats_v1>(SC_ACTOR_STATS_NAME, SC_ACTOR_STATS_VERSION_1_1);
         const auto* writer = Query<sc_actor_stats_write_v1>(SC_ACTOR_STATS_WRITE_NAME);
         const uint64_t player = mg::GetScene().player;
         CHECK(player != 0);
         ReadTests(stats, player);
+        ExtendedReadTests(stats11, player);
         DriftTests(stats, player);
         mg::ResetAll();
         ProbeTests("actor_stats_probe", player);
         mg::ResetAll();
-        WriteTests(writer, stats, const_cast<sco_plugin*>(probe->self), player);
+        WriteTests(writer, stats11, const_cast<sco_plugin*>(probe->self), player);
         // "game_pack" profile: the read capability follows the documented default, the write one stays off.
         CHECK(mg::ApplyProfile("game_pack"));
         CHECK(sco::caps::Has("game.actor_stats.read") && !sco::caps::Has("game.actor_stats.write"));

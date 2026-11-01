@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "source_sha": "bf56d2879393b2b5a603256347fc1d3cf9a1a751",
+  "catalogue_sha256": "66362fa7d207d586e43136d61418d18d80daea4ae7a187d8eead06800528ed49",
+  "items": [
+    {
+      "id": "sco-plugin-query",
+      "language": "c"
+    },
+    {
+      "id": "sco-plugin-load",
+      "language": "c"
+    },
+    {
+      "id": "sco-plugin-unload",
+      "language": "c"
+    },
+    {
+      "id": "sco-api-query-service",
+      "language": "c"
+    },
+    {
+      "id": "sco-api-has",
+      "language": "c"
+    },
+    {
+      "id": "sco-api-register-command",
+      "language": "c"
+    },
+    {
+      "id": "sc-asop-v1-claim-timeout",
+      "language": "c"
+    },
+    {
+      "id": "sc-asop-v1-shard-persisted",
+      "language": "c"
+    },
+    {
+      "id": "sc-asop-v1-last-error",
+      "language": "c"
+    },
+    {
+      "id": "sc-hangar-v1-lift-request",
+      "language": "c"
+    },
+    {
+      "id": "sc-hangar-v1-atc-cancel-request",
+      "language": "c"
+    },
+    {
+      "id": "sc-economy-v1-balance",
+      "language": "c"
+    },
+    {
+      "id": "sc-economy-v1-apply",
+      "language": "c"
+    },
+    {
+      "id": "sc-loadout-v1-apply",
+      "language": "c"
+    },
+    {
+      "id": "sc-prefabs-v1-spawn",
+      "language": "c"
+    },
+    {
+      "id": "sc-game-spatial-v1-pose-to-zone",
+      "language": "c"
+    },
+    {
+      "id": "sco-net-v1-register-channel",
+      "language": "c"
+    },
+    {
+      "id": "sco-net-v1-send-channel",
+      "language": "c"
+    },
+    {
+      "id": "sco-storage-v1-query",
+      "language": "c"
+    },
+    {
+      "id": "sco-storage-v1-step",
+      "language": "c"
+    },
+    {
+      "id": "sco-storage-v1-column",
+      "language": "c"
+    },
+    {
+      "id": "sco-storage-v1-close",
+      "language": "c"
+    },
+    {
+      "id": "sco-storage-v1-put",
+      "language": "c"
+    },
+    {
+      "id": "sco-widgets-v1-set-panel",
+      "language": "c"
+    }
+  ]
+}
