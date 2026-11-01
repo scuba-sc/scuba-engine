@@ -47,6 +47,9 @@ public:
 
     Status Start(const ScoHostOptions& options);
     void Tick();
+    // In the checked-lifecycle candidate profile, failure is fail-stop because
+    // this legacy void API cannot return whether backing must be retained. Use
+    // StopChecked() when the caller can handle that result explicitly.
     void Stop();
 #ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
     // True only when checked core retirement completed; a false result leaves

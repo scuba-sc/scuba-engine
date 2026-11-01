@@ -75,7 +75,7 @@ void ScoHost::Tick() {
 
 void ScoHost::Stop() {
 #ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
-    (void)StopChecked();
+    if (!StopChecked()) std::_Exit(EXIT_FAILURE);
 #else
     if (!started_) return;
     TheKernel().Stop();

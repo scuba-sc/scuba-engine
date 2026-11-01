@@ -225,6 +225,43 @@ if(SCUBA_CORE_LIFECYCLE_CANDIDATE)
     add_test(NAME kernel_lifecycle_${case} COMMAND test_kernel_lifecycle ${case})
     set_tests_properties(kernel_lifecycle_${case} PROPERTIES TIMEOUT 60)
   endforeach()
+
+  add_executable(test_net_sim_clean_peer net_sim_clean_peer.cpp)
+  scuba_warnings(test_net_sim_clean_peer)
+  add_executable(test_hostd_peer_shutdown
+    test_hostd_peer_shutdown.cpp
+    ../src/hostd/kernel.cpp
+    ../src/hostd/shutdown.cpp)
+  target_include_directories(test_hostd_peer_shutdown PRIVATE "${PROJECT_SOURCE_DIR}/src")
+  target_link_libraries(test_hostd_peer_shutdown PRIVATE scuba_mock_game sco_lua_game scuba_net_sim)
+  target_compile_definitions(test_hostd_peer_shutdown PRIVATE SCUBA_VERSION="${PROJECT_VERSION}"
+    SCUBA_CORE_LIFECYCLE_CANDIDATE SCUBA_KERNEL_TESTING)
+  scuba_warnings(test_hostd_peer_shutdown)
+  add_test(NAME hostd_peer_shutdown_order
+    COMMAND test_hostd_peer_shutdown $<TARGET_FILE:test_net_sim_clean_peer>)
+  set_tests_properties(hostd_peer_shutdown_order PROPERTIES TIMEOUT 30)
+
+  # Exercise the public void wrapper in a fresh process. The child exits
+  # immediately after Stop() returns so its destructor cannot mask a wrapper
+  # that incorrectly discards the checked shutdown result.
+  add_executable(test_sco_host_stop_contract
+    test_sco_host_stop_contract.cpp
+    ../engine/src/sco/sco_host.cpp
+    ../src/hostd/kernel.cpp)
+  target_include_directories(test_sco_host_stop_contract PRIVATE
+    "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/engine/src")
+  target_link_libraries(test_sco_host_stop_contract PRIVATE
+    scuba_engine_core scuba_mock_game sco_lua_game sco_widgets)
+  target_compile_definitions(test_sco_host_stop_contract PRIVATE
+    SCUBA_VERSION="${PROJECT_VERSION}" SCUBA_SDK_VERSION_STRING="${SCUBA_SDK_VERSION}"
+    SCUBA_CORE_LIFECYCLE_CANDIDATE SCUBA_KERNEL_TESTING)
+  scuba_warnings(test_sco_host_stop_contract)
+  add_test(NAME sco_host_void_stop_fail_stops
+    COMMAND "${CMAKE_COMMAND}"
+      "-DTEST_EXECUTABLE=$<TARGET_FILE:test_sco_host_stop_contract>"
+      "-DMARKER=${CMAKE_CURRENT_BINARY_DIR}/sco-host-stop-setup-complete"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_sco_host_stop_fail_stops.cmake")
+  set_tests_properties(sco_host_void_stop_fail_stops PROPERTIES TIMEOUT 30)
 endif()
 
 # Product distribution export: the tree --product accepts again, and every refusal that keeps a

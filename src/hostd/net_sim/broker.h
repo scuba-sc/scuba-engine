@@ -2,6 +2,7 @@
 #include "hostd/handlers.h"
 #include "hostd/net_sim/process.h"
 #include <map>
+#include <memory>
 
 namespace scuba::hostd::net_sim {
 class Broker {
@@ -25,5 +26,6 @@ private:
     std::map<uint32_t, std::unique_ptr<Process>> peers_;
     void Spawn(uint32_t slot);
 };
-void RegisterNetSim(Registry& registry, Broadcaster& broadcaster, const std::filesystem::path& executable);
+std::shared_ptr<Broker> RegisterNetSim(Registry& registry, Broadcaster& broadcaster,
+                                      const std::filesystem::path& executable);
 } // namespace scuba::hostd::net_sim

@@ -202,6 +202,7 @@ add_executable(scuba-hostd
   src/hostd/plugins_handlers.cpp
   src/hostd/widgets_bridge.cpp
   src/hostd/widgets_handlers.cpp
+  src/hostd/shutdown.cpp
   src/hostd/net_sim/peer.cpp
   src/hostd/net_sim/probe_plugin.cpp)
 # sco_app is the host kit; it links the kernel libraries transitively (sco_host, sco_runtime,

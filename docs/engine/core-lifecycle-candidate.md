@@ -44,13 +44,15 @@ fail-stop; a failed stop retains the process root.
 
 The hostd entrypoint and engine editor keep their owning callback and UI stacks alive while
 attempting checked stop. On a retained or uncertain result, they terminate the process before
-those stacks are destroyed. Normal teardown stops and joins the independent NetSandbox worker
-first. Each peer closes its input stream, runs core Stop on its game thread, and exits; the parent
+those stacks are destroyed. Hostd explicitly stops and reaps the NetSandbox broker before core
+shutdown; the editor stops and joins its independent NetSandbox worker before destroying UI
+owners. Each peer closes its input stream, runs core Stop on its game thread, and exits; the parent
 records the actual child exit status and waits for process termination before removing peer data.
 Forced termination or a nonzero child exit is reported as an unclean stop, but the parent has
-confirmed the child is gone before returning. Failed temporary-directory removal leaves the path
-recorded in the live broker so its destructor can make one final cleanup attempt. A failed staged
-plugin-snapshot removal is retained by the process root and is not retried before process exit.
+confirmed the child is gone before returning. A failed temporary-directory removal gets one
+cleanup retry before core stop; if it still fails, the path can remain on disk after process exit.
+A failed staged plugin-snapshot removal is retained by the process root and is not retried before
+process exit.
 The released RC2 profile still has a void core stop API; its child exit status proves process exit,
 not a checked core-stop result. Only the candidate profile exercises result-returning shutdown.
 

@@ -148,7 +148,8 @@ Json Broker::Peer(uint32_t slot, Json request) {
     return found->second->Call(std::move(request));
 }
 
-void RegisterNetSim(Registry& registry, Broadcaster& broadcaster, const std::filesystem::path& executable) {
+std::shared_ptr<Broker> RegisterNetSim(Registry& registry, Broadcaster& broadcaster,
+                                      const std::filesystem::path& executable) {
     auto broker = std::make_shared<Broker>(executable);
     const auto publish = [broker, &broadcaster] {
         Json result = broker->Snapshot();
@@ -201,5 +202,6 @@ void RegisterNetSim(Registry& registry, Broadcaster& broadcaster, const std::fil
         request.set("method", "input");
         broker->Peer(slot, std::move(request)); return publish();
     });
+    return broker;
 }
 } // namespace scuba::hostd::net_sim
