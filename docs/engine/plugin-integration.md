@@ -113,9 +113,10 @@ The profile calls only `multiplayer.status`, verifies `multiplayer.session` is o
 and leaves all game service providers unpublished. It never invokes Host, Join, or movement.
 The standard engine CTest does not depend on the separately built sc-mp module.
 
-The MCP widget snapshot now exposes the SDK's stable 1.2 `tag` and reports that feature in its
-capabilities. Numeric presentation remains outside this snapshot contract. Native SDK widget
-tests still verify callback dispatch and reject invalid panel events.
+The MCP widget snapshot exposes the SDK's stable 1.2 `tag`. It also carries 1.3 numeric
+`presentation` and advertises that feature when both the SDK declaration and host snapshot field
+are available. Consumers treat an absent presentation field as NUMBER. Native SDK widget tests
+still verify callback dispatch and reject invalid panel events.
 
 ### Shared-service readiness reconciled with sco-core
 

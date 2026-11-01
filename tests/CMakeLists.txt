@@ -28,6 +28,12 @@ set_tests_properties(e2e_hostd_ping PROPERTIES TIMEOUT 60)
 
 # sco.widgets bridge: the kit's own widget examples, built with their shipped CMakeLists, loaded
 # into scuba-hostd headless and driven over the WebSocket.
+add_executable(test_widgets_bridge test_widgets_bridge.cpp ../src/hostd/widgets_bridge.cpp)
+target_link_libraries(test_widgets_bridge PRIVATE scuba_bridge sco_widgets)
+scuba_warnings(test_widgets_bridge)
+add_test(NAME widgets_bridge COMMAND test_widgets_bridge)
+set_tests_properties(widgets_bridge PROPERTIES TIMEOUT 30)
+
 set(widget_plugins_out "${CMAKE_CURRENT_BINARY_DIR}/widget_plugins")
 set(widget_plugins_args -DSDK_DIR=${SCUBA_SDK_SOURCE_DIR} -DOUT=${widget_plugins_out} "-DGENERATOR=${CMAKE_GENERATOR}")
 if(CMAKE_GENERATOR_PLATFORM)
