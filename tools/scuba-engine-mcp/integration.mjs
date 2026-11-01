@@ -107,6 +107,9 @@ try {
   const scene = await call('mock_get_state');
   assert(Array.isArray(scene.entities));
   assert((await call('mock_list_services')).some(s => s.name === 'game.actors' && s.published));
+  const missingPos = await request('tools/call', { name: 'mock_spawn_entity', arguments: { class: 'No_Position', zone: 4 } });
+  assert.equal(missingPos.result.isError, true);
+  assert.match(missingPos.result.content[0].text, /arguments\.pos: required/);
   const spawned = await call('mock_spawn_entity', { class: "Mcp_Integration_Actor", zone: 4, pos: [1, 2, 3], actor: true });
   assert(Number.isSafeInteger(spawned.id) && spawned.id > 0);
   assert((await adminCall('mock_game.state')).entities.some(e => e.id === spawned.id && e.class === 'Mcp_Integration_Actor'));

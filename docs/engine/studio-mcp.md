@@ -21,7 +21,7 @@ tooling parity over the out-of-game sandbox and studio runtime.
 | `mock_set_service` | `service: string, published: bool` | Dynamically publish or withdraw mock service | `mock_game.services.set` |
 | `mock_get_state` | none | Read synthetic scene state (entities, player, camera) | `mock_game.state` |
 | `mock_list_services` | none | List mock services and published flags | `mock_game.services.list` |
-| `mock_spawn_entity` | `class: string, zone: int, pos?: [x,y,z], actor?: bool` | Spawn synthetic entity; returns `id` | `mock_game.entity.spawn` |
+| `mock_spawn_entity` | `class: string, zone: int, pos: [x,y,z], actor?: bool` | Spawn synthetic entity; returns `id` | `mock_game.entity.spawn` |
 | `mock_move_entity` | `id: int, zone?: int, pos: [x,y,z]` | Move a synthetic entity | `mock_game.entity.move` |
 | `mock_remove_entity` | `id: int` | Remove a synthetic entity (never the player) | `mock_game.entity.remove` |
 | `mock_move_player` | `pos: [x,y,z], zone?: int, rot?: [x,y,z,w], camera?: bool` | Move the synthetic player | `mock_game.player.move` |
