@@ -7,17 +7,18 @@ retires the session. This is an incremental consumer slice toward the core
 roadmap's milestone 2, products and studio on the SDK. It uses the held core
 host-source contract, not the released plugin SDK ABI.
 
-The candidate is pinned to core `0bac7b79729671d3a98a6adb27c2f3e7fd061605`,
-bootstrap 3, mock table 5, graph 1. Its host-source archive has 982 members and
-SHA-256 `54f685c623e2bbb4a8e9d9db5ee07456050ec10043bef1355b91878a257e4502`.
-Build from engine source based on main `f005372bd74967e53fdb8ed4cf3f4707ab3b20fa`:
+This local rehearsal uses held core #315 source
+`e4ba511c5be0f1f901e1ca958a1fd28839e30fdc`, bootstrap 3, mock table 5,
+graph 1. Its host-source archive has 985 members and SHA-256
+`090c27a051b25df6b78a620b9d84de64325a96bbd77a852f650b3efe25e5660b`.
+Build from engine source based on main `b569c3d5f9e5598d2c1071124d1cc68a21fdac0a`:
 
 ```sh
 cmake -S . -B build-curated -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DSCUBA_RESERVED_MOCK_HOST_ONLY=ON \
-  -DSCUBA_RESERVED_CORE_COMMIT=0bac7b79729671d3a98a6adb27c2f3e7fd061605 \
-  -DSCUBA_SDK_ARCHIVE_DIR=/workspace/engine-rc3-kit-0bac7b \
-  -DSCUBA_SDK_HOST_SOURCE_SHA256=54f685c623e2bbb4a8e9d9db5ee07456050ec10043bef1355b91878a257e4502
+  -DSCUBA_RESERVED_CORE_COMMIT=e4ba511c5be0f1f901e1ca958a1fd28839e30fdc \
+  -DSCUBA_SDK_ARCHIVE_DIR=/workspace/engine-core-kit-e4ba \
+  -DSCUBA_SDK_HOST_SOURCE_SHA256=090c27a051b25df6b78a620b9d84de64325a96bbd77a852f650b3efe25e5660b
 cmake --build build-curated
 ctest --test-dir build-curated --output-on-failure --output-junit ctest.xml
 ```
@@ -100,3 +101,12 @@ startup, which reserved sessions deliberately refuse; it is not migrated by this
 candidate. Native/PAK/game activation remains unavailable pending product-owned
 reader and instruction exclusion proof. No gameplay or visual acceptance is
 established here. No core implementation is changed by this consumer.
+
+The held `e4ba511` input was exercised locally on Linux; the earlier hosted
+Windows result for `0bac7b` does not qualify this new source and archive.
+The Linux Release build passed 9/9 tests, including its binary-composition
+audit. ASan/UBSan passed the eight runtime tests with leak detection enabled;
+the sanitizer-instrumented binary failed the unchanged composition audit because
+the Clang sanitizer runtime adds `libresolv`. The audit was not waived.
+Hostd's legacy startup, its peer process and editor ownership remain separate
+adoption work. This rehearsal does not qualify them to use core #315.

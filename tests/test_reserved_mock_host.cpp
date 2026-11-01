@@ -61,9 +61,18 @@ void Normal() {
     Require(Result(Call(registry, R"({"id":13,"method":"mock.entity_put","params":{"id":"9007199254740993","zone":1,"position":[1,2,3],"flags":0,"name":"Diver"}})")).find("name")->as_string() == "Diver", "entity reinserted");
     auto* table = ReservedMockHostTestAccess::Table(host);
     Require(table != nullptr && host.Close() == sco::Result::Ok, "close");
-    MockEntity sentinel{}; sentinel.id = 77; std::memcpy(sentinel.name, "unchanged", 10);
+    MockEntity sentinel{};
+    sentinel.id = 77; sentinel.zone = 88; sentinel.flags = 0x91u;
+    sentinel.position[0] = 1.25; sentinel.position[1] = -2.5; sentinel.position[2] = 9.75;
+    std::memset(sentinel.name, 'x', sizeof(sentinel.name));
+    std::memcpy(sentinel.name, "unchanged", 10);
+    const MockEntity expected = sentinel;
     Require(table->get_entity(table->context, 9007199254740993ULL, &sentinel) == sco::Result::Unavailable &&
-            sentinel.id == 77 && std::strcmp(sentinel.name, "unchanged") == 0, "cached table refusal leaves output unchanged");
+            sentinel.id == expected.id && sentinel.zone == expected.zone && sentinel.flags == expected.flags &&
+            sentinel.position[0] == expected.position[0] && sentinel.position[1] == expected.position[1] &&
+            sentinel.position[2] == expected.position[2] &&
+            std::memcmp(sentinel.name, expected.name, sizeof(sentinel.name)) == 0,
+            "cached table refusal leaves every output field unchanged");
     int64_t value = -9; uint64_t ticks = 55;
     Require(table->snapshot(table->context, &value, &ticks) == sco::Result::Unavailable && value == -9 && ticks == 55,
             "closed scalar outputs unchanged");
