@@ -14,8 +14,9 @@ from pathlib import Path
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: package_dev_sdk.py CORE_CHECKOUT OUTPUT_DIR")
+    if len(sys.argv) not in (3, 4) or (len(sys.argv) == 4 and sys.argv[3] not in ("host-source-sc", "legacy")):
+        raise SystemExit("usage: package_dev_sdk.py CORE_CHECKOUT OUTPUT_DIR [host-source-sc|legacy]")
+    profile = sys.argv[3] if len(sys.argv) == 4 else "host-source-sc"
     root = Path(sys.argv[1]).resolve()
     output = str(Path(sys.argv[2]).resolve())
     listing = subprocess.check_output(["git", "-C", str(root), "ls-files", "--stage", "-z"])
@@ -40,7 +41,7 @@ def main() -> None:
 
     os.access = index_access
     package = root / "sdk" / "package.py"
-    sys.argv = [str(package), "--profile", "host-source-sc", "--out", output]
+    sys.argv = [str(package), "--profile", profile, "--out", output]
     runpy.run_path(str(package), run_name="__main__")
 
 
