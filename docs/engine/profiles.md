@@ -17,7 +17,9 @@ SDK resolves dependencies and loads data, Lua, and native plugins in its normal 
 disabled, invalid, refused, or failed selected plugin makes startup fail. `--no-lua` still refuses
 Lua plugins. The mock initializer is a built-in and is always loaded. A selected plugin may
 already have run before another selected plugin is refused: hostd then stops the kit and unloads
-loaded plugins, but cannot undo their external side effects. Plugin code is trusted local code;
+loaded plugins when checked stop confirms cleanup, but cannot undo their external side effects.
+The opt-in checked lifecycle profile exits before stack teardown if the core retains dependencies;
+see [the candidate lifecycle contract](core-lifecycle-candidate.md). Plugin code is trusted local code;
 this is not an OS security sandbox.
 
 `mocks` currently accepts `game.events`. `services` accepts names listed by

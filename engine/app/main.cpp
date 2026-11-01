@@ -225,6 +225,16 @@ struct Editor {
     std::vector<asset::ModelHandle> requested;
     bool frameOnLoad = true;
 
+    ~Editor() {
+        if (netSandbox && !netSandbox->Shutdown())
+        std::fprintf(stderr, "scuba-engine: network sandbox peer exited uncleanly; child termination was confirmed\n");
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+        if (!sco.StopChecked()) std::_Exit(EXIT_FAILURE);
+#else
+        sco.Stop();
+#endif
+    }
+
     // panels
     bool showContent = true, showMounts = true, showScene = true, showInspector = true, showPlugins = true,
          showLoader = true, showLog = true, showStats = true, showScenario = false, showProduct = false,
@@ -852,6 +862,9 @@ int Run(const Args& args) {
     so.productRoot = args.product;
     so.dataRoot = data;
     if (auto r = ed.sco.Start(so); !r) {
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+        if (ed.sco.retained()) std::_Exit(EXIT_FAILURE);
+#endif
         // A product profile is fail-closed: a refused plugin or an unusable root stops the editor.
         if (!args.product.empty()) { log::Error("sco", r.error); return 1; }
         log::Warn("sco", r.error);   // the editor still runs without plugins
@@ -1062,12 +1075,20 @@ int Run(const Args& args) {
         std::fprintf(stderr, "scuba-engine: %d frame(s), %zu instance(s), %d error(s) -> exit %d\n", frame, ed.scene.size(), gErrors.load(), code);
     }
 
+    if (ed.netSandbox && !ed.netSandbox->Shutdown())
+        log::Warn("netsandbox", "a peer did not exit cleanly; child termination was confirmed");
+    ed.netSandbox.reset();
+    // Checked core shutdown runs while the host stack, UI, renderer and staged
+    // plugin files still exist. A retained result terminates before teardown.
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    if (!ed.sco.StopChecked()) std::_Exit(EXIT_FAILURE);
+#else
+    ed.sco.Stop();
+#endif
     ed.renderer->Flush();
     ed.renderer->ReleasePanel(panel);
-    ed.netSandbox.reset();
     ed.surface.reset();
     ed.ui.Shutdown();
-    ed.sco.Stop();
     ed.loader.reset();   // before the job pool
     ed.renderer.reset();
     log::SetSink(nullptr);

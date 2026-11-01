@@ -5,8 +5,8 @@ There is no game image, signature scan, proprietary fixture, engine call, or
 network session behind these tables. Nothing here has been run in Star Citizen.
 Use `--no-mock-game` to omit the synthetic provider.
 
-The pinned host-source kit is SDK 2.4.0 release candidate 2
-(`sdk-v2.4.0-rc.2`). The inventory below describes registered synthetic tables,
+The pinned host-source kit is the published SDK 2.4.0 release
+(`sdk-v2.4.0`, source commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`). The inventory below describes registered synthetic tables,
 not real game adapters. Publication can fail or be switched off individually;
 query `mock_game.services.list` for the actual publication state. Actor-stat
 tables are compiled and registered only when the kit supplies their headers.
@@ -253,6 +253,7 @@ not implement player physics/ammunition consumption. Private-session state
 does not authenticate peers. Mining counters and quantum progression are
 tick-count driven. These are deterministic test doubles, not game adapters.
 
-Linux GCC and Windows MSVC have not been run locally; their first compilation
-is the repository's future CI. The new implementation uses standard C++20 and
-the portable kit/bridge API, with no new platform-specific system calls.
+Linux GCC and Windows MSVC are validated separately in hosted CI. The
+implementation uses standard C++20 and the portable kit/bridge API, with no new
+platform-specific system calls. These builds validate synthetic mock behavior,
+not game-native providers or gameplay.

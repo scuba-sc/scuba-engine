@@ -47,7 +47,16 @@ public:
 
     Status Start(const ScoHostOptions& options);
     void Tick();
+    // In the checked-lifecycle candidate profile, failure is fail-stop because
+    // this legacy void API cannot return whether backing must be retained. Use
+    // StopChecked() when the caller can handle that result explicitly.
     void Stop();
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    // True only when checked core retirement completed; a false result leaves
+    // the host and its dependencies rooted for process exit.
+    bool StopChecked();
+    bool retained() const noexcept { return retained_; }
+#endif
     bool started() const noexcept { return started_; }
     // Why the last Start failed, when the kernel could name a reason (a refused product plugin,
     // a missing data/plugins root); empty otherwise.
@@ -63,6 +72,9 @@ public:
 
 private:
     bool started_ = false;
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    bool retained_ = false;
+#endif
     std::string profileError_;
     std::chrono::steady_clock::time_point start_{};
 };

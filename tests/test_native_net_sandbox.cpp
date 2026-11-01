@@ -87,5 +87,11 @@ int main(int argc, char** argv) {
     CHECK(missing.WaitIdle(5s));
     CHECK(missing.Read().error.empty());
     CHECK(!missing.Read().stale);
+    NetSandbox shutdown(argv[1]);
+    CHECK(shutdown.Start(2, "", false));
+    CHECK(shutdown.WaitIdle(60s));
+    CHECK(shutdown.Read().peers.size() == 2);
+    CHECK(shutdown.Shutdown());
+    CHECK(!shutdown.Start(2, "", false));
     return CheckExit("native_net_sandbox");
 }

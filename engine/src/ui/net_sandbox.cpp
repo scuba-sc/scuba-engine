@@ -56,7 +56,10 @@ struct NetSandbox::Impl {
     mutable std::mutex mutex;
     std::condition_variable wake;
     State state;
+    std::mutex shutdownMutex;
     bool exit = false;
+    bool shutdownComplete = false;
+    bool shutdownClean = false;
     Action action = Action::Refresh;
     uint32_t slot = 0, count = 0;
     std::string root;
@@ -72,7 +75,15 @@ struct NetSandbox::Impl {
         std::unique_lock lock(mutex);
         for (;;) {
             wake.wait(lock, [this] { return exit || state.busy; });
-            if (exit) break;
+            if (exit) {
+                lock.unlock();
+                const bool clean = broker.Stop();
+                lock.lock();
+                shutdownClean = clean;
+                shutdownComplete = true;
+                wake.notify_all();
+                break;
+            }
             const auto a = action;
             const auto s = slot, n = count;
             auto r = root;
@@ -84,7 +95,9 @@ struct NetSandbox::Impl {
                 Json result;
                 switch (a) {
                 case Action::Start: result = broker.Start(n, std::move(r), useSample); break;
-                case Action::Stop: broker.Stop(); result = broker.Snapshot(); break;
+                case Action::Stop:
+                    if (!broker.Stop()) throw std::runtime_error("peer did not exit cleanly; child processes have exited and the session is terminal");
+                    result = broker.Snapshot(); break;
                 case Action::Join: result = broker.Join(s); break;
                 case Action::Leave: result = broker.Leave(s); break;
                 case Action::Send: {
@@ -106,11 +119,18 @@ struct NetSandbox::Impl {
         }
         // Broker destruction and process cleanup stay on the same worker.
     }) {}
-    ~Impl() {
+    bool Shutdown() {
+        std::lock_guard shutdownLock(shutdownMutex);
         { std::lock_guard lock(mutex); exit = true; }
         wake.notify_all();
-        worker.join();
+        if (worker.joinable()) {
+            if (worker.get_id() == std::this_thread::get_id()) return false;
+            worker.join();
+        }
+        std::lock_guard lock(mutex);
+        return shutdownComplete && shutdownClean;
     }
+    ~Impl() { (void)Shutdown(); }
     bool Submit(Action a, uint32_t s = 0, uint32_t n = 0, std::string r = "", bool useSample = true) {
         std::lock_guard lock(mutex);
         if (state.busy || exit) return false;
@@ -127,7 +147,7 @@ struct NetSandbox::Impl {
     }
 };
 NetSandbox::NetSandbox(std::filesystem::path executable) : impl_(std::make_unique<Impl>(std::move(executable))) {}
-NetSandbox::~NetSandbox() = default;
+NetSandbox::~NetSandbox() { (void)Shutdown(); }
 NetSandbox::State NetSandbox::Read() const { std::lock_guard lock(impl_->mutex); return impl_->state; }
 bool NetSandbox::WaitIdle(std::chrono::milliseconds timeout) {
     std::unique_lock lock(impl_->mutex);
@@ -138,6 +158,7 @@ bool NetSandbox::Start(uint32_t count, std::string root, bool sample) {
     return impl_->Submit(Impl::Action::Start, 0, count, std::move(root), sample);
 }
 bool NetSandbox::Stop() { return impl_->Submit(Impl::Action::Stop); }
+bool NetSandbox::Shutdown() { return !impl_ || impl_->Shutdown(); }
 bool NetSandbox::Refresh() { return impl_->Submit(Impl::Action::Refresh); }
 bool NetSandbox::Join(uint32_t slot) { return slot >= 2 && slot <= 8 && impl_->Submit(Impl::Action::Join, slot); }
 bool NetSandbox::Leave(uint32_t slot) { return slot >= 2 && slot <= 8 && impl_->Submit(Impl::Action::Leave, slot); }

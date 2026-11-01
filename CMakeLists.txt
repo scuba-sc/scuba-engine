@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 project(scuba_engine VERSION 0.1.0 LANGUAGES C CXX)
 
-#   cmake -S . -B build [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0-rc.2 assets>]
+#   cmake -S . -B build [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0 assets>]
 #   cmake --build build && ctest --test-dir build --output-on-failure
 # Multi-config generators (Visual Studio): add --config <cfg> to the build and -C <cfg> to ctest.
 
@@ -24,8 +24,16 @@ option(SCUBA_WERROR "Treat warnings in scuba-engine's own code as errors" ON)
 option(SCUBA_BUILD_ENGINE "Build the native engine: core, VFS and assets everywhere; the scuba-engine app on Windows" ON)
 option(SCUBA_TEST_PLUGIN_SDK_CONSUMER
   "Register the published plugin-SDK-only configure, build, and checker CTest" OFF)
+option(SCUBA_CORE_LIFECYCLE_CANDIDATE
+  "Use checked sco-core startup and shutdown results for the pinned SDK" ON)
+option(SCUBA_ALLOW_UNCHECKED_DEV_REHEARSAL
+  "Allow the exact local bf56 development SDK to use its unchecked lifecycle API" OFF)
+set(SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT "6106fa3639cbcc28f78a1ded8de2707de019f4d3" CACHE STRING
+  "Exact sco-core source commit expected by the checked lifecycle profile")
+set(SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256 "a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c" CACHE STRING
+  "Exact host-source archive SHA-256 expected by the checked lifecycle profile")
 set(SCUBA_PLUGIN_SDK_ARCHIVE_PATH "" CACHE FILEPATH
-  "Optional local sco-sdk-2.4.0.zip for the plugin-SDK-only CTest (otherwise it downloads the pinned RC2 asset)")
+  "Optional local sco-sdk-2.4.0.zip for the plugin-SDK-only CTest (otherwise it downloads the pinned release asset)")
 
 find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -45,6 +53,53 @@ if(SCUBA_BUILD_ENGINE)
   set(SCO_WIDGETS_IMGUI_INCLUDE_DIR "${SCUBA_IMGUI_DIR}" CACHE PATH "" FORCE)
 endif()
 include(cmake/ScubaSdk.cmake)
+if(NOT SCUBA_CORE_LIFECYCLE_CANDIDATE)
+  if(SCUBA_ALLOW_UNCHECKED_DEV_REHEARSAL)
+    if(NOT "${SCUBA_SDK_RELEASE_TAG}" STREQUAL
+           "source-bf56d2879393b2b5a603256347fc1d3cf9a1a751-unpublished" OR
+       NOT "${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}" STREQUAL
+           "bf56d2879393b2b5a603256347fc1d3cf9a1a751" OR
+       NOT "${SCUBA_SDK_HOST_SOURCE_SHA256}" STREQUAL
+           "d41724ce46e34fa05a3ebfebc89ec3c16e6a2996061a183281dd17bcaa7fe0a8" OR
+       "${SCUBA_SDK_ARCHIVE_DIR}" STREQUAL "")
+      message(FATAL_ERROR
+        "Unchecked development rehearsal requires the exact local bf56 SDK archive, tag and explicit opt-in")
+    endif()
+  elseif(NOT "${SCUBA_SDK_RELEASE_TAG}" STREQUAL "sdk-v2.4.0-rc.2" OR
+         NOT "${SCUBA_SDK_HOST_SOURCE_SHA256}" STREQUAL
+             "3d711463f7dff3dcd372ffb70b09951ecf21f1d0e2c5f0a899cccbb9977b8201")
+    message(FATAL_ERROR
+      "Unchecked lifecycle profile is restricted to the exact sdk-v2.4.0-rc.2 archive; the stable SDK requires checked lifecycle")
+  endif()
+endif()
+if(SCUBA_CORE_LIFECYCLE_CANDIDATE)
+  string(LENGTH "${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}" _scuba_core_commit_length)
+  string(LENGTH "${SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256}" _scuba_core_hash_length)
+  if(NOT _scuba_core_commit_length EQUAL 40 OR
+     NOT SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT MATCHES "^[0-9a-f]+$" OR
+     NOT _scuba_core_hash_length EQUAL 64 OR
+     NOT SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256 MATCHES "^[0-9a-f]+$" OR
+     NOT SCUBA_SDK_HOST_SOURCE_SHA256 STREQUAL SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256)
+    message(FATAL_ERROR
+      "Checked-lifecycle profile needs the exact source commit and matching host-source SHA256")
+  endif()
+  execute_process(COMMAND "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/tools/curated_mock_host/verify_archive.py"
+    "${_scuba_sdk_zip}"
+    "${SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256}" "${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}"
+    COMMAND_ERROR_IS_FATAL ANY)
+  include(CheckCXXSourceCompiles)
+  set(_scuba_saved_required_includes "${CMAKE_REQUIRED_INCLUDES}")
+  set(CMAKE_REQUIRED_INCLUDES "${SCUBA_SDK_SOURCE_DIR}/include")
+  unset(SCUBA_SDK_CHECKED_LIFECYCLE CACHE)
+  unset(SCUBA_SDK_CHECKED_LIFECYCLE)
+  check_cxx_source_compiles("#include <type_traits>\n#include <utility>\n#include <sco/app.h>\nstatic_assert(std::is_same_v<decltype(sco::app::StartDetailed(std::declval<const sco::app::Platform&>())), sco::app::StartResult>);\nstatic_assert(std::is_same_v<decltype(sco::app::Stop()), sco::Result>);\nint main() { return 0; }" SCUBA_SDK_CHECKED_LIFECYCLE)
+  set(CMAKE_REQUIRED_INCLUDES "${_scuba_saved_required_includes}")
+  if(NOT SCUBA_SDK_CHECKED_LIFECYCLE)
+    message(FATAL_ERROR "Checked-lifecycle profile requires StartDetailed and result-returning app::Stop")
+  endif()
+  message(STATUS "Checked lifecycle enabled: core ${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}")
+endif()
 include(cmake/ScubaActorStats.cmake)
 include(cmake/ScubaWarnings.cmake)
 
@@ -155,6 +210,9 @@ scuba_warnings(scuba_scenario)
 add_library(scuba_kernel STATIC src/hostd/kernel.cpp)
 target_link_libraries(scuba_kernel PUBLIC scuba_mock_game sco_lua_game)
 target_compile_definitions(scuba_kernel PRIVATE SCUBA_VERSION="${PROJECT_VERSION}")
+if(SCUBA_CORE_LIFECYCLE_CANDIDATE)
+  target_compile_definitions(scuba_kernel PUBLIC SCUBA_CORE_LIFECYCLE_CANDIDATE)
+endif()
 scuba_warnings(scuba_kernel)
 
 add_executable(scuba-hostd
@@ -164,6 +222,7 @@ add_executable(scuba-hostd
   src/hostd/plugins_handlers.cpp
   src/hostd/widgets_bridge.cpp
   src/hostd/widgets_handlers.cpp
+  src/hostd/shutdown.cpp
   src/hostd/net_sim/peer.cpp
   src/hostd/net_sim/probe_plugin.cpp)
 # sco_app is the host kit; it links the kernel libraries transitively (sco_host, sco_runtime,

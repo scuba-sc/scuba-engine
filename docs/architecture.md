@@ -1,10 +1,11 @@
 # scuba-engine architecture
 
 scuba-engine is a studio for building and testing sco-core plugins and UI without the game. It
-consumes the latest published sco-core SDK release (SDK 2.4.0 release candidate 2, tag
-`sdk-v2.4.0-rc.2`, source commit `844e136ccb280ad8cb43f73bc43c9447e8f6799d`, the
-`sco-sdk-host-source-sc-2.4.0.zip` kit) and never vendors its sources. Nothing in this repository
-has run inside Star Citizen; it ships no game files or game data.
+consumes the published sco-core SDK release `sdk-v2.4.0`, source commit
+`6106fa3639cbcc28f78a1ded8de2707de019f4d3`, with the
+`sco-sdk-host-source-sc-2.4.0.zip` kit pinned by SHA-256 in `cmake/ScubaSdk.cmake`. It never
+vendors SDK sources. Nothing in this repository has run inside Star Citizen; it ships no game
+files or game data.
 
 ## Integrated subsystems
 
@@ -104,9 +105,12 @@ CTest covers native units, synthetic format fixtures, SDK plugin checkers, gener
 plugins, mock services, two/four/eight-process network scenarios and real-host WebSocket calls
 across every delivered module and all four APP plugins. Studio loader tests consume the native
 fixtures under `build/tests/assets-fixtures`, so run CTest before `npm test`.
-C# output cannot be compiled without dotnet; CI is its first compile opportunity. macOS clang
-verification does not substitute for Linux GCC or Windows MSVC builds. No proprietary fixtures,
-game execution, live diagnostics attachment, inventory grants or game-format parity are claimed.
+C# output cannot be compiled without dotnet; CI is its first compile opportunity. The supported
+native host runtime paths are Linux/GCC or Clang and Windows/MSVC, with separate hosted build
+coverage. macOS clang checks remain developer-tool evidence only; the pinned sco-core 2.4.0 host
+kit does not compile against Apple's libc++ `std::atomic<std::shared_ptr<T>>` implementation. No
+proprietary fixtures, game execution, live diagnostics attachment, inventory grants or game-format
+parity are claimed.
 
 ## Adding a module
 

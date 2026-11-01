@@ -13,6 +13,7 @@
 #include "hostd/server.h"
 #include "hostd/net_sim/broker.h"
 #include "hostd/net_sim/peer.h"
+#include "hostd/shutdown.h"
 
 #include <chrono>
 #include <csignal>
@@ -209,24 +210,56 @@ int main(int argc, char** argv) {
     host.pluginRoot = kernelOptions.pluginRoot.string();
     if (testShutdown) host.requestShutdown = [&stopRequested] { stopRequested = true; };
     RegisterAllModules(registry, host);
-    net_sim::RegisterNetSim(registry, broadcaster, argv[0]);
+    const auto netSimBroker = net_sim::RegisterNetSim(registry, broadcaster, argv[0]);
 
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    const KernelStartResult kernelStart = kernel.StartDetailed(kernelOptions, KernelLog);
+    if (kernelStart != KernelStartResult::Started) {
+        std::fprintf(stderr, "scuba-hostd: the sco-core host kernel did not start%s%s\n",
+                     kernel.profileError().empty() ? "" : ": ", kernel.profileError().c_str());
+        if (kernelStart == KernelStartResult::RetainDependencies || kernel.retained())
+            std::_Exit(1);
+        g_logBroadcaster = nullptr;
+        return 1;
+    }
+#else
     if (!kernel.Start(kernelOptions, KernelLog)) {
         std::fprintf(stderr, "scuba-hostd: the sco-core host kernel did not start%s%s\n",
                      kernel.profileError().empty() ? "" : ": ", kernel.profileError().c_str());
         return 1;
     }
+#endif
 
     if (!scenarioPath.empty()) {
         const bool passed = RunScenario(scenario);
-        kernel.Stop();
+        const auto stopped = StopHostRuntime(kernel, *netSimBroker);
+        if (!stopped.peersClean)
+            std::fprintf(stderr, "scuba-hostd: one or more network-sandbox peers did not exit cleanly\n");
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+        if (!stopped.kernelClean) {
+            std::fprintf(stderr, "scuba-hostd: kernel retirement uncertain; terminating with dependencies retained\n");
+            std::_Exit(1);
+        }
+        g_logBroadcaster = nullptr;
+#else
+        g_logBroadcaster = nullptr;
+#endif
         return passed ? 0 : 1;
     }
 
     std::string error;
     if (!server.Start(&error)) {
         std::fprintf(stderr, "scuba-hostd: %s\n", error.c_str());
-        kernel.Stop();
+        const auto stopped = StopHostRuntime(kernel, *netSimBroker);
+        if (!stopped.peersClean)
+            std::fprintf(stderr, "scuba-hostd: one or more network-sandbox peers did not exit cleanly\n");
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+        if (!stopped.kernelClean)
+            std::_Exit(1);
+        g_logBroadcaster = nullptr;
+#else
+        g_logBroadcaster = nullptr;
+#endif
         return 1;
     }
     if (serverOptions.bindAddress != "127.0.0.1")
@@ -249,7 +282,15 @@ int main(int argc, char** argv) {
     std::printf("scuba-hostd: stopping\n");
     std::fflush(stdout);
     server.Stop();
-    kernel.Stop();
+    const auto stopped = StopHostRuntime(kernel, *netSimBroker);
+    if (!stopped.peersClean)
+        std::fprintf(stderr, "scuba-hostd: one or more network-sandbox peers did not exit cleanly\n");
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    if (!stopped.kernelClean) {
+        std::fprintf(stderr, "scuba-hostd: kernel retirement uncertain; terminating with dependencies retained\n");
+        std::_Exit(1);
+    }
+#endif
     g_logBroadcaster = nullptr;
     return 0;
 }

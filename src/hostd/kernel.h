@@ -9,6 +9,23 @@
 
 namespace scuba::hostd {
 
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+enum class KernelStartResult {
+    Started,
+    RefusedBeforeExposure,
+    FailedCleanly,
+    FailedAfterCleanStop,
+    RetainDependencies,
+};
+
+enum class KernelStopResult {
+    Stopped,
+    NotStarted,
+    Refused,
+    RetainDependencies,
+};
+#endif
+
 struct KernelOptions {
     std::filesystem::path pluginRoot;   // empty: no plugin folders are discovered
     std::filesystem::path productRoot;  // sc-offline distribution root containing data/plugins
@@ -33,8 +50,28 @@ struct KernelPluginInfo {
 
 class Kernel {
 public:
-    // Line sink for kernel log lines (any thread). Set before Start.
+    // Line sink for kernel log lines (any thread). Candidate builds require a
+    // process-lifetime callback because uncertain core state is retained to exit.
     using LogFn = void (*)(const char* line);
+
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    Kernel() = default;
+    ~Kernel();
+    Kernel(const Kernel&) = delete;
+    Kernel& operator=(const Kernel&) = delete;
+    Kernel(Kernel&&) = delete;
+    Kernel& operator=(Kernel&&) = delete;
+
+    // RefusedBeforeExposure describes this call only. retained() may still be
+    // true when earlier shared core state cannot be ruled out.
+    KernelStartResult StartDetailed(const KernelOptions& options, LogFn log);
+    KernelStopResult StopDetailed();
+    bool retained() const { return retained_; }
+#endif
+#ifdef SCUBA_KERNEL_TESTING
+    const std::filesystem::path& stagedPathForTesting() const { return profileStage_; }
+    const std::filesystem::path& retainedStageForTesting() const;
+#endif
 
     bool Start(const KernelOptions& options, LogFn log);
     void Tick(uint32_t nowMs);
@@ -45,8 +82,20 @@ public:
 
 private:
     bool started_ = false;
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    bool retained_ = false;
+    void RetainProcessState() noexcept;
+#endif
     std::string profileError_;
     std::filesystem::path profileStage_;
 };
+
+#ifdef SCUBA_KERNEL_TESTING
+namespace testing {
+void ForceCoreRefusal();
+void ForceStartupRetain();
+void ForceStopFailure();
+}
+#endif
 
 }  // namespace scuba::hostd

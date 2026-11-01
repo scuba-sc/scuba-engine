@@ -52,6 +52,31 @@ add_test(NAME plugin_sdk_root_mode_rejected_early
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_root_plugin_sdk_mode_rejected.cmake")
 set_tests_properties(plugin_sdk_root_mode_rejected_early PROPERTIES TIMEOUT 120)
 
+if(SCUBA_CORE_LIFECYCLE_CANDIDATE AND
+   "${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}" STREQUAL "6106fa3639cbcc28f78a1ded8de2707de019f4d3" AND
+   "${SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256}" STREQUAL "a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c")
+  set(unchecked_stable_rejected_args
+    "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+    "-DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/unchecked-stable-lifecycle-rejected"
+    "-DGENERATOR=${CMAKE_GENERATOR}"
+    "-DCMAKE_EXECUTABLE=${CMAKE_COMMAND}"
+    "-DSDK_ARCHIVE_DIR=${PROJECT_BINARY_DIR}/_sdk")
+  if(CMAKE_GENERATOR_PLATFORM)
+    list(APPEND unchecked_stable_rejected_args "-DPLATFORM=${CMAKE_GENERATOR_PLATFORM}")
+  endif()
+  if(CMAKE_GENERATOR_TOOLSET)
+    list(APPEND unchecked_stable_rejected_args "-DTOOLSET=${CMAKE_GENERATOR_TOOLSET}")
+  endif()
+  if(NOT CMAKE_GENERATOR MATCHES "Visual Studio|Xcode")
+    list(APPEND unchecked_stable_rejected_args "-DC_COMPILER=${CMAKE_C_COMPILER}")
+    list(APPEND unchecked_stable_rejected_args "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}")
+  endif()
+  add_test(NAME stable_sdk_requires_checked_lifecycle
+    COMMAND "${CMAKE_COMMAND}" ${unchecked_stable_rejected_args}
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_unchecked_stable_lifecycle_rejected.cmake")
+  set_tests_properties(stable_sdk_requires_checked_lifecycle PROPERTIES TIMEOUT 120)
+endif()
+
 if(SCUBA_TEST_PLUGIN_SDK_CONSUMER)
   set(plugin_sdk_consumer_args
     "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
@@ -212,6 +237,58 @@ add_test(NAME product_profile_lifecycle COMMAND test_product_profile
   "${CMAKE_CURRENT_BINARY_DIR}/product-profile-fixture" $<TARGET_FILE:mock_game_probe>)
 set_tests_properties(product_profile_lifecycle PROPERTIES TIMEOUT 60)
 
+if(SCUBA_CORE_LIFECYCLE_CANDIDATE)
+  # Compile the fault hooks only into this test binary. Each retained-outcome
+  # case runs in a fresh process because the core contract forbids restart.
+  add_executable(test_kernel_lifecycle test_kernel_lifecycle.cpp ../src/hostd/kernel.cpp)
+  target_include_directories(test_kernel_lifecycle PRIVATE "${PROJECT_SOURCE_DIR}/src")
+  target_link_libraries(test_kernel_lifecycle PRIVATE scuba_mock_game sco_lua_game)
+  target_compile_definitions(test_kernel_lifecycle PRIVATE SCUBA_VERSION="${PROJECT_VERSION}"
+    SCUBA_CORE_LIFECYCLE_CANDIDATE SCUBA_KERNEL_TESTING)
+  scuba_warnings(test_kernel_lifecycle)
+  foreach(case clean refusal startup-retained stop-retained)
+    add_test(NAME kernel_lifecycle_${case} COMMAND test_kernel_lifecycle ${case})
+    set_tests_properties(kernel_lifecycle_${case} PROPERTIES TIMEOUT 60)
+  endforeach()
+
+  add_executable(test_net_sim_clean_peer net_sim_clean_peer.cpp)
+  scuba_warnings(test_net_sim_clean_peer)
+  add_executable(test_hostd_peer_shutdown
+    test_hostd_peer_shutdown.cpp
+    ../src/hostd/kernel.cpp
+    ../src/hostd/shutdown.cpp)
+  target_include_directories(test_hostd_peer_shutdown PRIVATE "${PROJECT_SOURCE_DIR}/src")
+  target_link_libraries(test_hostd_peer_shutdown PRIVATE scuba_mock_game sco_lua_game scuba_net_sim)
+  target_compile_definitions(test_hostd_peer_shutdown PRIVATE SCUBA_VERSION="${PROJECT_VERSION}"
+    SCUBA_CORE_LIFECYCLE_CANDIDATE SCUBA_KERNEL_TESTING)
+  scuba_warnings(test_hostd_peer_shutdown)
+  add_test(NAME hostd_peer_shutdown_order
+    COMMAND test_hostd_peer_shutdown $<TARGET_FILE:test_net_sim_clean_peer>)
+  set_tests_properties(hostd_peer_shutdown_order PROPERTIES TIMEOUT 30)
+
+  # Exercise the public void wrapper in a fresh process. The child exits
+  # immediately after Stop() returns so its destructor cannot mask a wrapper
+  # that incorrectly discards the checked shutdown result.
+  add_executable(test_sco_host_stop_contract
+    test_sco_host_stop_contract.cpp
+    ../engine/src/sco/sco_host.cpp
+    ../src/hostd/kernel.cpp)
+  target_include_directories(test_sco_host_stop_contract PRIVATE
+    "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/engine/src")
+  target_link_libraries(test_sco_host_stop_contract PRIVATE
+    scuba_engine_core scuba_mock_game sco_lua_game sco_widgets)
+  target_compile_definitions(test_sco_host_stop_contract PRIVATE
+    SCUBA_VERSION="${PROJECT_VERSION}" SCUBA_SDK_VERSION_STRING="${SCUBA_SDK_VERSION}"
+    SCUBA_CORE_LIFECYCLE_CANDIDATE SCUBA_KERNEL_TESTING)
+  scuba_warnings(test_sco_host_stop_contract)
+  add_test(NAME sco_host_void_stop_fail_stops
+    COMMAND "${CMAKE_COMMAND}"
+      "-DTEST_EXECUTABLE=$<TARGET_FILE:test_sco_host_stop_contract>"
+      "-DMARKER=${CMAKE_CURRENT_BINARY_DIR}/sco-host-stop-setup-complete"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_sco_host_stop_fail_stops.cmake")
+  set_tests_properties(sco_host_void_stop_fail_stops PROPERTIES TIMEOUT 30)
+endif()
+
 # Product distribution export: the tree --product accepts again, and every refusal that keeps a
 # half-written distribution from existing. Portable, so it runs everywhere the core builds.
 add_executable(test_product_export test_product_export.cpp)
@@ -354,6 +431,15 @@ add_test(NAME netsim_two_peer_delivery COMMAND test_net_sim $<TARGET_FILE:scuba-
 add_test(NAME netsim_four_peer_join_leave COMMAND test_net_sim $<TARGET_FILE:scuba-hostd> membership)
 add_test(NAME netsim_eight_peer_bounds COMMAND test_net_sim $<TARGET_FILE:scuba-hostd> bounds)
 set_tests_properties(netsim_two_peer_delivery netsim_four_peer_join_leave netsim_eight_peer_bounds PROPERTIES TIMEOUT 120)
+
+add_executable(test_net_sim_unclean_peer net_sim_unclean_peer.cpp)
+scuba_warnings(test_net_sim_unclean_peer)
+add_executable(test_net_sim_broker test_net_sim_broker.cpp)
+target_link_libraries(test_net_sim_broker PRIVATE scuba_net_sim)
+scuba_warnings(test_net_sim_broker)
+add_test(NAME netsim_unclean_shutdown_is_terminal
+  COMMAND test_net_sim_broker $<TARGET_FILE:test_net_sim_unclean_peer>)
+set_tests_properties(netsim_unclean_shutdown_is_terminal PROPERTIES TIMEOUT 30)
 
 find_program(SCUBA_NODE_EXECUTABLE node REQUIRED)
 add_test(NAME studio_mcp_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"

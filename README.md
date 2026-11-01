@@ -1,6 +1,6 @@
 # scuba-engine
 
-A cross-platform (Windows, macOS, Linux) studio for building and testing [sco-core](https://github.com/scuba-sc/sco-core) plugins and UI without running the game: a native sandbox host (`scuba-hostd`) built from the published sco-core SDK, and a browser studio for widget design, 3D in-world panel projection, DataCore and asset inspection, and multi-peer networking tests.
+The browser studio is an OS-independent tool for building and testing [sco-core](https://github.com/scuba-sc/sco-core) plugins and UI without the game. It provides widget design, 3D in-world panel projection, DataCore and asset inspection, and multi-peer networking tests. `scuba-hostd` is the native sandbox host; its supported runtime targets are Windows x64 and Linux x64. The native `scuba-engine.exe` editor currently targets Windows x64.
 
 Status: integrated out-of-game sandbox. Licence: GPL-3.0-only ([LICENSE](LICENSE)). This project ships no game files, and **nothing here has been verified inside Star Citizen**.
 
@@ -36,6 +36,7 @@ textures yet), CPU picking.
 ## Requirements
 
 - CMake 3.21+, a C++20 compiler (clang, GCC or MSVC), 64-bit
+- Supported native host runtime builds: Linux x64 with GCC/Clang and Windows x64 with MSVC
 - Node.js 22.12+ (24 is what CI uses) for the studio
 - Python 3 for native plugin export; Bun and Lua 5.4 for the generated-plugin CTest
 - Network access on first configure (the sco-core SDK kit is downloaded), or a local copy of the release assets
@@ -50,15 +51,15 @@ ctest --test-dir build --output-on-failure
 
 Build and CTest before running studio tests: Asset Lab's loader tests consume synthetic files generated at `build/tests/assets-fixtures`. If using another build directory, generate its fixtures and copy them to that location before `npm test`.
 
-Configure downloads `sco-sdk-host-source-sc-2.4.0.zip` from the latest sco-core [`sdk-v2.4.0-rc.2`](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0-rc.2) release (SDK 2.4.0, release candidate 2), checks its SHA-256 (`3d711463…77b8201`, the value in the release's `SHA256SUMS`) and builds it under `build/_sdk/`. The release tag points to source commit `844e136ccb280ad8cb43f73bc43c9447e8f6799d`; later `main` commits do not change the released archive bytes. A mismatched archive stops the configure. A build tree configured before the pin moved keeps its cached `SCUBA_SDK_*` values: configure a fresh tree, or add `-U "SCUBA_SDK_*"` once. To build offline from a local copy of the release assets:
+Configure downloads the published sco-core [`sdk-v2.4.0`](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0) host-source kit, checks SHA-256 `a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c` and source commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`, then builds it under `build/_sdk/`. A mismatched archive stops configure. A fresh root build enables checked startup/shutdown handling for this pinned SDK. Existing build trees retain cached `SCUBA_SDK_*` values and lifecycle options; use a fresh tree when moving from RC2. To build offline from a local copy of the release assets:
 
 ```sh
-cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.4.0-rc.2-assets
+cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.4.0-assets
 ```
 
 On Windows add `-A x64` to the configure and `--config Release` / `-C Release` to build and ctest.
-The separate [core-main SDK rehearsal](docs/engine/core-main-sdk-rehearsal.md) is an opt-in
-development profile with its own source and archive hash; it does not change this published default.
+The separate [core-main SDK rehearsal](docs/engine/core-main-sdk-rehearsal.md) uses an unpublished
+development profile with its own source and archive hash; it is not release evidence.
 For a plugin-only build from the published SDK archive, see
 [Build the plugins with the published plugin SDK only](docs/engine/plugin-integration.md#build-the-plugins-with-the-published-plugin-sdk-only).
 
@@ -90,4 +91,4 @@ The bridge is unauthenticated and loopback-only by default; it refuses foreign `
 
 ## Limits
 
-The `game.*` services are deterministic mock models, not the game's native adapters: they provide no real physics, entitlement, authenticated game networking, or proprietary catalogs. A shop purchase only debits synthetic balance; it grants no inventory. `game.asop` and `game.contracts` return fixed synthetic values; the game pack holds their capabilities off until an in-game run confirms them. Mock tests do not establish real native service support or gameplay. C# and Lua generation support only the published builder subset; native folder export supports C/C++ only. C# requires a separate dotnet environment; CI is its first compile opportunity. Linux GCC and Windows MSVC platform paths require their own builds; a macOS pass is not cross-platform certification.
+The `game.*` services are deterministic mock models, not the game's native adapters: they provide no real physics, entitlement, authenticated game networking, or proprietary catalogs. A shop purchase only debits synthetic balance; it grants no inventory. `game.asop` and `game.contracts` return fixed synthetic values; the game pack holds their capabilities off until an in-game run confirms them. Mock tests do not establish real native service support or gameplay. C# and Lua generation support only the published builder subset; native folder export supports C/C++ only. C# requires a separate dotnet environment; CI is its first compile opportunity. Linux/GCC and Windows/MSVC are the supported native runtime build paths and are validated separately in CI. The pinned sco-core 2.4.0 host kit does not compile with Apple's libc++ because `std::atomic<std::shared_ptr<T>>` is not implemented there; macOS is not a supported native runtime target. Browser Studio use and standalone portable developer tools remain separate from that runtime support statement.

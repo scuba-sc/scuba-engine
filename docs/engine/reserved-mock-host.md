@@ -7,14 +7,23 @@ retires the session. This is an incremental consumer slice toward the core
 roadmap's milestone 2, products and studio on the SDK. It uses the held core
 host-source contract, not the released plugin SDK ABI.
 
-This rehearsal uses RC3 candidate core source
+This historical rehearsal used RC3 candidate core source
 `44ffd1290e261e12684b38ac862ec0c4f08921df`, bootstrap 3, mock table 5,
 graph 1. Its host-source archive has 985 members and SHA-256
 `799511bfa08a7bf77a46fcf8262d3cac4a5f0e6a0ef04a28f53e6e624c01e8a0`.
 The paired core-source archive has 442 members and SHA-256
 `807a322eab2b3d8c25e10c3582008ec3ec50b6b536bc947f2b28cf4b63095c22`;
-the engine consumes the host-source profile. Core #313 remains open, so the
-final release source may advance. Build from the PR branch:
+the engine consumes the host-source profile. Core #313's implementation merged
+at `349911d37a2fe5bb4acbafc972615578b9da82a0`; core #317 published the stable
+SDK from `6106fa3639cbcc28f78a1ded8de2707de019f4d3`. The published host-source
+archive has SHA-256
+`a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c` and 986
+members. The stable package is the current engine default; the following command
+reproduces the earlier candidate-specific reserved-host receipt. This historical
+reserved-host rehearsal uses the earlier exact source and is separate from the
+checked lifecycle integration documented in
+[`core-lifecycle-candidate.md`](core-lifecycle-candidate.md). Build this
+reserved-host rehearsal from its PR branch:
 
 ```sh
 cmake -S . -B build-curated -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -30,8 +39,9 @@ Configure verifies the archive digest, complete member checksum inventory and
 embedded source commits before extracting and compiling it. The curated target
 links one executable-resident `sco_authority` and the engine's JSON/Registry
 sources. The legacy app, scanner, plugin loader, native providers and network
-server are absent from its link graph. Default engine builds retain their
-published RC2 profile. This opt-in does not disable existing tests or features.
+server are absent from its link graph. Default engine builds use the published
+2.4.0 profile and checked lifecycle integration; this separate opt-in does not
+disable existing tests or features.
 
 Example stdin session:
 
@@ -96,14 +106,13 @@ verdicts. The normal host uses the uninstrumented authority; its binary check
 also rejects reader-observer and consumer-probe symbols. This exercises one
 entity handler's copy/unwind path, not a census of every future handler.
 
-Remaining adoption gates: the core owner's qualification of the exact held
-contract/composition, Windows compile/runtime and artifact audit, editor transport
-and scene integration, complete mock services, reviewed plugin/UI callback
-ownership and logging/worker roots. The existing `Kernel::Start` uses legacy app
-startup, which reserved sessions deliberately refuse; it is not migrated by this
-candidate. Native/PAK/game activation remains unavailable pending product-owned
-reader and instruction exclusion proof. No gameplay or visual acceptance is
-established here. No core implementation is changed by this consumer.
+This reserved-host rehearsal is a separate executable and does not qualify the
+legacy `Kernel` or native editor. The checked lifecycle candidate now adapts that
+legacy path in an explicit development profile, but it does not enable native
+game services. Complete mock-service coverage, plugin/UI callback ownership,
+logging and worker roots, and native reader/instruction exclusion remain separate
+gates. No gameplay or visual acceptance is established here. No core
+implementation is changed by this consumer.
 
 The 44ffd host-source archive from candidate workflow 41332377573 passed its
 checksum, inventory, provenance and SPDX audits. Regenerating it from that
@@ -140,9 +149,9 @@ configuration. It must strongly own backing and callback code and hold admission
 through provider calls, output copying and unwind. Unknown plugin and native
 paths need their own callback and worker lifetime proof before activation.
 
-The engine must also preserve process-lifetime state after
-`RetainDependencies` or a non-`Ok` stop, refuse restart in its bounded first
-implementation, and treat `RefusedBeforeExposure` as applying only to that
-invocation. Hostd logging and server contexts, mock scene/TLS state, peer
-shutdown acknowledgement and staged files require explicit ownership. A
-reserved retained verdict is not a successful `app::Stop`.
+The legacy engine candidate preserves process-lifetime state after
+`RetainDependencies` or a non-`Ok` stop, refuses restart after an uncertain
+outcome, and treats `RefusedBeforeExposure` as applying only to that invocation.
+Hostd logging and server contexts, mock scene/TLS state, peer exit status and
+staged files require explicit ownership. A reserved retained
+verdict is not a successful `app::Stop`.

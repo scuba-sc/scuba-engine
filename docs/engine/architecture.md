@@ -9,10 +9,18 @@ parity (see [Phases](#phases)).
 
 Nothing here has run inside Star Citizen. The engine uses mock game services only.
 
+The supported native host runtime targets are Linux x64 and Windows x64. The native editor app
+(`scuba-engine.exe`) is currently Windows-only; the Linux editor remains a planned phase. macOS is
+not a supported native runtime target for the pinned sco-core 2.4.0 package because Apple's
+libc++ does not implement the C++20 `std::atomic<std::shared_ptr<T>>` specialization used by that
+package. Browser Studio use and standalone portable developer tools are separate from runtime
+support.
+
 ## Principles
 
-1. **sco-core is the boundary.** The engine is a host of the latest published SDK kit (SDK 2.4.0
-   release candidate 2, tag sdk-v2.4.0-rc.2, pinned by SHA-256 in `cmake/ScubaSdk.cmake`). Plugins reach the engine only through
+1. **sco-core is the boundary.** The engine is a host of the published SDK 2.4.0 release
+   (`sdk-v2.4.0`, source commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`, pinned by SHA-256
+   in `cmake/ScubaSdk.cmake`). Plugins reach the engine only through
    SDK services and contracts. Plugin UI arrives as `sco.widgets` panels; no plugin sees an ImGui
    type, a D3D12 object or an engine pointer.
 2. **One owner per thread.** The main thread owns the window, the sco-core game thread, the UI
@@ -46,13 +54,16 @@ cmake/ScubaDeps.cmake       Dear ImGui (docking) and miniz, pinned by SHA-256
 tests/test_engine_core.cpp  VFS, overlay, jobs, loader, picking (no GPU)
 ```
 
-| Target | Platforms | Contains | Links |
+The table lists supported/tested product targets for the pinned SDK release. It does not claim
+that isolated utility sources cannot compile on other platforms.
+
+| Target | Supported/tested targets | Contains | Links |
 |---|---|---|---|
-| `scuba_engine_core` | all | jobs, log, VFS backends and stack, model decode and loader, camera and picking math | `sco_vfs`, `scuba_assets` (bounded OBJ/CGF readers), miniz |
-| `scuba_engine_sco` | all | `ScoHost`: kernel boot, tick, plugins, widget panels | `scuba_kernel` (sco::app + mock game) |
+| `scuba_engine_core` | Linux, Windows | jobs, log, VFS backends and stack, model decode and loader, camera and picking math | `sco_vfs`, `scuba_assets` (bounded OBJ/CGF readers), miniz |
+| `scuba_engine_sco` | Linux, Windows | `ScoHost`: kernel boot, tick, plugins, widget panels | `scuba_kernel` (sco::app + mock game) |
 | `scuba_engine_runtime` | Windows | Win32 window, D3D12 renderer, ImGui shell, input router | the two above, Dear ImGui, `sco_widgets_imgui` |
 | `scuba-engine` | Windows | the editor | runtime |
-| `scuba-pack` | all | .scpak tool | core |
+| `scuba-pack` | Linux, Windows | .scpak tool | core |
 
 CMake: `SCUBA_BUILD_ENGINE` (default ON). With it on, Windows builds turn on the kit's
 host-only `SCO_WIDGETS_IMGUI` adapter and point it at the engine's ImGui. The language level is

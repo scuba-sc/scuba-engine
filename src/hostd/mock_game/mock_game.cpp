@@ -211,6 +211,22 @@ void Unpublish() {
     g_servicePublished.clear();
 }
 
+void ResetAfterCoreStop() noexcept {
+    g_published = false;
+    g_selective = false;
+    g_events = false;
+    g_selected.clear();
+    g_servicePublished.clear();
+}
+
+void ResetConfiguration() noexcept {
+    if (g_published) return;
+    g_selective = false;
+    g_events = false;
+    g_selected.clear();
+    g_servicePublished.clear();
+}
+
 bool Published() { return g_published; }
 
 std::vector<CapabilityInfo> Capabilities() {

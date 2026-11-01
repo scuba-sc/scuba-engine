@@ -16,6 +16,11 @@ void ConfigureSelected(sco::app::Platform& platform, const std::vector<std::stri
 void Publish();
 // After sco::app::Stop: forgets the published state (the kit already withdrew the tables).
 void Unpublish();
+// Clear provider-local state only after checked core Stop returned Ok.
+// This makes no calls into sco-core after its runtime has stopped.
+void ResetAfterCoreStop() noexcept;
+// Restore the default selection after a refused startup that exposed nothing.
+void ResetConfiguration() noexcept;
 bool Published();
 
 // Scene and every service back to their defaults (plugins' ownership included).

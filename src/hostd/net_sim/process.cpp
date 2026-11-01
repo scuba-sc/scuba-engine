@@ -29,12 +29,17 @@ struct Process::Impl {
     pid_t pid = -1;
 #endif
     std::thread reader;
+    std::mutex stopMutex;
     std::mutex mutex;
     std::condition_variable changed;
     std::deque<Json> responses;
     bool ended = false;
     bool exited = false;
     bool unusable = false;
+    bool exitStatusValid = false;
+    int exitStatus = -1;
+    bool stopComplete = false;
+    bool stopClean = false;
 
     void Read() {
         std::string line;
@@ -73,31 +78,76 @@ struct Process::Impl {
         changed.notify_all();
     }
 
-    ~Impl() {
+    bool Stop() noexcept {
+        std::lock_guard stopLock(stopMutex);
+        if (stopComplete) return stopClean;
+        bool forced = false;
 #ifdef _WIN32
-        if (input) CloseHandle(input);
+        if (input) { CloseHandle(input); input = nullptr; }
         if (process) {
-            if (WaitForSingleObject(process, 3000) == WAIT_TIMEOUT) {
-                TerminateProcess(process, 1);
-                WaitForSingleObject(process, INFINITE);
+            const DWORD wait = WaitForSingleObject(process, 3000);
+            if (wait != WAIT_OBJECT_0) {
+                forced = true;
+                (void)TerminateProcess(process, 1);
+                (void)WaitForSingleObject(process, INFINITE);
             }
+            DWORD code = 1;
+            const bool gotCode = GetExitCodeProcess(process, &code) != 0;
+            stopClean = wait == WAIT_OBJECT_0 && gotCode && code == 0 && !forced;
+            if (reader.joinable()) reader.join();
             CloseHandle(process);
+            process = nullptr;
+        } else {
+            stopClean = true;
         }
 #else
-        if (input >= 0) close(input);
+        if (input >= 0) { close(input); input = -1; }
         if (pid > 0) {
-            std::unique_lock lock(mutex);
-            if (!changed.wait_for(lock, std::chrono::seconds(3), [this] { return exited; })) kill(pid, SIGKILL);
-            lock.unlock();
+            // If the reader/reaper thread could not be created after spawn,
+            // no other thread can set `exited`. Reap this child directly so
+            // constructor unwinding cannot wait forever on an absent worker.
+            if (!reader.joinable()) {
+                forced = true;
+                (void)kill(pid, SIGKILL);
+                int status = 0;
+                pid_t waited = -1;
+                do { waited = waitpid(pid, &status, 0); } while (waited < 0 && errno == EINTR);
+                stopClean = false;
+                {
+                    std::lock_guard lock(mutex);
+                    exited = waited == pid || (waited < 0 && errno == ECHILD);
+                    exitStatusValid = waited == pid;
+                    exitStatus = status;
+                }
+            } else {
+                std::unique_lock lock(mutex);
+                if (!changed.wait_for(lock, std::chrono::seconds(3), [this] { return exited; })) {
+                    forced = true;
+                    const int rc = kill(pid, SIGKILL);
+                    if (rc != 0 && errno != ESRCH) unusable = true;
+                    changed.wait(lock, [this] { return exited; });
+                }
+                const bool terminated = exited;
+                const bool valid = exitStatusValid;
+                const int code = exitStatus;
+                lock.unlock();
+                reader.join();
+                stopClean = terminated && valid && WIFEXITED(code) && WEXITSTATUS(code) == 0 && !forced;
+            }
+        } else {
+            stopClean = true;
         }
 #endif
-        if (reader.joinable()) reader.join();
 #ifdef _WIN32
-        if (output) CloseHandle(output);
+        if (output) { CloseHandle(output); output = nullptr; }
 #else
-        if (output >= 0) close(output);
+        if (output >= 0) { close(output); output = -1; }
 #endif
+        stopComplete = true;
+        return stopClean;
     }
+
+    ~Impl() { (void)Stop(); }
 };
 
 #ifdef _WIN32
@@ -203,17 +253,21 @@ Process::Process(const std::filesystem::path& executable, const std::vector<std:
         state.Read();
 #ifndef _WIN32
         int status = 0;
-        while (waitpid(state.pid, &status, 0) < 0 && errno == EINTR) {}
+        pid_t waited = -1;
+        do { waited = waitpid(state.pid, &status, 0); } while (waited < 0 && errno == EINTR);
         {
             std::lock_guard lock(state.mutex);
-            state.exited = true;
+            state.exited = waited == state.pid || (waited < 0 && errno == ECHILD);
+            state.exitStatusValid = waited == state.pid;
+            state.exitStatus = status;
         }
         state.changed.notify_all();
 #endif
     });
 }
 
-Process::~Process() = default;
+Process::~Process() { (void)Stop(); }
+bool Process::Stop() { return impl_ ? impl_->Stop() : true; }
 uint64_t Process::id() const { return static_cast<uint64_t>(impl_->pid); }
 
 Json Process::Call(Json request) {

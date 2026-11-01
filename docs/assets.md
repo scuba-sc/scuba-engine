@@ -176,8 +176,21 @@ reference resolution, rejected overrides, new-pack import, `sco-dcb lint` and
 `sco-dcb check`. Vitest loads the native GLBs with the actual studio GLTFLoader,
 checks geometry and embedded DDS mip payloads, and loads an imported OBJ pack.
 
-For reproducible macOS browser evidence, run the built host from the worktree
-root on port 17966 in a separate terminal, then run from the worktree root:
+For reproducible macOS browser-only evidence, use a host built with the pinned
+RC2 compatibility profile. The published 2.4.0 host kit is not a supported
+macOS runtime input because Apple libc++ lacks its C++20 atomic shared-pointer
+specialization. This RC2 build exercises the browser/tooling workflow only and
+does not validate the current runtime package:
+
+```sh
+cmake -S . -B build-macos-rc2 -DSCUBA_CORE_LIFECYCLE_CANDIDATE=OFF \
+  -DSCUBA_SDK_RELEASE_TAG=sdk-v2.4.0-rc.2 \
+  -DSCUBA_SDK_HOST_SOURCE_SHA256=3d711463f7dff3dcd372ffb70b09951ecf21f1d0e2c5f0a899cccbb9977b8201
+cmake --build build-macos-rc2 --target scuba-hostd
+```
+
+Run `build-macos-rc2/scuba-hostd --port 17966` from the worktree root in a
+separate terminal, then run from the worktree root:
 
 ```sh
 bun tests/asset_visual.mjs "$VISUAL_DIR"

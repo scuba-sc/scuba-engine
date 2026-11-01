@@ -6,6 +6,12 @@ session through `sco.net`. Peer 1 hosts; all other peers join its ephemeral port
 The SDK's star topology relays joiner messages through Peer 1. No game process,
 game files, or proprietary fixtures are used.
 
+The supported host runtime platforms are Linux x64 and Windows x64. macOS
+process-launch code remains for standalone developer tooling, but the full host
+runtime is not supported there with the pinned sco-core 2.4.0 package: Apple's
+libc++ lacks the C++20 atomic shared-pointer specialization used by that
+package. Hosted runtime CI therefore covers Linux and Windows only.
+
 ## Run
 
 ```sh
@@ -18,10 +24,9 @@ cd ..
 ./build/scuba-hostd --studio studio/dist
 ```
 
-The foundation downloads the published `sdk-v2.4.0-rc.2` host-source kit (SDK
-2.4.0, release candidate 2, source commit
-`844e136ccb280ad8cb43f73bc43c9447e8f6799d`) and verifies
-its pinned SHA-256. For offline work, set `SCUBA_SDK_ARCHIVE_DIR` at configure
+The foundation downloads the published `sdk-v2.4.0` host-source kit (source
+commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`) and verifies its pinned
+SHA-256. For offline work, set `SCUBA_SDK_ARCHIVE_DIR` at configure
 time to a directory containing the release archive; the same hash check applies.
 
 Open the studio and select **NetSandbox**. Select a peer count and choose
@@ -65,9 +70,10 @@ The session may temporarily have only its host after joiners leave.
   control transport is inherited stdin/stdout with one JSON object per line.
   Kernel logs go to stderr. Arbitrary plugin writes to stdout can invalidate
   that peer's control stream; the studio then reports the peer as failed.
-- macOS uses close-on-exec-default spawn semantics; Linux closes inherited
-  descriptors via `/proc/self/fd` before starting its kernel. Windows uses a
-  handle allowlist. Closing the parent's pipe causes graceful kernel shutdown;
+- The retained macOS developer-tool path uses close-on-exec-default spawn
+  semantics; Linux closes inherited descriptors via `/proc/self/fd` before
+  starting its kernel. Windows uses a handle allowlist. Closing the parent's
+  pipe causes graceful kernel shutdown;
   normal stop reaps each process, with forced termination after a 3 s grace
   period if a plugin prevents shutdown. Joiners stop before the session host.
 - Commands are serialized on hostd's game thread. Starting/joining waits up to
@@ -165,6 +171,7 @@ with bounded deadlines, never sleeps. Each prints `unreliable_loss=0` only
 after comparing delivered counts with the expected counts.
 
 These are standalone host tests, not in-game verification. Linux GCC and
-Windows MSVC need their first platform compile. No raw `sco.ui` overlay or
+Windows MSVC are covered by hosted builds; macOS is excluded from the supported
+runtime matrix as described above. No raw `sco.ui` overlay or
 shared-memory peer bridge is implemented by this panel; the retained
 `sco.widgets` panels and private `sco.ipc` namespaces are available to plugins.
