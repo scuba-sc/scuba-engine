@@ -6,7 +6,7 @@ Status: integrated out-of-game sandbox. Licence: GPL-3.0-only ([LICENSE](LICENSE
 
 ## Feature tour
 
-- **Widgets** renders loaded plugins through the SDK's retained widgets service. The studio bridge advertises widgets 1.1 features, including paging, tooltips and severity; input travels back through hostd.
+- **Widgets** renders loaded plugins through the SDK's retained widgets service. The studio bridge exposes widgets 1.2 features and advertises 1.3 numeric presentation when both the SDK declaration and host snapshot support it; input travels back through hostd.
 - **Designer** edits nested widget trees, previews through the same widget renderer, round-trips generated C/C++/C#/Lua source, and exports native plugin folders.
 - **Viewport** projects plugin panels onto six synthetic terminal environments as billboards or perspective quads. Select a plugin surface and optionally follow the mock camera; projection and ray-plane input use the same camera.
 - **Asset Lab** browses DataCore records and TOML overrides, converts a documented clean-room subset of Cry/DDS/OBJ/glTF, and previews GLB. See [format limits](docs/assets.md).
@@ -59,6 +59,8 @@ cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.4.0-rc.2-assets
 On Windows add `-A x64` to the configure and `--config Release` / `-C Release` to build and ctest.
 The separate [core-main SDK rehearsal](docs/engine/core-main-sdk-rehearsal.md) is an opt-in
 development profile with its own source and archive hash; it does not change this published default.
+For a plugin-only build from the published SDK archive, see
+[Build the plugins with the published plugin SDK only](docs/engine/plugin-integration.md#build-the-plugins-with-the-published-plugin-sdk-only).
 
 ## Build the studio
 

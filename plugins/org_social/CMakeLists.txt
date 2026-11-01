@@ -14,12 +14,15 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   option(SCUBA_BUILD_TESTS "Build the org_social tests and register them with CTest" ON)
   find_package(Threads REQUIRED)
   include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ScubaSdk.cmake")
+  set(SCUBA_PLUGIN_SDK_CMAKE_FILE "${SCUBA_SDK_SOURCE_DIR}/sdk/cmake/sco-plugin.cmake")
+  set(SCUBA_PLUGIN_SDK_INCLUDE_DIR "${SCUBA_SDK_SOURCE_DIR}/include")
+  set(SCUBA_PLUGIN_SDK_CHECKER_SOURCE "${SCUBA_SDK_SOURCE_DIR}/sdk/tools/sco-plugin-check.c")
   if(SCUBA_BUILD_TESTS)
     enable_testing()
   endif()
 endif()
 
-include("${SCUBA_SDK_SOURCE_DIR}/sdk/cmake/sco-plugin.cmake")
+include("${SCUBA_PLUGIN_SDK_CMAKE_FILE}")
 
 set(ORG_SOCIAL_CORE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/os_model.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/os_wire.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/os_json.c")

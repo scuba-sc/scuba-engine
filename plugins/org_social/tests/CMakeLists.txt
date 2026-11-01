@@ -14,8 +14,8 @@ endfunction()
 # The SDK's checker, built from the kit sources (the kit builds it only with SCO_BUILD_TESTS).
 # Shared by every plugin lane under plugins/: the first one to get here defines it.
 if(NOT TARGET scuba-plugin-check)
-  add_executable(scuba-plugin-check "${SCUBA_SDK_SOURCE_DIR}/sdk/tools/sco-plugin-check.c")
-  target_include_directories(scuba-plugin-check PRIVATE "${SCUBA_SDK_SOURCE_DIR}/include")
+  add_executable(scuba-plugin-check "${SCUBA_PLUGIN_SDK_CHECKER_SOURCE}")
+  target_include_directories(scuba-plugin-check PRIVATE "${SCUBA_PLUGIN_SDK_INCLUDE_DIR}")
   set_target_properties(scuba-plugin-check PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON
                         MSVC_RUNTIME_LIBRARY "MultiThreaded")
   if(MSVC)
@@ -35,7 +35,7 @@ org_social_warnings(org_social_core_test)
 add_test(NAME org_social_core COMMAND org_social_core_test)
 
 add_executable(org_social_host_test test_host.cpp ../src/os_wire.c ../src/os_model.c)
-target_include_directories(org_social_host_test PRIVATE "${SCUBA_SDK_SOURCE_DIR}/include" "../src")
+target_include_directories(org_social_host_test PRIVATE "${SCUBA_PLUGIN_SDK_INCLUDE_DIR}" "../src")
 target_link_libraries(org_social_host_test PRIVATE sco_app)
 org_social_warnings(org_social_host_test)
 add_dependencies(org_social_host_test org_social scuba-plugin-check)

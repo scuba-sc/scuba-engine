@@ -13,8 +13,8 @@ add_custom_command(TARGET diegetic_shop_inv POST_BUILD
 
 if(SCUBA_BUILD_TESTS)
   if(NOT TARGET sco-plugin-check)
-    add_executable(sco-plugin-check "${SCUBA_SDK_SOURCE_DIR}/sdk/tools/sco-plugin-check.c")
-    target_include_directories(sco-plugin-check PRIVATE "${SCO_SDK_INCLUDE_DIR}")
+    add_executable(sco-plugin-check "${SCUBA_PLUGIN_SDK_CHECKER_SOURCE}")
+    target_include_directories(sco-plugin-check PRIVATE "${SCUBA_PLUGIN_SDK_INCLUDE_DIR}")
     set_target_properties(sco-plugin-check PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON
       MSVC_RUNTIME_LIBRARY "MultiThreaded")
     if(MSVC)

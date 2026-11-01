@@ -272,7 +272,10 @@ void Exercise(uint16_t port) {
     const Json list = s.Call("widgets.list", Json::MakeObject());
     const Json* result = list.find("result");
     CHECK(result && result->find("started") && result->find("started")->as_bool());
-    CHECK(result && result->find("capabilities") && result->find("capabilities")->find("version")->as_string() == "1.2");
+    const Json* capabilities = result ? result->find("capabilities") : nullptr;
+    const std::string version = capabilities && capabilities->find("version")
+        ? capabilities->find("version")->as_string() : "";
+    CHECK(version == "1.2" || version == "1.3");
     const Json* panels = result ? result->find("panels") : nullptr;
     // The 2.4.0 kit's widgets example adds a one-node "widgets.named" panel (a stable-tag anchor) when
     // the host offers widgets 1.2 stable tags, as the kit's own host does.
@@ -293,6 +296,8 @@ void Exercise(uint16_t port) {
     CHECK(native->find("owner")->as_string() == "widgets");
     CHECK(FindNode(*native, 4) && FindNode(*native, 4)->find("kind")->as_string() == "button");
     CHECK(NodeValue(*native, 6) == 0.5);
+    const Json* presentation = FindNode(*native, 6) ? FindNode(*native, 6)->find("presentation") : nullptr;
+    CHECK(version == "1.3" ? presentation && presentation->as_number() == 0 : !presentation);
     CHECK(NodeValue(*lua, 6) == 0.5);
     const Json* table = FindNode(*native, 10);
     CHECK(table && table->find("kind")->as_string() == "table" && table->find("columns")->as_number() == 2 &&

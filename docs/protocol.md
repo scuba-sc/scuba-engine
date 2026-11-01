@@ -89,7 +89,7 @@ Binding a non-loopback address (`--bind`) exposes the unauthenticated bridge to 
 
 ## Widgets (`widgets.*`, `src/hostd/widgets_bridge.{h,cpp}`)
 
-`scuba-hostd` renders sco-core's renderer-neutral panels (the `sco.widgets` 1.0/1.1 host
+`scuba-hostd` renders sco-core's renderer-neutral panels (the `sco.widgets` host
 service, `include/sco/widgets.h`) through `StudioWidgetRenderer`, a `sco::widgets::Renderer`.
 Every 50 ms on the game thread it calls `sco::widgets::RenderPanel` for each live panel and
 publishes a panel again only when its snapshot was rebuilt (`sco::widgets::SnapshotBuilds()`
@@ -110,7 +110,7 @@ and calls the owning plugin exactly as an in-game renderer would.
   `column` node.
 - `kind` is one of `label`, `button`, `toggle`, `slider`, `combo`, `list`, `text_input`,
   `table`, `row` or `column`.
-- Every field is always present; fields that don't apply to a node's kind are zero or empty.
+- Base fields are always present; fields that don't apply to a node's kind are zero or empty.
   `items` holds combo/list options, or the row-major cells of a `table` with `columns` columns.
 - The 1.1 node extension: `extended` is true when the plugin submitted a `sco_widget_node_1_1`.
   `severity` is `none`, `info`, `warning` or `error`, and `tooltip` is plain text.
@@ -118,12 +118,17 @@ and calls the owning plugin exactly as an in-game renderer would.
   starting at `first_row`.
 - `revision` increases with every snapshot the bridge publishes, across all panels.
 - A `text_input` flagged `password` is sent with `text` empty. The plaintext stays in the host.
+- When the compiled host snapshot includes widget 1.3 numeric presentation, each node also
+  carries `presentation`: `0` for NUMBER, `1` for INTEGER or `2` for INTEGER_PERCENT.
+  Integer modes apply to sliders and require integral values. Older host snapshots omit
+  this field; consumers must treat its absence as NUMBER. The Studio widget renderer uses
+  whole-number steps for integer modes and a `%` suffix for INTEGER_PERCENT.
 
 ### Methods
 
 | Method | Params | Result |
 |---|---|---|
-| `widgets.list` | none | `{"started": bool, "capabilities": {"service": "sco.widgets", "version": "1.1", "features": [...], "limits": {"max_panels", "max_nodes", "max_total_nodes", "max_items", "max_columns", "max_text", "max_events"}, "events": [...]}, "panels": [snapshot...]}` |
+| `widgets.list` | none | `{"started": bool, "capabilities": {"service": "sco.widgets", "version": "1.2" or "1.3", "features": [...], "limits": {"max_panels", "max_nodes", "max_total_nodes", "max_items", "max_columns", "max_text", "max_events", "max_tag"}, "events": [...]}, "panels": [snapshot...]}` |
 | `widgets.get` | `{"id": string}` | one snapshot |
 | `widgets.event` | `{"panel": string, "node_id": int, "kind": string, ...payload}` | `{"result": "OK", "revision": number}` |
 
@@ -133,7 +138,7 @@ and calls the owning plugin exactly as an in-game renderer would.
 |---|---|
 | `button` | none |
 | `toggle` | `value`: 0 or 1 |
-| `slider` | `value`, within `[minimum, maximum]` |
+| `slider` | `value`, within `[minimum, maximum]`; integral for INTEGER/INTEGER_PERCENT presentation |
 | `combo`, `list` | `index`: -1 or an item index |
 | `text_input` | `text`: at most 255 bytes |
 | `page` | `row`: the new first visible row of a paged list or table |
@@ -141,6 +146,10 @@ and calls the owning plugin exactly as an in-game renderer would.
 The plugin's callback runs before the response is sent. The response's `result` is sco-core's
 `ResultName` for the dispatching render (`OK`, `CRASHED`, ...). A non-button event changes the
 host-held value, so a `widgets.snapshot` event follows.
+
+The bridge reports version `1.3` and feature `numeric_presentation` only when both the SDK
+declaration and host snapshot field are available. Otherwise it retains version `1.2` and
+omits that feature and field. The released RC2 host-source kit supports the 1.3 metadata.
 
 Errors:
 
