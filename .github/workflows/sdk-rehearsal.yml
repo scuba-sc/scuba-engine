@@ -1,0 +1,176 @@
+name: SDK development rehearsal
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-rehearsal-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  rehearsal:
+    name: SDK rehearsal (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    env:
+      CORE_COMMIT: bf56d2879393b2b5a603256347fc1d3cf9a1a751
+      HOST_SHA256: d41724ce46e34fa05a3ebfebc89ec3c16e6a2996061a183281dd17bcaa7fe0a8
+      SCUBA_DEV_SDK_ARCHIVE_DIR: ${{ github.workspace }}/sdk-artifacts
+      PYTHON: python
+    steps:
+      - name: Keep checkout bytes unchanged
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: scuba-sc/sco-core
+          ref: bf56d2879393b2b5a603256347fc1d3cf9a1a751
+          path: coordinated-core
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - name: Set up x64 MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Install Ninja
+        run: python -m pip install ninja==1.11.1.4
+      - name: Install Lua 5.4
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lua5.4
+      - name: Build and verify development archives
+        id: verify
+        run: |
+          set -o pipefail
+          mkdir -p evidence sdk-artifacts sdk-extracted
+          {
+            test "$(git -C coordinated-core rev-parse HEAD)" = "$CORE_COMMIT"
+            test -z "$(git -C coordinated-core status --porcelain --untracked-files=no)"
+            python tools/package_dev_sdk.py coordinated-core sdk-artifacts
+            python tools/package_dev_sdk.py coordinated-core sdk-artifacts legacy
+            python tools/verify_dev_sdk.py sdk-artifacts/sco-sdk-host-source-sc-2.4.0.zip "$HOST_SHA256" "$CORE_COMMIT"
+            # Validate the complete combined inventory and trusted hash before extraction.
+            python -c 'import os, runpy; from pathlib import Path; m = runpy.run_path("tests/test_actor_stats_fixture.py"); m["inspect_archive"](Path("sdk-artifacts/sco-sdk-2.4.0.zip"), m["PLUGIN_SHA256"], "sco-sdk-2.4.0", "legacy", os.environ["CORE_COMMIT"])'
+            python -m zipfile -e sdk-artifacts/sco-sdk-2.4.0.zip sdk-extracted
+            python tests/test_actor_stats_fixture.py \
+              --host-archive sdk-artifacts/sco-sdk-host-source-sc-2.4.0.zip \
+              --plugin-archive sdk-artifacts/sco-sdk-2.4.0.zip \
+              --plugin-root sdk-extracted/sco-sdk-2.4.0 --source "$CORE_COMMIT"
+          } 2>&1 | tee evidence/archives.log
+      - name: Configure and build engine
+        id: engine_build
+        if: ${{ !cancelled() && steps.verify.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          cmake --preset core-main-bf56-rehearsal -B build-sdk-rehearsal \
+            -DSCUBA_ACTOR_STATS_SDK_DIR:PATH="$GITHUB_WORKSPACE/sdk-extracted/sco-sdk-2.4.0" 2>&1 | tee evidence/engine-configure.log
+          cmake --build build-sdk-rehearsal --parallel 4 2>&1 | tee evidence/engine-build.log
+      - name: Run full engine CTest serially
+        if: ${{ !cancelled() && steps.engine_build.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          ctest --test-dir build-sdk-rehearsal -C Release --parallel 1 --output-on-failure \
+            --output-junit "$GITHUB_WORKSPACE/evidence/engine-ctest.xml" 2>&1 | tee evidence/engine-ctest.log
+      - name: Build isolated archive plugins and check compiler dependencies
+        id: plugin_build
+        if: ${{ !cancelled() && steps.verify.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          cmake -S tests/sdk_archive_plugins -B build-sdk-archive-plugins -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSCUBA_PLUGIN_SDK_ROOT:PATH="$GITHUB_WORKSPACE/sdk-extracted/sco-sdk-2.4.0" 2>&1 | tee evidence/plugins-configure.log
+          cmake --build build-sdk-archive-plugins --parallel 4 2>&1 | tee evidence/plugins-build.log
+          ninja -C build-sdk-archive-plugins -t deps > evidence/plugins-deps.txt
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          workspace = Path(os.environ['GITHUB_WORKSPACE']).resolve()
+          build = workspace / 'build-sdk-archive-plugins'
+          sdk = (workspace / 'sdk-extracted/sco-sdk-2.4.0').resolve()
+          plugins = ('mp_chat', 'org_social', 'diegetic_asop', 'diegetic_shop_inv')
+          seen = {name: False for name in plugins}
+          target = None
+          def within(path, root):
+              return path == root or root in path.parents
+          for line in (workspace / 'evidence/plugins-deps.txt').read_text(encoding='utf-8').splitlines():
+              if not line.startswith(' '):
+                  match = re.match(r'CMakeFiles[/\\]([^/\\]+)\.dir[/\\].*: #deps [1-9][0-9]*,.*\(VALID\)$', line)
+                  target = match.group(1) if match else None
+                  continue
+              if target not in (*plugins, 'sco-plugin-check'):
+                  continue
+              dep = Path(line.strip())
+              dep = (dep if dep.is_absolute() else build / dep).resolve()
+              allowed = [sdk]
+              if target in plugins:
+                  allowed.append((workspace / 'plugins' / target).resolve())
+                  if within(dep, sdk / 'include'):
+                      seen[target] = True
+              if within(dep, workspace) and not any(within(dep, root) for root in allowed):
+                  raise SystemExit(f'{target}: unexpected workspace dependency: {dep}')
+          if not all(seen.values()):
+              raise SystemExit(f'missing compiler SDK-header dependencies: {seen}')
+          print('Compiler dependencies use the extracted SDK and each plugin’s own sources:', seen)
+          PY
+      - name: Run eight archive plugin checks
+        if: ${{ !cancelled() && steps.plugin_build.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          ctest --test-dir build-sdk-archive-plugins -C Release --parallel 1 --output-on-failure \
+            --output-junit "$GITHUB_WORKSPACE/evidence/plugins-ctest.xml" 2>&1 | tee evidence/plugins-ctest.log
+      - name: Build and run host-kit UDP burst regression
+        if: ${{ !cancelled() && steps.verify.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          cmake -S tests/udp_burst -B build-sdk-udp-burst -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DSCUBA_SDK_ARCHIVE_DIR:PATH="$SCUBA_DEV_SDK_ARCHIVE_DIR" \
+            -DSCUBA_SDK_HOST_SOURCE_SHA256="$HOST_SHA256" 2>&1 | tee evidence/udp-configure.log
+          cmake --build build-sdk-udp-burst --parallel 4 2>&1 | tee evidence/udp-build.log
+          ctest --test-dir build-sdk-udp-burst -C Release --parallel 1 --output-on-failure \
+            --output-junit "$GITHUB_WORKSPACE/evidence/udp-ctest.xml" 2>&1 | tee evidence/udp-ctest.log
+      # Both package gates run even if another consumer check failed, provided the kits verified.
+      - name: Full combined SDK archive test
+        if: ${{ !cancelled() && steps.verify.outcome == 'success' }}
+        env:
+          SCO_SDK_NO_LUA: ${{ runner.os == 'Windows' && '1' || '0' }}
+        run: |
+          set -o pipefail
+          bash coordinated-core/sdk/test-zip.sh "$GITHUB_WORKSPACE/sdk-artifacts/sco-sdk-2.4.0.zip" 2>&1 | tee evidence/sdk-combined-test-zip.log
+      - name: Full host-source SDK archive test
+        if: ${{ !cancelled() && steps.verify.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          bash coordinated-core/sdk/test-zip.sh "$GITHUB_WORKSPACE/sdk-artifacts/sco-sdk-host-source-sc-2.4.0.zip" 2>&1 | tee evidence/sdk-host-test-zip.log
+      - name: Upload rehearsal evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-rehearsal-${{ matrix.os }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 30
