@@ -138,21 +138,25 @@ function renderNode(panel: string, item: TreeNode): VNode {
       return h('label', decorate(item, ''), [input, ...caption, ...severityBadge(item)]);
     }
     case 'slider': {
+      const integer = n.presentation === 1 || n.presentation === 2;
+      const displayedValue = `${n.value}${n.presentation === 2 ? '%' : ''}`;
       const input = h(
         'input',
-        controlAttrs(item, { type: 'range', min: String(n.minimum), max: String(n.maximum), step: 'any', value: String(n.value) }),
+        controlAttrs(item, { type: 'range', min: String(n.minimum), max: String(n.maximum),
+          step: integer ? '1' : 'any', value: String(n.value),
+          ...(n.presentation === 2 ? { 'aria-valuetext': displayedValue } : {}) }),
       );
       input.on = {
         change: (s) => {
           const value = Number(s.value);
-          if (!Number.isFinite(value) || value < n.minimum || value > n.maximum) return null;
+          if (!Number.isFinite(value) || value < n.minimum || value > n.maximum || (integer && !Number.isInteger(value))) return null;
           return { panel, node_id: n.id, kind: 'slider', value };
         },
       };
       return h('label', decorate(item, ''), [
         ...caption,
         input,
-        h('output', { class: 'w-value' }, undefined, String(n.value)),
+        h('output', { class: 'w-value' }, undefined, displayedValue),
         ...severityBadge(item),
       ]);
     }
