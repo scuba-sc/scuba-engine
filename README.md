@@ -59,6 +59,8 @@ cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.4.0-rc.2-assets
 On Windows add `-A x64` to the configure and `--config Release` / `-C Release` to build and ctest.
 The separate [core-main SDK rehearsal](docs/engine/core-main-sdk-rehearsal.md) is an opt-in
 development profile with its own source and archive hash; it does not change this published default.
+For a plugin-only build from the published SDK archive, see
+[Build the plugins with the published plugin SDK only](docs/engine/plugin-integration.md#build-the-plugins-with-the-published-plugin-sdk-only).
 
 ## Build the studio
 
