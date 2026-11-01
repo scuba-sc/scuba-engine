@@ -31,6 +31,7 @@ test('advertises sixteen explicit tools with object schemas and mutation annotat
   expect(tools.every(t => t.inputSchema.additionalProperties === false && !('map' in t) && !('method' in t))).toBe(true);
   expect(tools.find(t => t.name === 'host_status').annotations.readOnlyHint).toBe(true);
   expect(tools.find(t => t.name === 'invoke_command').annotations.destructiveHint).toBe(true);
+  expect(tools.find(t => t.name === 'mock_spawn_entity').inputSchema.required).toEqual(['class', 'zone', 'pos']);
 });
 
 test('maps every approved tool to the actual hostd field names', async () => {
@@ -78,6 +79,7 @@ test('rejects invalid input without making any bridge call', async () => {
     ['send_widget_event', { panel_id: 'p', node_id: 1, kind: 'tab' }],
     ['mock_spawn_entity', {}],
     ['mock_spawn_entity', { class: 'ok' }],
+    ['mock_spawn_entity', { class: 'ok', zone: 4 }],
     ['mock_spawn_entity', { class: 'ok', actor: 'yes' }],
     ['mock_spawn_entity', { class: 'ok', zone: -1 }],
     ['mock_move_entity', { pos: [1, 2, 3] }],
