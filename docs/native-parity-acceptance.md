@@ -3,13 +3,19 @@
 Local candidate based on live main `8373c52012d2f58fc773f796e199de81c16eb571`.
 This is not browser retirement evidence, a release, or an in-game qualification.
 
+Current supported native runtime targets are Linux x64 and Windows x64. The
+macOS headless-tooling result below is historical developer-tool evidence, not
+runtime support: the pinned sco-core 2.4.0 package does not compile with Apple's
+libc++ `std::atomic<std::shared_ptr<T>>` implementation. The browser Studio and
+standalone portable tooling remain separate from the runtime matrix.
+
 ## Integrated
 
 - Plugin surface: editor-owned isolated ImGui context sharing the backend font atlas; selected plugin rendered through `ScoHost::RenderPanel` and SDK adapter, never a plugin-specific recreation. Each `PanelDraw` owns its own cloned UI. D3D uses that clone, binds its live backend viewport for recording, and retires the clone through the existing main-thread retirement queue. Its upload ring is sized for up to four surface passes plus the editor per buffered frame.
 - Plugin surface picker is reopenable from View; `--diegetic [PANEL_ID]` starts with the chosen published panel (default first). Ray/plane UV mapping supplies local pointer, keyboard/text, focus and outside/Escape release. World transform axes use the view matrix columns. This is one camera-facing surface, not six browser environments.
 - Designer is reachable from View: bounded outline, properties, palette, mutations, undo/redo, preview, C++ source/copy. Folder export remains visibly disabled in the actual application; the reusable model exporter seam was separately exercised by the worker, not wired as a misleading success action.
 - NetSandbox is reachable from View: real separate hostd peers, dedicated broker worker, bounded start/stop/refresh/join/leave/send and counters. Its CMake-generated hostd path names the binary from this build. No peer widget rendering.
-- Portable CMake target `scuba_native_tools` builds actual UI and SDK ImGui renderer on macOS, allowing real headless UI/input tests, not just model checks.
+- The standalone portable CMake target `scuba_native_tools` has macOS headless UI/input test evidence; that tooling result does not cover the full runtime target or its pinned SDK dependency.
 
 The feature-specific notes distinguish standalone evidence from this integrated candidate.
 The bounded native surfaces do not establish complete web/editor parity or browser retirement.

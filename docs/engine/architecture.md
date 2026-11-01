@@ -9,6 +9,13 @@ parity (see [Phases](#phases)).
 
 Nothing here has run inside Star Citizen. The engine uses mock game services only.
 
+The supported native host runtime targets are Linux x64 and Windows x64. The native editor app
+(`scuba-engine.exe`) is currently Windows-only; the Linux editor remains a planned phase. macOS is
+not a supported native runtime target for the pinned sco-core 2.4.0 package because Apple's
+libc++ does not implement the C++20 `std::atomic<std::shared_ptr<T>>` specialization used by that
+package. Browser Studio use and standalone portable developer tools are separate from runtime
+support.
+
 ## Principles
 
 1. **sco-core is the boundary.** The engine is a host of the published SDK 2.4.0 release
@@ -49,11 +56,11 @@ tests/test_engine_core.cpp  VFS, overlay, jobs, loader, picking (no GPU)
 
 | Target | Platforms | Contains | Links |
 |---|---|---|---|
-| `scuba_engine_core` | all | jobs, log, VFS backends and stack, model decode and loader, camera and picking math | `sco_vfs`, `scuba_assets` (bounded OBJ/CGF readers), miniz |
-| `scuba_engine_sco` | all | `ScoHost`: kernel boot, tick, plugins, widget panels | `scuba_kernel` (sco::app + mock game) |
+| `scuba_engine_core` | Linux, Windows | jobs, log, VFS backends and stack, model decode and loader, camera and picking math | `sco_vfs`, `scuba_assets` (bounded OBJ/CGF readers), miniz |
+| `scuba_engine_sco` | Linux, Windows | `ScoHost`: kernel boot, tick, plugins, widget panels | `scuba_kernel` (sco::app + mock game) |
 | `scuba_engine_runtime` | Windows | Win32 window, D3D12 renderer, ImGui shell, input router | the two above, Dear ImGui, `sco_widgets_imgui` |
 | `scuba-engine` | Windows | the editor | runtime |
-| `scuba-pack` | all | .scpak tool | core |
+| `scuba-pack` | Linux, Windows | .scpak tool | core |
 
 CMake: `SCUBA_BUILD_ENGINE` (default ON). With it on, Windows builds turn on the kit's
 host-only `SCO_WIDGETS_IMGUI` adapter and point it at the engine's ImGui. The language level is

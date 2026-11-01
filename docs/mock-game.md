@@ -253,6 +253,7 @@ not implement player physics/ammunition consumption. Private-session state
 does not authenticate peers. Mining counters and quantum progression are
 tick-count driven. These are deterministic test doubles, not game adapters.
 
-Linux GCC and Windows MSVC have not been run locally; their first compilation
-is the repository's future CI. The new implementation uses standard C++20 and
-the portable kit/bridge API, with no new platform-specific system calls.
+Linux GCC and Windows MSVC are validated separately in hosted CI. The
+implementation uses standard C++20 and the portable kit/bridge API, with no new
+platform-specific system calls. These builds validate synthetic mock behavior,
+not game-native providers or gameplay.

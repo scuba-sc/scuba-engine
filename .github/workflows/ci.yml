@@ -62,7 +62,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - name: Download and verify published plugin SDK archive
@@ -85,7 +85,8 @@ jobs:
               -DSCUBA_TEST_PLUGIN_SDK_CONSUMER=ON \
               -DSCUBA_PLUGIN_SDK_ARCHIVE_PATH="$GITHUB_WORKSPACE/sdk-plugin-artifacts/sco-sdk-2.4.0.zip"
           else
-            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+            echo "Unsupported native runtime platform: $RUNNER_OS" >&2
+            exit 1
           fi
       - name: Build
         run: cmake --build build --config Release --parallel

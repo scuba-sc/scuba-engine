@@ -1,6 +1,6 @@
 # scuba-engine
 
-A cross-platform (Windows, macOS, Linux) studio for building and testing [sco-core](https://github.com/scuba-sc/sco-core) plugins and UI without running the game: a native sandbox host (`scuba-hostd`) built from the published sco-core SDK, and a browser studio for widget design, 3D in-world panel projection, DataCore and asset inspection, and multi-peer networking tests.
+The browser studio is an OS-independent tool for building and testing [sco-core](https://github.com/scuba-sc/sco-core) plugins and UI without the game. It provides widget design, 3D in-world panel projection, DataCore and asset inspection, and multi-peer networking tests. `scuba-hostd` is the native sandbox host; its supported runtime targets are Windows x64 and Linux x64. The native `scuba-engine.exe` editor currently targets Windows x64.
 
 Status: integrated out-of-game sandbox. Licence: GPL-3.0-only ([LICENSE](LICENSE)). This project ships no game files, and **nothing here has been verified inside Star Citizen**.
 
@@ -36,6 +36,7 @@ textures yet), CPU picking.
 ## Requirements
 
 - CMake 3.21+, a C++20 compiler (clang, GCC or MSVC), 64-bit
+- Supported native host runtime builds: Linux x64 with GCC/Clang and Windows x64 with MSVC
 - Node.js 22.12+ (24 is what CI uses) for the studio
 - Python 3 for native plugin export; Bun and Lua 5.4 for the generated-plugin CTest
 - Network access on first configure (the sco-core SDK kit is downloaded), or a local copy of the release assets
@@ -90,4 +91,4 @@ The bridge is unauthenticated and loopback-only by default; it refuses foreign `
 
 ## Limits
 
-The `game.*` services are deterministic mock models, not the game's native adapters: they provide no real physics, entitlement, authenticated game networking, or proprietary catalogs. A shop purchase only debits synthetic balance; it grants no inventory. `game.asop` and `game.contracts` return fixed synthetic values; the game pack holds their capabilities off until an in-game run confirms them. Mock tests do not establish real native service support or gameplay. C# and Lua generation support only the published builder subset; native folder export supports C/C++ only. C# requires a separate dotnet environment; CI is its first compile opportunity. Linux GCC and Windows MSVC platform paths require their own builds; a macOS pass is not cross-platform certification.
+The `game.*` services are deterministic mock models, not the game's native adapters: they provide no real physics, entitlement, authenticated game networking, or proprietary catalogs. A shop purchase only debits synthetic balance; it grants no inventory. `game.asop` and `game.contracts` return fixed synthetic values; the game pack holds their capabilities off until an in-game run confirms them. Mock tests do not establish real native service support or gameplay. C# and Lua generation support only the published builder subset; native folder export supports C/C++ only. C# requires a separate dotnet environment; CI is its first compile opportunity. Linux/GCC and Windows/MSVC are the supported native runtime build paths and are validated separately in CI. The pinned sco-core 2.4.0 host kit does not compile with Apple's libc++ because `std::atomic<std::shared_ptr<T>>` is not implemented there; macOS is not a supported native runtime target. Browser Studio use and standalone portable developer tools remain separate from that runtime support statement.
