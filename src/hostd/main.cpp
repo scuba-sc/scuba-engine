@@ -211,22 +211,50 @@ int main(int argc, char** argv) {
     RegisterAllModules(registry, host);
     net_sim::RegisterNetSim(registry, broadcaster, argv[0]);
 
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    const KernelStartResult kernelStart = kernel.StartDetailed(kernelOptions, KernelLog);
+    if (kernelStart != KernelStartResult::Started) {
+        std::fprintf(stderr, "scuba-hostd: the sco-core host kernel did not start%s%s\n",
+                     kernel.profileError().empty() ? "" : ": ", kernel.profileError().c_str());
+        if (kernelStart == KernelStartResult::RetainDependencies || kernel.retained())
+            std::_Exit(1);
+        g_logBroadcaster = nullptr;
+        return 1;
+    }
+#else
     if (!kernel.Start(kernelOptions, KernelLog)) {
         std::fprintf(stderr, "scuba-hostd: the sco-core host kernel did not start%s%s\n",
                      kernel.profileError().empty() ? "" : ": ", kernel.profileError().c_str());
         return 1;
     }
+#endif
 
     if (!scenarioPath.empty()) {
         const bool passed = RunScenario(scenario);
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+        const auto stopped = kernel.StopDetailed();
+        if (stopped != KernelStopResult::Stopped && stopped != KernelStopResult::NotStarted) {
+            std::fprintf(stderr, "scuba-hostd: kernel retirement uncertain; terminating with dependencies retained\n");
+            std::_Exit(1);
+        }
+        g_logBroadcaster = nullptr;
+#else
         kernel.Stop();
+#endif
         return passed ? 0 : 1;
     }
 
     std::string error;
     if (!server.Start(&error)) {
         std::fprintf(stderr, "scuba-hostd: %s\n", error.c_str());
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+        const auto stopped = kernel.StopDetailed();
+        if (stopped != KernelStopResult::Stopped && stopped != KernelStopResult::NotStarted)
+            std::_Exit(1);
+        g_logBroadcaster = nullptr;
+#else
         kernel.Stop();
+#endif
         return 1;
     }
     if (serverOptions.bindAddress != "127.0.0.1")
@@ -249,7 +277,15 @@ int main(int argc, char** argv) {
     std::printf("scuba-hostd: stopping\n");
     std::fflush(stdout);
     server.Stop();
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    const auto stopped = kernel.StopDetailed();
+    if (stopped != KernelStopResult::Stopped && stopped != KernelStopResult::NotStarted) {
+        std::fprintf(stderr, "scuba-hostd: kernel retirement uncertain; terminating with dependencies retained\n");
+        std::_Exit(1);
+    }
+#else
     kernel.Stop();
+#endif
     g_logBroadcaster = nullptr;
     return 0;
 }

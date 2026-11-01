@@ -212,6 +212,21 @@ add_test(NAME product_profile_lifecycle COMMAND test_product_profile
   "${CMAKE_CURRENT_BINARY_DIR}/product-profile-fixture" $<TARGET_FILE:mock_game_probe>)
 set_tests_properties(product_profile_lifecycle PROPERTIES TIMEOUT 60)
 
+if(SCUBA_CORE_LIFECYCLE_CANDIDATE)
+  # Compile the fault hooks only into this test binary. Each retained-outcome
+  # case runs in a fresh process because the core contract forbids restart.
+  add_executable(test_kernel_lifecycle test_kernel_lifecycle.cpp ../src/hostd/kernel.cpp)
+  target_include_directories(test_kernel_lifecycle PRIVATE "${PROJECT_SOURCE_DIR}/src")
+  target_link_libraries(test_kernel_lifecycle PRIVATE scuba_mock_game sco_lua_game)
+  target_compile_definitions(test_kernel_lifecycle PRIVATE SCUBA_VERSION="${PROJECT_VERSION}"
+    SCUBA_CORE_LIFECYCLE_CANDIDATE SCUBA_KERNEL_TESTING)
+  scuba_warnings(test_kernel_lifecycle)
+  foreach(case clean refusal startup-retained stop-retained)
+    add_test(NAME kernel_lifecycle_${case} COMMAND test_kernel_lifecycle ${case})
+    set_tests_properties(kernel_lifecycle_${case} PROPERTIES TIMEOUT 60)
+  endforeach()
+endif()
+
 # Product distribution export: the tree --product accepts again, and every refusal that keeps a
 # half-written distribution from existing. Portable, so it runs everywhere the core builds.
 add_executable(test_product_export test_product_export.cpp)
@@ -354,6 +369,15 @@ add_test(NAME netsim_two_peer_delivery COMMAND test_net_sim $<TARGET_FILE:scuba-
 add_test(NAME netsim_four_peer_join_leave COMMAND test_net_sim $<TARGET_FILE:scuba-hostd> membership)
 add_test(NAME netsim_eight_peer_bounds COMMAND test_net_sim $<TARGET_FILE:scuba-hostd> bounds)
 set_tests_properties(netsim_two_peer_delivery netsim_four_peer_join_leave netsim_eight_peer_bounds PROPERTIES TIMEOUT 120)
+
+add_executable(test_net_sim_unclean_peer net_sim_unclean_peer.cpp)
+scuba_warnings(test_net_sim_unclean_peer)
+add_executable(test_net_sim_broker test_net_sim_broker.cpp)
+target_link_libraries(test_net_sim_broker PRIVATE scuba_net_sim)
+scuba_warnings(test_net_sim_broker)
+add_test(NAME netsim_unclean_shutdown_is_terminal
+  COMMAND test_net_sim_broker $<TARGET_FILE:test_net_sim_unclean_peer>)
+set_tests_properties(netsim_unclean_shutdown_is_terminal PROPERTIES TIMEOUT 30)
 
 find_program(SCUBA_NODE_EXECUTABLE node REQUIRED)
 add_test(NAME studio_mcp_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"

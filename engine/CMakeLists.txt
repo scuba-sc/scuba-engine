@@ -41,6 +41,9 @@ target_include_directories(scuba_engine_sco PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(scuba_engine_sco PUBLIC scuba_engine_core PRIVATE scuba_kernel)
 target_compile_definitions(scuba_engine_sco PRIVATE SCUBA_VERSION="${PROJECT_VERSION}"
   SCUBA_SDK_VERSION_STRING="${SCUBA_SDK_VERSION}")
+if(SCUBA_CORE_LIFECYCLE_CANDIDATE)
+  target_compile_definitions(scuba_engine_sco PUBLIC SCUBA_CORE_LIFECYCLE_CANDIDATE)
+endif()
 scuba_warnings(scuba_engine_sco)
 
 add_library(scuba_imgui_core STATIC

@@ -6,6 +6,7 @@
 #include "sco/widgets.h"
 
 #include <cstring>
+#include <cstdlib>
 
 #ifndef SCUBA_SDK_VERSION_STRING
 #define SCUBA_SDK_VERSION_STRING "unknown"
@@ -29,7 +30,13 @@ void ForwardKernelLog(const char* line) {
 
 }  // namespace
 
-ScoHost::~ScoHost() { Stop(); }
+ScoHost::~ScoHost() {
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    if (!StopChecked()) std::_Exit(EXIT_FAILURE);
+#else
+    Stop();
+#endif
+}
 
 Status ScoHost::Start(const ScoHostOptions& options) {
     if (started_) return Status::Fail("sco host already started");
@@ -42,10 +49,19 @@ Status ScoHost::Start(const ScoHostOptions& options) {
     k.mockGame = options.mockGame;
     k.hostVersion = "scuba-engine " SCUBA_VERSION;
     start_ = std::chrono::steady_clock::now();
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    const auto result = TheKernel().StartDetailed(k, &ForwardKernelLog);
+    if (result != hostd::KernelStartResult::Started) {
+        retained_ = result == hostd::KernelStartResult::RetainDependencies || TheKernel().retained();
+        profileError_ = TheKernel().profileError();
+        return Status::Fail(profileError_.empty() ? "sco::app::StartDetailed refused startup" : profileError_);
+    }
+#else
     if (!TheKernel().Start(k, &ForwardKernelLog)) {
         profileError_ = TheKernel().profileError();
         return Status::Fail(profileError_.empty() ? "sco::app::Start failed (see the sco log channel)" : profileError_);
     }
+#endif
     started_ = true;
     log::Info("sco", "kernel started; " + std::to_string(Plugins().size()) + " plugin folder(s)");
     return Status::Ok();
@@ -58,10 +74,31 @@ void ScoHost::Tick() {
 }
 
 void ScoHost::Stop() {
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    (void)StopChecked();
+#else
     if (!started_) return;
     TheKernel().Stop();
     started_ = false;
+#endif
 }
+
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+bool ScoHost::StopChecked() {
+    if (retained_) return false;
+    if (!started_) return true;
+    const auto result = TheKernel().StopDetailed();
+    if (result == hostd::KernelStopResult::Stopped || result == hostd::KernelStopResult::NotStarted) {
+        started_ = false;
+        return true;
+    }
+    if (result == hostd::KernelStopResult::RetainDependencies) {
+        started_ = false;
+        retained_ = true;
+    }
+    return false;
+}
+#endif
 
 std::vector<ScoPlugin> ScoHost::Plugins() const {
     std::vector<ScoPlugin> out;

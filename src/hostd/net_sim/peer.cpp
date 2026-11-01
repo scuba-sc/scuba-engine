@@ -10,6 +10,7 @@
 #include "sco_lua_game.h"
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <deque>
 #include <iostream>
 #include <mutex>
@@ -27,6 +28,7 @@ std::string ipcPrefix;
 std::set<uint64_t> remotePeers;
 bool sessionActive = false;
 int eventOwner = 0;
+bool coreStarted = false;
 void SessionEvent(const char* event, const void* data, void*) {
     if (std::string_view(event) == SCO_NET_EVENT_STATE) {
         sessionActive = static_cast<const sco_net_state_event*>(data)->active != 0;
@@ -142,7 +144,14 @@ Json Command(const Json& request) {
         ipcPrefix = Field(request, "ipcPrefix").as_string();
         platform.builtins = builtins;
         platform.nBuiltins = Field(request, "sample").as_bool() ? 2u : 1u;
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+        const auto startup = sco::app::StartDetailed(platform);
+        if (startup == sco::app::StartResult::RetainDependencies) std::_Exit(EXIT_FAILURE);
+        if (startup != sco::app::StartResult::Started) throw std::runtime_error("kernel start refused before exposure");
+#else
         if (!sco::app::Start(platform)) throw std::runtime_error("kernel start failed");
+#endif
+        coreStarted = true;
         if (sco::Subscribe(&eventOwner, SCO_NET_EVENT_STATE, SessionEvent, nullptr) != sco::Result::Ok ||
             sco::Subscribe(&eventOwner, SCO_NET_EVENT_PEER, SessionEvent, nullptr) != sco::Result::Ok)
             throw std::runtime_error("session event subscription failed");
@@ -254,7 +263,11 @@ int PeerMain() {
         std::cout << result.dump() << '\n' << std::flush;
     }
     reader.join();
+#ifdef SCUBA_CORE_LIFECYCLE_CANDIDATE
+    if (coreStarted && sco::app::Stop() != sco::Result::Ok) std::_Exit(EXIT_FAILURE);
+#else
     sco::app::Stop();
+#endif
     return 0;
 }
 } // namespace scuba::hostd::net_sim

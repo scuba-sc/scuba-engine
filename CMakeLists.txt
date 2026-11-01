@@ -24,6 +24,12 @@ option(SCUBA_WERROR "Treat warnings in scuba-engine's own code as errors" ON)
 option(SCUBA_BUILD_ENGINE "Build the native engine: core, VFS and assets everywhere; the scuba-engine app on Windows" ON)
 option(SCUBA_TEST_PLUGIN_SDK_CONSUMER
   "Register the published plugin-SDK-only configure, build, and checker CTest" OFF)
+option(SCUBA_CORE_LIFECYCLE_CANDIDATE
+  "Build the development consumer path for StartDetailed and checked app::Stop" OFF)
+set(SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT "" CACHE STRING
+  "Exact sco-core source commit for the checked-lifecycle development profile")
+set(SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256 "" CACHE STRING
+  "Exact host-source archive SHA-256 for the checked-lifecycle development profile")
 set(SCUBA_PLUGIN_SDK_ARCHIVE_PATH "" CACHE FILEPATH
   "Optional local sco-sdk-2.4.0.zip for the plugin-SDK-only CTest (otherwise it downloads the pinned RC2 asset)")
 
@@ -45,6 +51,35 @@ if(SCUBA_BUILD_ENGINE)
   set(SCO_WIDGETS_IMGUI_INCLUDE_DIR "${SCUBA_IMGUI_DIR}" CACHE PATH "" FORCE)
 endif()
 include(cmake/ScubaSdk.cmake)
+if(SCUBA_CORE_LIFECYCLE_CANDIDATE)
+  string(LENGTH "${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}" _scuba_core_commit_length)
+  string(LENGTH "${SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256}" _scuba_core_hash_length)
+  if(NOT _scuba_core_commit_length EQUAL 40 OR
+     NOT SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT MATCHES "^[0-9a-f]+$" OR
+     NOT _scuba_core_hash_length EQUAL 64 OR
+     NOT SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256 MATCHES "^[0-9a-f]+$" OR
+     NOT SCUBA_SDK_ARCHIVE_DIR OR
+     NOT SCUBA_SDK_HOST_SOURCE_SHA256 STREQUAL SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256)
+    message(FATAL_ERROR
+      "Checked-lifecycle profile needs the exact source commit, matching host-source SHA256, and local archive directory")
+  endif()
+  execute_process(COMMAND "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/tools/curated_mock_host/verify_archive.py"
+    "${SCUBA_SDK_ARCHIVE_DIR}/sco-sdk-host-source-sc-${SCUBA_SDK_VERSION}.zip"
+    "${SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256}" "${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}"
+    COMMAND_ERROR_IS_FATAL ANY)
+  include(CheckCXXSourceCompiles)
+  set(_scuba_saved_required_includes "${CMAKE_REQUIRED_INCLUDES}")
+  set(CMAKE_REQUIRED_INCLUDES "${SCUBA_SDK_SOURCE_DIR}/include")
+  unset(SCUBA_SDK_CHECKED_LIFECYCLE CACHE)
+  unset(SCUBA_SDK_CHECKED_LIFECYCLE)
+  check_cxx_source_compiles("#include <type_traits>\n#include <utility>\n#include <sco/app.h>\nstatic_assert(std::is_same_v<decltype(sco::app::StartDetailed(std::declval<const sco::app::Platform&>())), sco::app::StartResult>);\nstatic_assert(std::is_same_v<decltype(sco::app::Stop()), sco::Result>);\nint main() { return 0; }" SCUBA_SDK_CHECKED_LIFECYCLE)
+  set(CMAKE_REQUIRED_INCLUDES "${_scuba_saved_required_includes}")
+  if(NOT SCUBA_SDK_CHECKED_LIFECYCLE)
+    message(FATAL_ERROR "Checked-lifecycle profile requires StartDetailed and result-returning app::Stop")
+  endif()
+  message(STATUS "Checked-lifecycle development profile: core ${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}")
+endif()
 include(cmake/ScubaActorStats.cmake)
 include(cmake/ScubaWarnings.cmake)
 
@@ -155,6 +190,9 @@ scuba_warnings(scuba_scenario)
 add_library(scuba_kernel STATIC src/hostd/kernel.cpp)
 target_link_libraries(scuba_kernel PUBLIC scuba_mock_game sco_lua_game)
 target_compile_definitions(scuba_kernel PRIVATE SCUBA_VERSION="${PROJECT_VERSION}")
+if(SCUBA_CORE_LIFECYCLE_CANDIDATE)
+  target_compile_definitions(scuba_kernel PUBLIC SCUBA_CORE_LIFECYCLE_CANDIDATE)
+endif()
 scuba_warnings(scuba_kernel)
 
 add_executable(scuba-hostd

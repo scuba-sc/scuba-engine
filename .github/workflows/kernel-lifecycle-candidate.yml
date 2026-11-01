@@ -1,0 +1,80 @@
+name: checked Kernel lifecycle candidate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kernel-lifecycle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  candidate:
+    name: checked lifecycle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    env:
+      CORE_COMMIT: 349911d37a2fe5bb4acbafc972615578b9da82a0
+      CORE_KIT_SHA256: 3c152ccbf9b8881edf7ac472603f46905ed3c51556ddeea0a5b3a15083683844
+    steps:
+      - name: Preserve source bytes
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: scuba-sc/sco-core
+          ref: 349911d37a2fe5bb4acbafc972615578b9da82a0
+          path: coordinated-core
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
+      - name: Package and verify the exact core host-source kit
+        run: |
+          test "$(git -C coordinated-core rev-parse HEAD)" = "$CORE_COMMIT"
+          test -z "$(git -C coordinated-core status --porcelain --untracked-files=no)"
+          python tools/package_dev_sdk.py coordinated-core sdk-artifacts
+          python tools/curated_mock_host/verify_archive.py \
+            sdk-artifacts/sco-sdk-host-source-sc-2.4.0.zip "$CORE_KIT_SHA256" "$CORE_COMMIT"
+      - name: Configure checked lifecycle profile
+        run: |
+          cmake_args=(-DSCUBA_CORE_LIFECYCLE_CANDIDATE=ON \
+            "-DSCUBA_CORE_LIFECYCLE_SOURCE_COMMIT=$CORE_COMMIT" \
+            "-DSCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256=$CORE_KIT_SHA256" \
+            "-DSCUBA_SDK_ARCHIVE_DIR=$GITHUB_WORKSPACE/sdk-artifacts" \
+            "-DSCUBA_SDK_HOST_SOURCE_SHA256=$CORE_KIT_SHA256")
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmake -S . -B build-kernel-lifecycle -A x64 "${cmake_args[@]}"
+          else
+            cmake -S . -B build-kernel-lifecycle -DCMAKE_BUILD_TYPE=Release "${cmake_args[@]}"
+          fi
+      - name: Build host and engine
+        run: cmake --build build-kernel-lifecycle --config Release --parallel
+      - name: Run lifecycle, host, and engine tests
+        run: ctest --test-dir build-kernel-lifecycle -C Release --output-on-failure --output-junit ctest.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-lifecycle-${{ matrix.os }}
+          path: |
+            ctest.xml
+            build-kernel-lifecycle/Testing/Temporary/LastTest.log
+          if-no-files-found: warn

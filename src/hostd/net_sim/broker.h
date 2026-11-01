@@ -13,11 +13,14 @@ public:
     Json Leave(uint32_t slot);
     Json Join(uint32_t slot);
     Json Peer(uint32_t slot, Json request);
-    void Stop();
+    // True only when every peer exited normally and its backing root was
+    // removed. Either result follows confirmed child-process termination.
+    bool Stop();
 private:
     std::filesystem::path executable_, dataRoot_;
     std::string pluginRoot_, passphrase_, namespace_;
     bool sample_ = true;
+    bool stopFailure_ = false;
     uint16_t port_ = 0;
     std::map<uint32_t, std::unique_ptr<Process>> peers_;
     void Spawn(uint32_t slot);

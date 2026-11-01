@@ -33,6 +33,9 @@ public:
     // True means accepted, not completed. One in-flight command, no pending queue.
     bool Start(uint32_t count, std::string pluginRoot, bool sample);
     bool Stop();
+    // Close admission, join the worker and wait for every child process to exit.
+    // False reports a nonzero/forced child exit; no child remains live on return.
+    bool Shutdown();
     bool Refresh();
     bool Join(uint32_t slot);
     bool Leave(uint32_t slot);

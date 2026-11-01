@@ -22,7 +22,7 @@ Json Request(const char* method) {
 } // namespace
 
 Broker::Broker(std::filesystem::path executable) : executable_(std::filesystem::absolute(std::move(executable))) {}
-Broker::~Broker() { Stop(); }
+Broker::~Broker() { (void)Stop(); }
 
 void Broker::Spawn(uint32_t slot) {
     auto peer = std::make_unique<Process>(executable_, std::vector<std::string>{"--net-peer"});
@@ -37,7 +37,8 @@ void Broker::Spawn(uint32_t slot) {
 }
 Json Broker::Start(uint32_t count, std::string pluginRoot, bool sample) {
     if (count < 2 || count > 8) throw std::invalid_argument("peers must be 2..8");
-    if (!peers_.empty()) throw std::runtime_error("stop the current sandbox first");
+    if (stopFailure_) throw std::runtime_error("sandbox shutdown was unclean; new sessions are disabled");
+    if (!peers_.empty() || !dataRoot_.empty()) throw std::runtime_error("stop the current sandbox first");
     std::random_device random;
     char hex[16]{};
     const auto encoded = std::to_chars(hex, hex + sizeof hex, random(), 16);
@@ -56,6 +57,7 @@ Json Broker::Start(uint32_t count, std::string pluginRoot, bool sample) {
             request.set("members", count);
             peer->Call(std::move(request));
         }
+        stopFailure_ = false;
         return Snapshot();
     } catch (...) {
         Stop();
@@ -80,19 +82,35 @@ Json Broker::Snapshot() {
     result.set("peers", std::move(peers));
     return result;
 }
-void Broker::Stop() {
+bool Broker::Stop() {
     // Joiners send BYE while the host is still alive.
-    while (!peers_.empty()) peers_.erase(std::prev(peers_.end()));
+    bool clean = !stopFailure_;
+    while (!peers_.empty()) {
+        auto peer = std::prev(peers_.end());
+        if (!peer->second->Stop()) clean = false;
+        peers_.erase(peer);
+    }
     port_ = 0;
     if (!dataRoot_.empty()) {
         std::error_code error;
         std::filesystem::remove_all(dataRoot_, error);
-        dataRoot_.clear();
+        if (error) clean = false;
+        else dataRoot_.clear();
     }
+    stopFailure_ = !clean;
+    return clean;
 }
 Json Broker::Leave(uint32_t slot) {
+    if (stopFailure_) throw std::runtime_error("sandbox shutdown was unclean; peer operations are disabled");
     if (slot == 1) throw std::runtime_error("the session host cannot leave; stop the sandbox");
-    if (peers_.erase(slot) == 0) throw std::runtime_error("peer slot is not running");
+    const auto found = peers_.find(slot);
+    if (found == peers_.end()) throw std::runtime_error("peer slot is not running");
+    const bool clean = found->second->Stop();
+    peers_.erase(found);
+    if (!clean) {
+        stopFailure_ = true;
+        throw std::runtime_error("peer did not exit cleanly; session is terminal");
+    }
     const auto count = peers_.size();
     for (auto& [key, peer] : peers_) {
         (void)key;
@@ -103,6 +121,7 @@ Json Broker::Leave(uint32_t slot) {
     return Snapshot();
 }
 Json Broker::Join(uint32_t slot) {
+    if (stopFailure_) throw std::runtime_error("sandbox shutdown was unclean; peer operations are disabled");
     if (slot < 2 || slot > 8 || peers_.contains(slot) || !peers_.contains(1)) throw std::runtime_error("invalid join slot");
     Spawn(slot);
     try {
@@ -113,12 +132,17 @@ Json Broker::Join(uint32_t slot) {
             peer->Call(std::move(request));
         }
     } catch (...) {
-        peers_.erase(slot);
+        const auto failed = peers_.find(slot);
+        if (failed != peers_.end()) {
+            if (!failed->second->Stop()) stopFailure_ = true;
+            peers_.erase(failed);
+        }
         throw;
     }
     return Snapshot();
 }
 Json Broker::Peer(uint32_t slot, Json request) {
+    if (stopFailure_) throw std::runtime_error("sandbox shutdown was unclean; peer operations are disabled");
     const auto found = peers_.find(slot);
     if (found == peers_.end()) throw std::runtime_error("peer slot is not running");
     return found->second->Call(std::move(request));
@@ -143,7 +167,8 @@ void RegisterNetSim(Registry& registry, Broadcaster& broadcaster, const std::fil
     });
     registry.register_handler("netsim.status", [publish](const Json&, const CallContext&) { return publish(); });
     registry.register_handler("netsim.stop", [broker, publish](const Json&, const CallContext&) {
-        broker->Stop(); return publish();
+        if (!broker->Stop()) throw std::runtime_error("peer did not exit cleanly; child processes have exited and the session is terminal");
+        return publish();
     });
     registry.register_handler("netsim.leave", [broker, publish](const Json& params, const CallContext&) {
         broker->Leave(Integer(params, "slot", 2, 8)); return publish();
