@@ -49,6 +49,10 @@ for plugin in mp_chat org_social diegetic_asop diegetic_shop_inv; do
 done
 ```
 
+For a Visual Studio generator, configure with `-A x64`, add `--config Release` to the build,
+and use `build-plugin-sdk/Release/sco-plugin-check.exe` for the checker commands. The staged
+plugin folders remain under `build-plugin-sdk/runtime`.
+
 For the RC2 archive, verify SHA-256
 `51a7ce266d087bcbeac39c92f26a6f905b4473883dd7ed6f0f5ca823fa88c88e` before extraction. CMake
 checks the supplied directory's SDK version and required file layout; it does not verify archive
@@ -58,12 +62,18 @@ contains plugin headers, CMake helpers, and `sco-plugin-check`, but not `sco_app
 clearly if `SCUBA_BUILD_TESTS` is enabled. Omit `SCUBA_PLUGIN_SDK_ROOT` to retain the default
 host-source kit build and its host tests.
 
-The positive consumer check is an opt-in root CTest so the normal suite stays unchanged. Configure
-with `-DSCUBA_TEST_PLUGIN_SDK_CONSUMER=ON`; set `SCUBA_PLUGIN_SDK_ARCHIVE_PATH` to a local zip for
-offline runs. If no local path is set, CTest downloads the RC2 asset and checks the same SHA-256
-before extracting it. The test configures the standalone plugin project with tests off, builds the
-four modules and checker, then checks each module with full and short tables. Run it with
-`ctest --test-dir build -R '^plugin_sdk_public_archive_consumer$' --output-on-failure`.
+The normal root CTest suite includes checks that reject unsupported plugin-SDK-only configurations.
+The positive archive consumer and its archive-preservation regression are opt-in: configure with
+`-DSCUBA_TEST_PLUGIN_SDK_CONSUMER=ON` and set `SCUBA_PLUGIN_SDK_ARCHIVE_PATH` to a local RC2 zip for
+offline runs. If no path is set, CTest downloads the RC2 asset and checks the same SHA-256 before
+extracting it. The consumer configures the standalone plugin project with tests off, builds the
+four modules and checker, then checks each module with full and short tables. Run both opt-in tests
+with `ctest --test-dir build -L plugin-sdk-integration --output-on-failure`.
+For a Visual Studio generator, add `-C Release` to that CTest command.
+
+The separate [core-main SDK rehearsal](core-main-sdk-rehearsal.md) uses an unpublished,
+source-pinned development kit. Its `tests/sdk_archive_plugins` consumer is a separate test of
+that archive; it does not exercise this standalone `cmake -S plugins` entrypoint or replace RC2.
 
 ### sc-offline
 

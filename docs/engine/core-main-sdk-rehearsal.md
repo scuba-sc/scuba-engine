@@ -59,7 +59,8 @@ ctest --test-dir build-archive-plugins --output-on-failure
 
 This test configuration builds the actual four engine plugins using only the
 extracted SDK's public headers/helper/checker and the plugins' own source files.
-It does not silently adapt the engine's old standalone plugin CMake entrypoint.
+It is independent of the standalone plugin CMake entrypoint documented in
+[plugin integration](plugin-integration.md#build-the-plugins-with-the-published-plugin-sdk-only).
 Resolved compiler dependencies are recorded in the evidence directory. The
 24-item requirements declaration is a selected C ABI subset, not an exhaustive
 host-source C++ API census. Run it with the extracted SDK tool, catalogue and
