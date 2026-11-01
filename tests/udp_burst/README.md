@@ -12,9 +12,11 @@ SDK socket before reading any. It then requires every datagram exactly once.
 There are no send retries or fixed sleeps; the one-second deadline bounds a
 failed receive. Its capacity demand is deliberately a regression workload, not
 a portable promise that UDP cannot lose data. Socket buffers, kernel accounting
-and other workloads can affect results. It is opt-in and is not added as a gate
-to the released RC2 profile. It uses the selected host-source SDK socket API;
-the optional receive-buffer diagnostic is absent in RC2 and printed as such.
+and other workloads can affect results. This separate 384-datagram diagnostic is
+opt-in; the normal engine suite retains the eight-peer 224/224 assertion as a
+gate against the published SDK. The released SDK 2.4.0 host-source kit includes
+the upstream receive-buffer fix; the RC2 profile lacks the optional capacity
+diagnostic and prints that fact.
 
 ## Reproduce
 
@@ -47,6 +49,17 @@ python tools/compare_udp_bounds.py \
   --baseline-build /workspace/engine-integration/build \
   --candidate-build /workspace/engine-integration/build-core-1b \
   --runs 6 --out /workspace/udp-comparison-new-directory
+```
+
+For the published SDK 2.4.0 comparison, use its exact hostd build and one identical test
+binary for both profiles:
+
+```sh
+python tools/compare_udp_bounds.py \
+  --baseline-build /workspace/build-kernel-lifecycle-rc2 \
+  --candidate-build /workspace/build-kernel-lifecycle-6106 \
+  --test-binary /workspace/build-kernel-lifecycle-6106/tests/test_net_sim \
+  --runs 6 --out /workspace/udp-comparison-release-new-directory
 ```
 
 The runner alternates baseline/candidate serially and records every result,
@@ -111,8 +124,36 @@ overlapped that batch's aggregate-counter window, so the explicitly serial
 batch above is the primary comparison. Earlier six baseline failures remain
 at `/workspace/engine-rc2-network-repro`.
 
-The fixed kit is a development artifact, not a published RC3 release. Default
-published RC2 consumption is unchanged. Windows/macOS, clamped-low-rmem kernels,
-forced-buffer privilege and real network/game behavior were not exercised by
-this investigation. Six successes on one Linux host do not establish universal
-stability. No core or offline source was edited or published.
+The six-run comparison above records the earlier unpublished development input,
+not the stable release. A separate paired recheck against the exact published
+SDK 2.4.0 package used engine build `/workspace/build-kernel-lifecycle-rc2` as
+the RC2 baseline and `/workspace/build-kernel-lifecycle-6106` for the release.
+The test executable was identical for both inputs (SHA-256
+`70a82df721ccf8be6ccb4d50a37c5eb7bc8b0a4ae17202b81096daea5210f64e`); the
+hostd binaries differed (RC2 SHA-256
+`1d76708fb6aea6b7253e6afd22468e799107ec79353cbb93e4f342eb950e952e`; 2.4.0
+SHA-256 `135424dc2d066e69db00dcebba51360fb4d55f4782ac405d94ff673995f9d528`).
+The 2.4.0 archive is source-bound to
+`6106fa3639cbcc28f78a1ded8de2707de019f4d3` and SHA-256
+`a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c`.
+In six alternating runs, RC2 reproduced loss all six times with aggregate
+`RcvbufErrors` deltas 64, 70, 77, 100, 75, and 100; the published release
+passed all six with zero such errors. The receipt and per-run logs are in
+`/workspace/engine-udp-rc2-vs-sdk240-20261101`. The comparison used one exact
+test binary and retained the 224/224 assertions. Kernel counters are aggregate
+to this namespace and can include unrelated traffic.
+
+The final SDK 2.4.0 package was subsequently published
+from core source `6106fa3639cbcc28f78a1ded8de2707de019f4d3`; its host-source ZIP
+SHA-256 is
+`a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c`. The
+The engine now pins this package by default. The current engine branch was
+configured from a fresh directory with the default checked lifecycle profile and
+the published plugin-SDK archive consumer enabled; its Clang 19 Release build
+passed and the full CTest suite passed 97/97, including the exact
+`netsim_eight_peer_bounds` 224/224 assertion. Earlier Release builds against the
+same exact package passed 92/92 with checked lifecycle enabled and 86/86 with
+that consumer option disabled. These are Linux synthetic loopback results, not
+a universal UDP guarantee or game/network acceptance. Windows/macOS,
+clamped-low-rmem kernels, and forced-buffer privilege were not exercised. The
+package was published by the core owner; no core source was edited here.

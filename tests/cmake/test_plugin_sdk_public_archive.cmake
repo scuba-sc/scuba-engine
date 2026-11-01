@@ -2,8 +2,8 @@ if(NOT DEFINED PROJECT_SOURCE_DIR OR NOT DEFINED TEST_BINARY_DIR OR NOT DEFINED 
   message(FATAL_ERROR "PROJECT_SOURCE_DIR, TEST_BINARY_DIR, and GENERATOR are required")
 endif()
 
-set(_archive_url "https://github.com/scuba-sc/sco-core/releases/download/sdk-v2.4.0-rc.2/sco-sdk-2.4.0.zip")
-set(_archive_sha256 "51a7ce266d087bcbeac39c92f26a6f905b4473883dd7ed6f0f5ca823fa88c88e")
+set(_archive_url "https://github.com/scuba-sc/sco-core/releases/download/sdk-v2.4.0/sco-sdk-2.4.0.zip")
+set(_archive_sha256 "0df4995624e9b094d24e9c5534b1ea7357f517c83a0a8c8ed6ad7d4d475afcbc")
 get_filename_component(_test_binary_dir "${TEST_BINARY_DIR}" ABSOLUTE)
 file(MAKE_DIRECTORY "${_test_binary_dir}")
 file(REAL_PATH "${_test_binary_dir}" _test_binary_dir)

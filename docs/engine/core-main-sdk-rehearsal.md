@@ -1,10 +1,12 @@
 # Local current-main SDK upgrade rehearsal
 
 This records a development-input rehearsal, not a published SDK upgrade or
-release acceptance. The original local batch used engine main
+release acceptance. The published 2.4.0 package at source `6106fa3639cbcc28f78a1ded8de2707de019f4d3`
+is now the engine's stable default; this isolated preset reproduces the earlier unpublished
+bf56 development-input check. The original local batch used engine main
 `f005372bd74967e53fdb8ed4cf3f4707ab3b20fa` and UDP diagnostic commit
 `5a992e932a9a1948b6557f9a6844eb2ac2446d64`; it was subsequently merged into engine
-main in #51. The preset remains opt-in and the published RC2 default pin is unchanged.
+main in #51. The preset remains opt-in and does not change the current published default.
 
 ## Exact selected inputs
 
@@ -133,7 +135,9 @@ tables, 231 method mappings match RC2). Its original coverage gaps and subsequen
 ## Rollback and subsequent publication
 
 Unset SCUBA_DEV_SDK_ARCHIVE_DIR and configure a fresh ordinary build directory
-to return to the unchanged published RC2 path. Keep separate build directories;
+to return to the default published 2.4.0 profile. To compare legacy RC2, keep a
+separate build directory and explicitly select its release tag and verified
+archive hash;
 do not mix objects/headers or hot-swap live SDK instances across profiles.
 No release/tag restoration or remote pin rollback is needed because none changed.
 

@@ -1,7 +1,7 @@
 # scuba-engine plugins: one add_subdirectory per plugin folder.
 #
 # Built from a parent project that has already included cmake/ScubaSdk.cmake, or on its own:
-#   cmake -S plugins -B build-plugins [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0-rc.2 assets>]
+#   cmake -S plugins -B build-plugins [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0 assets>]
 #   cmake --build build-plugins && ctest --test-dir build-plugins --output-on-failure
 # For a plugin-only build from an extracted public package, set SCUBA_PLUGIN_SDK_ROOT and
 # SCUBA_BUILD_TESTS=OFF; that package does not include the host-source test dependencies.

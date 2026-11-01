@@ -50,15 +50,15 @@ ctest --test-dir build --output-on-failure
 
 Build and CTest before running studio tests: Asset Lab's loader tests consume synthetic files generated at `build/tests/assets-fixtures`. If using another build directory, generate its fixtures and copy them to that location before `npm test`.
 
-Configure downloads `sco-sdk-host-source-sc-2.4.0.zip` from the latest sco-core [`sdk-v2.4.0-rc.2`](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0-rc.2) release (SDK 2.4.0, release candidate 2), checks its SHA-256 (`3d711463…77b8201`, the value in the release's `SHA256SUMS`) and builds it under `build/_sdk/`. The release tag points to source commit `844e136ccb280ad8cb43f73bc43c9447e8f6799d`; later `main` commits do not change the released archive bytes. A mismatched archive stops the configure. A build tree configured before the pin moved keeps its cached `SCUBA_SDK_*` values: configure a fresh tree, or add `-U "SCUBA_SDK_*"` once. To build offline from a local copy of the release assets:
+Configure downloads the published sco-core [`sdk-v2.4.0`](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0) host-source kit, checks SHA-256 `a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c` and source commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`, then builds it under `build/_sdk/`. A mismatched archive stops configure. A fresh root build enables checked startup/shutdown handling for this pinned SDK. Existing build trees retain cached `SCUBA_SDK_*` values and lifecycle options; use a fresh tree when moving from RC2. To build offline from a local copy of the release assets:
 
 ```sh
-cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.4.0-rc.2-assets
+cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.4.0-assets
 ```
 
 On Windows add `-A x64` to the configure and `--config Release` / `-C Release` to build and ctest.
-The separate [core-main SDK rehearsal](docs/engine/core-main-sdk-rehearsal.md) is an opt-in
-development profile with its own source and archive hash; it does not change this published default.
+The separate [core-main SDK rehearsal](docs/engine/core-main-sdk-rehearsal.md) uses an unpublished
+development profile with its own source and archive hash; it is not release evidence.
 For a plugin-only build from the published SDK archive, see
 [Build the plugins with the published plugin SDK only](docs/engine/plugin-integration.md#build-the-plugins-with-the-published-plugin-sdk-only).
 

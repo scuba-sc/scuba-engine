@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 project(scuba_engine VERSION 0.1.0 LANGUAGES C CXX)
 
-#   cmake -S . -B build [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0-rc.2 assets>]
+#   cmake -S . -B build [-DSCUBA_SDK_ARCHIVE_DIR=<dir with the sdk-v2.4.0 assets>]
 #   cmake --build build && ctest --test-dir build --output-on-failure
 # Multi-config generators (Visual Studio): add --config <cfg> to the build and -C <cfg> to ctest.
 
@@ -25,13 +25,13 @@ option(SCUBA_BUILD_ENGINE "Build the native engine: core, VFS and assets everywh
 option(SCUBA_TEST_PLUGIN_SDK_CONSUMER
   "Register the published plugin-SDK-only configure, build, and checker CTest" OFF)
 option(SCUBA_CORE_LIFECYCLE_CANDIDATE
-  "Build the development consumer path for StartDetailed and checked app::Stop" OFF)
-set(SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT "" CACHE STRING
-  "Exact sco-core source commit for the checked-lifecycle development profile")
-set(SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256 "" CACHE STRING
-  "Exact host-source archive SHA-256 for the checked-lifecycle development profile")
+  "Use checked sco-core startup and shutdown results for the pinned SDK" ON)
+set(SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT "6106fa3639cbcc28f78a1ded8de2707de019f4d3" CACHE STRING
+  "Exact sco-core source commit expected by the checked lifecycle profile")
+set(SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256 "a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c" CACHE STRING
+  "Exact host-source archive SHA-256 expected by the checked lifecycle profile")
 set(SCUBA_PLUGIN_SDK_ARCHIVE_PATH "" CACHE FILEPATH
-  "Optional local sco-sdk-2.4.0.zip for the plugin-SDK-only CTest (otherwise it downloads the pinned RC2 asset)")
+  "Optional local sco-sdk-2.4.0.zip for the plugin-SDK-only CTest (otherwise it downloads the pinned release asset)")
 
 find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -58,14 +58,13 @@ if(SCUBA_CORE_LIFECYCLE_CANDIDATE)
      NOT SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT MATCHES "^[0-9a-f]+$" OR
      NOT _scuba_core_hash_length EQUAL 64 OR
      NOT SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256 MATCHES "^[0-9a-f]+$" OR
-     NOT SCUBA_SDK_ARCHIVE_DIR OR
      NOT SCUBA_SDK_HOST_SOURCE_SHA256 STREQUAL SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256)
     message(FATAL_ERROR
-      "Checked-lifecycle profile needs the exact source commit, matching host-source SHA256, and local archive directory")
+      "Checked-lifecycle profile needs the exact source commit and matching host-source SHA256")
   endif()
   execute_process(COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/tools/curated_mock_host/verify_archive.py"
-    "${SCUBA_SDK_ARCHIVE_DIR}/sco-sdk-host-source-sc-${SCUBA_SDK_VERSION}.zip"
+    "${_scuba_sdk_zip}"
     "${SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256}" "${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}"
     COMMAND_ERROR_IS_FATAL ANY)
   include(CheckCXXSourceCompiles)
@@ -78,7 +77,7 @@ if(SCUBA_CORE_LIFECYCLE_CANDIDATE)
   if(NOT SCUBA_SDK_CHECKED_LIFECYCLE)
     message(FATAL_ERROR "Checked-lifecycle profile requires StartDetailed and result-returning app::Stop")
   endif()
-  message(STATUS "Checked-lifecycle development profile: core ${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}")
+  message(STATUS "Checked lifecycle enabled: core ${SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT}")
 endif()
 include(cmake/ScubaActorStats.cmake)
 include(cmake/ScubaWarnings.cmake)

@@ -7,18 +7,21 @@ retires the session. This is an incremental consumer slice toward the core
 roadmap's milestone 2, products and studio on the SDK. It uses the held core
 host-source contract, not the released plugin SDK ABI.
 
-This rehearsal uses RC3 candidate core source
+This historical rehearsal used RC3 candidate core source
 `44ffd1290e261e12684b38ac862ec0c4f08921df`, bootstrap 3, mock table 5,
 graph 1. Its host-source archive has 985 members and SHA-256
 `799511bfa08a7bf77a46fcf8262d3cac4a5f0e6a0ef04a28f53e6e624c01e8a0`.
 The paired core-source archive has 442 members and SHA-256
 `807a322eab2b3d8c25e10c3582008ec3ec50b6b536bc947f2b28cf4b63095c22`;
 the engine consumes the host-source profile. Core #313's implementation merged
-at `349911d37a2fe5bb4acbafc972615578b9da82a0`; core #317 later finalized the
-candidate designation at `6106fa3639cbcc28f78a1ded8de2707de019f4d3`. The latter
-changes release metadata only, but its final host-source archive is still pending
-qualification. This historical reserved-host rehearsal uses the earlier exact
-source and is separate from the checked lifecycle integration documented in
+at `349911d37a2fe5bb4acbafc972615578b9da82a0`; core #317 published the stable
+SDK from `6106fa3639cbcc28f78a1ded8de2707de019f4d3`. The published host-source
+archive has SHA-256
+`a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c` and 986
+members. The stable package is the current engine default; the following command
+reproduces the earlier candidate-specific reserved-host receipt. This historical
+reserved-host rehearsal uses the earlier exact source and is separate from the
+checked lifecycle integration documented in
 [`core-lifecycle-candidate.md`](core-lifecycle-candidate.md). Build this
 reserved-host rehearsal from its PR branch:
 
@@ -36,8 +39,9 @@ Configure verifies the archive digest, complete member checksum inventory and
 embedded source commits before extracting and compiling it. The curated target
 links one executable-resident `sco_authority` and the engine's JSON/Registry
 sources. The legacy app, scanner, plugin loader, native providers and network
-server are absent from its link graph. Default engine builds retain their
-published RC2 profile. This opt-in does not disable existing tests or features.
+server are absent from its link graph. Default engine builds use the published
+2.4.0 profile and checked lifecycle integration; this separate opt-in does not
+disable existing tests or features.
 
 Example stdin session:
 

@@ -1,12 +1,12 @@
 # First-party plugin integration map
 
 This inventory separates source modules, shipped defaults, SDK contracts, and live provider
-availability. It was checked against scuba-engine `56f5085`, sc-offline `96686b9`, sc-mp
-`6308ed3`, and sco-core `0c977d3` on 2026-10-29. Those are source-tree revisions. Product
-consumers still pin the published SDK 2.4.0 RC2 archive (`sco-sdk-2.4.0.zip`, SHA-256
-`51a7ce266d087bcbeac39c92f26a6f905b4473883dd7ed6f0f5ca823fa88c88e`, host-source commit
-`844e136ccb280ad8cb43f73bc43c9447e8f6799d`); the current core main source is not a replacement
-published artifact.
+availability. Its source audit is dated 2026-10-29: scuba-engine `56f5085`, sc-offline `96686b9`,
+sc-mp `6308ed3`, and sco-core `0c977d3`. The engine now consumes the published SDK 2.4.0 release:
+the plugin package `sco-sdk-2.4.0.zip` has SHA-256
+`0df4995624e9b094d24e9c5534b1ea7357f517c83a0a8c8ed6ad7d4d475afcbc`, and the host-source package
+has SHA-256 `a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c`, from core source
+`6106fa3639cbcc28f78a1ded8de2707de019f4d3`.
 
 ## Inventory
 
@@ -35,7 +35,7 @@ fixture, not a first-party product plugin.
 
 To compile the four first-party modules without the host-source SDK kit, extract the published
 `sco-sdk-2.4.0.zip` from the
-[`sdk-v2.4.0-rc.2` sco-core release](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0-rc.2)
+[`sdk-v2.4.0` sco-core release](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0)
 and point `SCUBA_PLUGIN_SDK_ROOT` at the extracted `sco-sdk-2.4.0` directory:
 
 ```sh
@@ -53,8 +53,8 @@ For a Visual Studio generator, configure with `-A x64`, add `--config Release` t
 and use `build-plugin-sdk/Release/sco-plugin-check.exe` for the checker commands. The staged
 plugin folders remain under `build-plugin-sdk/runtime`.
 
-For the RC2 archive, verify SHA-256
-`51a7ce266d087bcbeac39c92f26a6f905b4473883dd7ed6f0f5ca823fa88c88e` before extraction. CMake
+For the published archive, verify SHA-256
+`0df4995624e9b094d24e9c5534b1ea7357f517c83a0a8c8ed6ad7d4d475afcbc` before extraction. CMake
 checks the supplied directory's SDK version and required file layout; it does not verify archive
 provenance, and `VERSION` alone cannot distinguish release candidates. The published package
 contains plugin headers, CMake helpers, and `sco-plugin-check`, but not `sco_app` or
@@ -64,16 +64,16 @@ host-source kit build and its host tests.
 
 The normal root CTest suite includes checks that reject unsupported plugin-SDK-only configurations.
 The positive archive consumer and its archive-preservation regression are opt-in: configure with
-`-DSCUBA_TEST_PLUGIN_SDK_CONSUMER=ON` and set `SCUBA_PLUGIN_SDK_ARCHIVE_PATH` to a local RC2 zip for
-offline runs. If no path is set, CTest downloads the RC2 asset and checks the same SHA-256 before
+`-DSCUBA_TEST_PLUGIN_SDK_CONSUMER=ON` and set `SCUBA_PLUGIN_SDK_ARCHIVE_PATH` to a local release zip for
+offline runs. If no path is set, CTest downloads the published asset and checks the same SHA-256 before
 extracting it. The consumer configures the standalone plugin project with tests off, builds the
 four modules and checker, then checks each module with full and short tables. Run both opt-in tests
 with `ctest --test-dir build -L plugin-sdk-integration --output-on-failure`.
 For a Visual Studio generator, add `-C Release` to that CTest command.
 
-The separate [core-main SDK rehearsal](core-main-sdk-rehearsal.md) uses an unpublished,
+The separate [core-main SDK rehearsal](core-main-sdk-rehearsal.md) records an unpublished,
 source-pinned development kit. Its `tests/sdk_archive_plugins` consumer is a separate test of
-that archive; it does not exercise this standalone `cmake -S plugins` entrypoint or replace RC2.
+that historical archive; it does not exercise this standalone `cmake -S plugins` entrypoint.
 
 ### sc-offline
 
@@ -141,7 +141,7 @@ four-step scenario with the same four modules loaded. These are lifecycle and sa
 not native game behavior.
 
 `tests/profiles/scmp_multiplayer.json` and its expectations are a reusable external-module
-profile. Run it after building sc-mp against the published RC2 archive and placing the resulting
+profile. Run it after building sc-mp against the published SDK 2.4.0 archive and placing the resulting
 plugin in a host root:
 
 ```sh
@@ -164,7 +164,7 @@ still verify callback dispatch and reject invalid panel events.
 
 ### Shared-service readiness reconciled with sco-core
 
-Public RC2 headers/status metadata do contain `game.missions`, `game.mining`, `game.relocation`,
+Published SDK 2.4.0 headers/status metadata do contain `game.missions`, `game.mining`, `game.relocation`,
 `game.quantum`, and `game.inventory.layout`. Current main likewise contains their status rows.
 The gap is provider readiness/admission, not a missing name in the published C ABI:
 
@@ -172,9 +172,9 @@ The gap is provider readiness/admission, not a missing name in the published C A
 | --- | --- | --- |
 | Contracts | `game.missions` 1.0 and `game.economy` are exposed; mission capabilities default OFF in the registry. Core source has an offline mission provider, but it only enables capabilities for a validated/admitted backend. | Core/offline owners must confirm a product-bound ready backend and prove status/offer/accept/progress behavior. Static registry presence is not availability. |
 | Mining | `game.mining` 1.0 exists; capability is OFF by default and the product setting defaults false. | Core must prove an admitted adapter and owner cleanup; offline must keep the disabled/fail-closed default until then. |
-| Gear presets | RC2 `sc_inventory.h` exposes `game.inventory.layout`; registry marks the capability OFF. | There is no ready product table/provider in the current consumer path. Track this as a provider gap, not as an absent RC2 header. The consumer is development-only. |
-| Teleport | RC2 has `game.relocation` 1.1; the product path is gated by offline admission and the relocation/position capabilities. | Confirm product admission/capability state and native movement acceptance; do not infer support from the registry row. |
-| Quantum | RC2 has `game.quantum` 1.0; `game.quantum.control` defaults OFF. | Core needs a verified control backend plus cleanup/admission; offline controls remain gated. |
+| Gear presets | SDK 2.4.0 `sc_inventory.h` exposes `game.inventory.layout`; registry marks the capability OFF. | There is no ready product table/provider in the current consumer path. Track this as a provider gap, not as an absent header. The consumer is development-only. |
+| Teleport | SDK 2.4.0 has `game.relocation` 1.0; the product path is gated by offline admission and the relocation/position capabilities. | Confirm product admission/capability state and native movement acceptance; do not infer support from the registry row. |
+| Quantum | SDK 2.4.0 has `game.quantum` 1.0; `game.quantum.control` defaults OFF. | Core needs a verified control backend plus cleanup/admission; offline controls remain gated. |
 | Build | Public `sco.content`, world-control, raycast, spatial, and owned entity interfaces exist. | The live native provider must publish each required capability; ray/entity operations remain game-only. |
 | Crew / Spawn / NPC | Public actor/entity/vehicle services and capability rows exist, including NPC ownership, seat, and flight-ready paths. | Verify provider cleanup, streamed-state semantics, seat authority, and exact-build behavior in game. CTest/mock success is not game proof. |
 | Inspector | Read-only actor/entity/stat/gamerules/inventory contracts exist, with some capabilities off or experimental. | Report section-level unavailable/unknown values until a real provider succeeds; do not fabricate zero/default readings. |

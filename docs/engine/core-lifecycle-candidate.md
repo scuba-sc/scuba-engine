@@ -1,30 +1,36 @@
-# Checked host-kernel lifecycle candidate
+# Checked host-kernel lifecycle integration
 
-The checked lifecycle integration is an opt-in development build for the engine's existing
-`Kernel` and editor host adapter. It consumes the exact host-source kit generated from sco-core
-commit `349911d37a2fe5bb4acbafc972615578b9da82a0`; the archive contains 986 members and has
-SHA-256 `3c152ccbf9b8881edf7ac472603f46905ed3c51556ddeea0a5b3a15083683844`. The dedicated
-`checked Kernel lifecycle candidate` workflow regenerates that archive from the pinned clean
-source checkout, verifies its inventory and embedded source identity, then builds and tests on
-Linux and Windows.
+The checked lifecycle integration is enabled by default for the engine's `Kernel` and editor
+host adapter. It consumes the published sco-core `sdk-v2.4.0` host-source kit from commit
+`6106fa3639cbcc28f78a1ded8de2707de019f4d3`; the archive contains 986 members and has SHA-256
+`a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c`. The dedicated
+`checked Kernel lifecycle candidate` workflow downloads this immutable release archive, verifies
+its checksum inventory and embedded source identity, then builds and tests on Linux and Windows.
 
-Core main later advanced to `6106fa3639cbcc28f78a1ded8de2707de019f4d3` to finalize the
-`sdk-v2.4.0` candidate designation. The source diff from `349911d` changes only the changelog and
-candidate-tag metadata; the final host-source package and manifest for `6106fa3` are still pending.
-The receipts in this document therefore qualify the exact `349911d` kit only, not the later
-release-candidate archive. Once the finalized package is published, its exact manifest, hash and
-source identity must be verified before updating this profile.
+The RC2 compatibility build remains available by explicitly disabling
+`SCUBA_CORE_LIFECYCLE_CANDIDATE`; that older SDK exposes only void shutdown and cannot provide the
+checked stop result used by the default profile.
 
-The normal profile remains the released RC2 kit configured in `cmake/ScubaSdk.cmake`. A local
-candidate configure must opt in and provide all three coordinated source values:
+To select RC2 in a separate compatibility build, pin its archived bytes explicitly:
+
+```sh
+cmake -S . -B build-rc2 -G Ninja \
+  -DSCUBA_CORE_LIFECYCLE_CANDIDATE=OFF \
+  -DSCUBA_SDK_RELEASE_TAG=sdk-v2.4.0-rc.2 \
+  -DSCUBA_SDK_HOST_SOURCE_SHA256=3d711463f7dff3dcd372ffb70b09951ecf21f1d0e2c5f0a899cccbb9977b8201
+```
+
+The default profile uses the released kit configured in `cmake/ScubaSdk.cmake`. A fresh build
+verifies its source identity and archive checksum during configure. Existing build directories
+may keep cached RC2 values; use a new build directory when moving them to the release. To validate
+another exact coordinated kit, override the source and archive values explicitly:
 
 ```sh
 cmake -S . -B build-kernel-lifecycle -G Ninja \
-  -DSCUBA_CORE_LIFECYCLE_CANDIDATE=ON \
-  -DSCUBA_CORE_LIFECYCLE_SOURCE_COMMIT=349911d37a2fe5bb4acbafc972615578b9da82a0 \
-  -DSCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256=3c152ccbf9b8881edf7ac472603f46905ed3c51556ddeea0a5b3a15083683844 \
+  -DSCUBA_CORE_LIFECYCLE_SOURCE_COMMIT=6106fa3639cbcc28f78a1ded8de2707de019f4d3 \
+  -DSCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256=a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c \
   -DSCUBA_SDK_ARCHIVE_DIR=/path/to/the-verified-kit \
-  -DSCUBA_SDK_HOST_SOURCE_SHA256=3c152ccbf9b8881edf7ac472603f46905ed3c51556ddeea0a5b3a15083683844
+  -DSCUBA_SDK_HOST_SOURCE_SHA256=a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c
 cmake --build build-kernel-lifecycle
 ctest --test-dir build-kernel-lifecycle --output-on-failure
 ```
@@ -53,8 +59,9 @@ confirmed the child is gone before returning. A failed temporary-directory remov
 cleanup retry before core stop; if it still fails, the path can remain on disk after process exit.
 A failed staged plugin-snapshot removal is retained by the process root and is not retried before
 process exit.
-The released RC2 profile still has a void core stop API; its child exit status proves process exit,
-not a checked core-stop result. Only the candidate profile exercises result-returning shutdown.
+The released RC2 compatibility profile still has a void core stop API; a child exit status proves
+process exit, not a checked core-stop result. The default `sdk-v2.4.0` profile exercises
+result-returning shutdown.
 
 The lifecycle tests use separate processes for clean start/stop/restart, wrong-thread stop,
 preflight refusal, core startup refusal, retained startup after provider publication, and failed
@@ -62,4 +69,4 @@ dependent stop. They assert staged files and provider state remain live for reta
 The existing native NetSandbox test covers loopback peers and orderly child retirement. These are
 synthetic consumer tests; they do not test an installed game, Windows game ABI, or native provider
 activation. Core's native-reader exclusion remains unavailable, and this profile does not enable
-it. The candidate option is not a release pin or production default.
+it. The checked lifecycle profile does not enable native providers or claim game execution.

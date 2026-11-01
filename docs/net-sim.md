@@ -18,10 +18,9 @@ cd ..
 ./build/scuba-hostd --studio studio/dist
 ```
 
-The foundation downloads the published `sdk-v2.4.0-rc.2` host-source kit (SDK
-2.4.0, release candidate 2, source commit
-`844e136ccb280ad8cb43f73bc43c9447e8f6799d`) and verifies
-its pinned SHA-256. For offline work, set `SCUBA_SDK_ARCHIVE_DIR` at configure
+The foundation downloads the published `sdk-v2.4.0` host-source kit (source
+commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`) and verifies its pinned
+SHA-256. For offline work, set `SCUBA_SDK_ARCHIVE_DIR` at configure
 time to a directory containing the release archive; the same hash check applies.
 
 Open the studio and select **NetSandbox**. Select a peer count and choose

@@ -149,7 +149,7 @@ host-held value, so a `widgets.snapshot` event follows.
 
 The bridge reports version `1.3` and feature `numeric_presentation` only when both the SDK
 declaration and host snapshot field are available. Otherwise it retains version `1.2` and
-omits that feature and field. The released RC2 host-source kit supports the 1.3 metadata.
+omits that feature and field. The published SDK 2.4.0 host-source kit supports the 1.3 metadata.
 
 Errors:
 
