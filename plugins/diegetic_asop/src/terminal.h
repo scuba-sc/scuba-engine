@@ -45,7 +45,8 @@ public:
 
 private:
     scosdk::PanelTree Build();
-    Outcome Record(Outcome outcome);
+    void SyncAsopStatus();
+    Outcome Record(Outcome outcome, bool asopRead = false);
 
     HangarClient client_;
     AsopClient asopClient_;
@@ -54,6 +55,7 @@ private:
     AsopStatus asop_;
     std::string claimText_ = "not read", shardText_ = "not read";
     Outcome last_;
+    bool lastWasAsopRead_ = false;
     std::string landing_, lift_, atc_;
     std::string buildError_;
     scosdk::PanelTree tree_;
