@@ -24,7 +24,7 @@ jobs:
             config: Release
           - os: ubuntu-24.04
             config: Release
-          - os: macos-14
+          - os: macos-15
             config: Release
     runs-on: ${{ matrix.os }}
     steps:
