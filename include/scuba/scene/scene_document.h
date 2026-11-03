@@ -155,18 +155,19 @@ private:
     bool dirty_ = false;
 };
 
-enum class SceneActionKind : uint8_t { Open, Create, Quit };
+enum class SceneActionKind : uint8_t { Open, Create, OpenProject, Quit };
 enum class SceneActionChoice : uint8_t { Save, Discard, Cancel };
 
 struct SceneAction {
     SceneActionKind kind = SceneActionKind::Open;
-    std::string sceneId;
+    // A scene ID for Open/Create, a UTF-8 project path for OpenProject, and empty for Quit.
+    std::string target;
 
     friend bool operator==(const SceneAction&, const SceneAction&) = default;
 };
 
-// A small decision gate used by the editor before switching scenes or quitting. Failed saves
-// leave the action pending; discard commits it; cancel clears it.
+// A small decision gate used by the editor before switching scenes/projects or quitting. Failed
+// saves leave the action pending; discard commits it; cancel clears it.
 class SceneActionGate {
 public:
     std::optional<SceneAction> Request(SceneAction action, bool dirty);

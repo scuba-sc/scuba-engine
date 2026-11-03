@@ -47,15 +47,20 @@ returns sorted IDs for direct-child regular scene files and skips symlinks. `Cre
 without replacing an existing scene file.
 
 The project writer is separate from the VFS. Asset directories, archives, and `.scpak` mounts stay
-read-only inputs. The native editor opens one scene by stable ID with
+read-only inputs. The native editor can open one scene by stable ID with
 `scuba-engine.exe --project <existing-project-directory> --scene <scene-id>`; `--scene` defaults to
-`main`. The File menu and Scene panel also open a project-scene browser where saved scenes can be
-listed, opened, and created without restarting the editor or supplying a scene ID on the command
-line. Switching away from unsaved edits asks whether to save, discard the in-memory changes, or
-cancel. Creating a scene refuses to replace an existing file. If the default scene file does not
-exist, the editor starts an empty, unsaved scene. It does not create the project directory. The app
-checks directory mounts through `ProjectStore` and checks archive mount paths separately before
-opening the session.
+`main`. The File menu also offers **Open project...**, where the editor accepts a path to an existing
+project directory and opens its `main` scene, or starts a new unsaved `main` scene if that file is
+absent. This path-entry flow does not require a scene ID and reports invalid paths or project files
+in the dialog. It is not a native folder picker and does not create project directories. The File
+menu and Scene panel also open a project-scene browser where saved scenes can be listed, opened, and
+created without restarting the editor or supplying a scene ID on the command line. Switching away
+from unsaved edits asks whether to save, discard the in-memory changes, or cancel; a failed save
+keeps the switch pending, and a failed project open leaves the current session in place. Creating a
+scene refuses to replace an existing file. If the default scene file does not exist, the editor
+starts an empty, unsaved scene. The app tracks mounted directory and archive sources and rejects a
+project root that overlaps them before opening or mounting the source; `ProjectStore` rechecks
+directory separation before reads and writes.
 
 The Scene panel is a document-backed outliner. Stable node IDs are used for selection and the
 Inspector edits local translation, local XYZ Euler rotation in degrees, and nonuniform scale. Euler

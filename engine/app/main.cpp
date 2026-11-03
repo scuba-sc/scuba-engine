@@ -62,6 +62,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -193,7 +194,8 @@ std::optional<Args> ParseArgs() {
 }
 
 // Mounts a directory, .zip or .scpak by what the path is.
-Status MountPath(vfs::VirtualFileSystem& vfs, const fs::path& path, const std::string& mountPoint, int priority) {
+Status MountPath(vfs::VirtualFileSystem& vfs, const fs::path& path, const std::string& mountPoint, int priority,
+                 vfs::MountId* mountedId = nullptr) {
     Status st;
     std::unique_ptr<vfs::FileSystem> backend;
     std::string ext = path.extension().string();
@@ -203,7 +205,10 @@ Status MountPath(vfs::VirtualFileSystem& vfs, const fs::path& path, const std::s
     else if (ext == ".scpak") backend = vfs::OpenPack(path, st);
     else return Status::Fail("not a directory, .zip or .scpak: " + path.generic_string());
     if (!backend) return st;
-    vfs.Mount(std::move(backend), {mountPoint, priority, path.filename().generic_string()}, &st);
+    const vfs::MountId id = vfs.Mount(std::move(backend), {mountPoint, priority, path.filename().generic_string()}, &st);
+    if (!st) return st;
+    if (id == 0) return Status::Fail("VFS refused the asset mount");
+    if (mountedId) *mountedId = id;
     if (st) log::Info("vfs", "mounted " + path.generic_string() + (mountPoint.empty() ? "" : " at " + mountPoint) + " (priority " + std::to_string(priority) + ")");
     return st;
 }
@@ -258,6 +263,19 @@ render::Float3 TransformPoint(render::Float3 point, const render::Float4x4& matr
 }
 
 struct Editor {
+    struct MountedSource {
+        fs::path path;
+        bool directory = false;
+    };
+
+    struct PreparedProject {
+        std::optional<scene::ProjectStore> store;
+        fs::path root;
+        scene::Document document;
+        scene::DocumentDirtyState dirty;
+        bool saved = false;
+    };
+
     vfs::VirtualFileSystem vfs;
     JobSystem jobs;
     std::unique_ptr<asset::ModelLoader> loader;
@@ -297,6 +315,7 @@ struct Editor {
     scene::SceneActionGate sceneActionGate;
     std::optional<scene::ProjectStore> projectStore;
     fs::path projectRoot;
+    std::map<vfs::MountId, MountedSource> mountedSources;
     std::vector<Instance> instances;
     std::unordered_map<std::string, render::Float4x4> worldByNode;
     uint32_t nextInstance = 1;
@@ -329,6 +348,9 @@ struct Editor {
     std::string selectedProjectScene;
     std::string sceneBrowserStatus;
     bool pendingSceneConfirmation = false;
+    bool showProjectOpenDialog = false;
+    char projectPathBuffer[1024] = "";
+    std::string projectOpenStatus;
     bool frameOnLoad = true;
 
     ~Editor() {
@@ -339,6 +361,21 @@ struct Editor {
 #else
         sco.Stop();
 #endif
+    }
+
+    Status MountAssetSource(const fs::path& path, const std::string& mountPoint, int priority) {
+        std::error_code ec;
+        const fs::path canonical = fs::canonical(path, ec);
+        if (ec) return Status::Fail("asset source cannot be resolved: " + ec.message());
+        const bool directory = fs::is_directory(canonical, ec);
+        if (ec) return Status::Fail("asset source cannot be inspected: " + ec.message());
+        if (projectStore && PathsOverlap(projectRoot, canonical))
+            return Status::Fail("asset source overlaps the open project directory");
+
+        vfs::MountId id = 0;
+        if (auto status = MountPath(vfs, canonical, mountPoint, priority, &id); !status) return status;
+        mountedSources.emplace(id, MountedSource{canonical, directory});
+        return Status::Ok();
     }
 
     // panels
@@ -719,7 +756,7 @@ struct Editor {
 
     void SaveScene() {
         if (!projectStore) {
-            sceneStatus = "No project session. Start with --project DIR to save.";
+            sceneStatus = "No project session. Open a project from File or launch with --project DIR to save.";
             return;
         }
         if (auto status = projectStore->Save(document); !status) {
@@ -738,7 +775,7 @@ struct Editor {
 
     void RefreshProjectScenes() {
         if (!projectStore) {
-            sceneBrowserStatus = "Open a project with --project DIR to browse scenes.";
+            sceneBrowserStatus = "Open a project from File > Open project to browse scenes.";
             projectScenes.clear();
             return;
         }
@@ -755,13 +792,41 @@ struct Editor {
 
     void OpenSceneBrowser() {
         if (!projectStore) {
-            sceneStatus = "Open a project with --project DIR to browse scenes.";
+            sceneStatus = "Open a project from File > Open project to browse scenes.";
             return;
         }
         showSceneBrowser = true;
         RefreshProjectScenes();
         selectedProjectScene = std::find(projectScenes.begin(), projectScenes.end(), document.id) != projectScenes.end()
             ? document.id : std::string{};
+    }
+
+    void OpenProjectDialog() {
+        projectOpenStatus.clear();
+        showProjectOpenDialog = true;
+    }
+
+    void RequestOpenProject() {
+        const std::string pathText(projectPathBuffer);
+        if (pathText.empty()) {
+            projectOpenStatus = "Enter an existing project directory path.";
+            return;
+        }
+        try {
+            PreparedProject preview;
+            if (auto status = PrepareProject(PathFromUtf8(pathText), "main", preview); !status) {
+                projectOpenStatus = "Cannot open project: " + status.error;
+                return;
+            }
+            projectOpenStatus.clear();
+        } catch (const std::exception& error) {
+            projectOpenStatus = std::string("Invalid project path: ") + error.what();
+            return;
+        }
+        auto action = sceneActionGate.Request(
+            {scene::SceneActionKind::OpenProject, pathText}, documentDirty.dirty());
+        if (action) CompletePendingSceneAction(*action);
+        else pendingSceneConfirmation = true;
     }
 
     void RequestOpenScene(std::string sceneId) {
@@ -801,11 +866,29 @@ struct Editor {
     }
 
     void CompletePendingSceneAction(const scene::SceneAction& action, bool* quit = nullptr) {
-        const std::string& sceneId = action.sceneId;
         if (action.kind == scene::SceneActionKind::Quit) {
             if (quit) *quit = true;
             return;
         }
+        if (action.kind == scene::SceneActionKind::OpenProject) {
+            try {
+                PreparedProject prepared;
+                if (auto status = PrepareProject(PathFromUtf8(action.target), "main", prepared); !status) {
+                    projectOpenStatus = "Cannot open project: " + status.error;
+                    return;
+                }
+                if (auto status = InstallPreparedProject(std::move(prepared), true); !status) {
+                    projectOpenStatus = "Cannot open project: " + status.error;
+                    return;
+                }
+                projectOpenStatus.clear();
+                showProjectOpenDialog = false;
+            } catch (const std::exception& error) {
+                projectOpenStatus = std::string("Invalid project path: ") + error.what();
+            }
+            return;
+        }
+        const std::string& sceneId = action.target;
         if (!projectStore) return;
 
         scene::Document candidate;
@@ -984,37 +1067,90 @@ struct Editor {
         if (Instance* updated = FindNodeInstance(nodeId)) updated->autoPlaceOnLoad = false;
     }
 
-    Status OpenProject(const fs::path& root, std::string_view sceneId,
-                       std::span<const fs::path> readOnlyRoots) {
+    Status PrepareProject(const fs::path& root, std::string_view sceneId, PreparedProject& prepared) const {
+        std::error_code ec;
+        const fs::path canonicalRoot = fs::canonical(root, ec);
+        if (ec) return Status::Fail("project directory cannot be resolved: " + ec.message());
+        if (!fs::is_directory(canonicalRoot, ec) || ec)
+            return Status::Fail("project root must be an existing directory");
+
+        std::vector<fs::path> readOnlyRoots;
+        readOnlyRoots.reserve(mountedSources.size());
+        for (const auto& [id, source] : mountedSources) {
+            (void)id;
+            const fs::path currentSource = fs::canonical(source.path, ec);
+            if (ec) return Status::Fail("mounted asset source cannot be resolved: " + ec.message());
+            if (PathsOverlap(canonicalRoot, currentSource))
+                return Status::Fail("project directory overlaps a mounted asset source");
+            if (source.directory) readOnlyRoots.push_back(currentSource);
+        }
+
+        Status status;
+        auto store = scene::ProjectStore::Open(canonicalRoot, readOnlyRoots, &status);
+        if (!store) return status;
+
         scene::Document initial;
         initial.id = std::string(sceneId);
         initial.name = "Untitled";
-        if (auto status = scene::Validate(initial); !status) return status;
-        Status status;
-        auto store = scene::ProjectStore::Open(root, readOnlyRoots, &status);
-        if (!store) return status;
-        std::error_code rootError;
-        projectRoot = fs::canonical(root, rootError);
-        if (rootError) return Status::Fail("project directory cannot be resolved: " + rootError.message());
-        projectStore = std::move(*store);
-        const fs::path scenePath = projectRoot / (initial.id + ".scene.json");
-        std::error_code ec;
+        if (auto valid = scene::Validate(initial); !valid) return valid;
+        const fs::path scenePath = canonicalRoot / (initial.id + ".scene.json");
         const auto fileStatus = fs::symlink_status(scenePath, ec);
+        bool saved = false;
         if (!ec && (fs::exists(fileStatus) || fs::is_symlink(fileStatus))) {
-            if (auto loaded = projectStore->Load(sceneId, initial); !loaded) return loaded;
-            if (auto installed = InstallDocument(std::move(initial)); !installed) return installed;
-            sceneHistory.Clear();
-            if (auto baseline = SetSavedBaseline(true); !baseline) return baseline;
-            sceneStatus = "Loaded " + std::string(sceneId);
+            if (auto loaded = store->Load(sceneId, initial); !loaded) return loaded;
+            saved = true;
         } else if (ec && ec != std::errc::no_such_file_or_directory) {
             return Status::Fail("cannot inspect project scene file: " + ec.message());
-        } else {
-            if (auto installed = InstallDocument(std::move(initial)); !installed) return installed;
-            sceneHistory.Clear();
-            if (auto baseline = SetSavedBaseline(false); !baseline) return baseline;
-            sceneStatus = "New scene · unsaved";
+        }
+        std::vector<scene::ResolvedTransform> worldTransforms;
+        if (auto resolved = scene::ResolveWorldTransforms(initial, worldTransforms); !resolved)
+            return Status::Fail("project scene cannot be installed: " + resolved.error);
+        scene::DocumentDirtyState dirty;
+        if (auto baseline = dirty.SetBaseline(initial, saved); !baseline) return baseline;
+
+        prepared.store = std::move(*store);
+        prepared.root = canonicalRoot;
+        prepared.document = std::move(initial);
+        prepared.dirty = std::move(dirty);
+        prepared.saved = saved;
+        return Status::Ok();
+    }
+
+    Status InstallPreparedProject(PreparedProject prepared, bool showBrowser) {
+        if (!prepared.store) return Status::Fail("project was not prepared");
+        const bool saved = prepared.saved;
+        if (auto installed = InstallDocument(std::move(prepared.document)); !installed) return installed;
+        projectStore = std::move(prepared.store);
+        projectRoot = std::move(prepared.root);
+        documentDirty = std::move(prepared.dirty);
+        sceneHistory.Clear();
+        selectedNode.clear();
+        inspectorUndoCaptured = false;
+        inspectorUndoNode.clear();
+        inspectorRotationNode.clear();
+        inspectorRotationInitialized = false;
+        inspectorRotationActive = false;
+        renameTarget.clear();
+        renameSourceName.clear();
+        renameBufferDirty = false;
+        reparentTarget.clear();
+        reparentTargetNode.clear();
+        CancelPlacement("Project changed");
+        frameOnLoad = true;
+        sceneStatus = saved ? "Opened project · loaded scene " + document.id
+                            : "Opened project · main scene is new and unsaved";
+        selectedProjectScene = document.id;
+        if (showBrowser) {
+            RefreshProjectScenes();
+            showSceneBrowser = true;
         }
         return Status::Ok();
+    }
+
+    Status OpenProject(const fs::path& root, std::string_view sceneId, bool showBrowser = false) {
+        PreparedProject prepared;
+        if (auto status = PrepareProject(root, sceneId, prepared); !status) return status;
+        return InstallPreparedProject(std::move(prepared), showBrowser);
     }
 
     Status InitializeEmptyScene() {
@@ -1024,7 +1160,7 @@ struct Editor {
         if (auto status = InstallDocument(document); !status) return status;
         sceneHistory.Clear();
         if (auto baseline = SetSavedBaseline(true); !baseline) return baseline;
-        sceneStatus = "In-memory scene · pass --project DIR to save";
+        sceneStatus = "In-memory scene · open a project from File or pass --project DIR to save";
         return Status::Ok();
     }
 
@@ -1142,6 +1278,7 @@ struct Editor {
     void DrawMounts();
     void DrawScene();
     void DrawSceneBrowser();
+    void DrawProjectOpenDialog();
     void DrawSceneChangeConfirmation(bool& quit);
     void DrawInspector();
     void DrawPlugins();
@@ -1588,6 +1725,7 @@ void Editor::DrawMenu(bool& quit) {
         if (ImGui::MenuItem("Undo", "Ctrl+Z", false, sceneHistory.CanUndo())) UndoScene();
         if (ImGui::MenuItem("Redo", "Ctrl+Y", false, sceneHistory.CanRedo())) RedoScene();
         ImGui::Separator();
+        if (ImGui::MenuItem("Open project...")) OpenProjectDialog();
         if (ImGui::MenuItem("Project scenes...", nullptr, false, projectStore.has_value())) OpenSceneBrowser();
         if (ImGui::MenuItem("Save scene", "Ctrl+S", false, projectStore.has_value())) SaveScene();
         if (ImGui::MenuItem("Clear scene")) ClearScene();
@@ -1888,14 +2026,17 @@ void Editor::DrawMounts() {
             ImGui::PopID();
         }
         ImGui::EndTable();
-        if (drop && vfs.Unmount(*drop)) InvalidateAssetBrowser();
+        if (drop && vfs.Unmount(*drop)) {
+            mountedSources.erase(*drop);
+            InvalidateAssetBrowser();
+        }
     }
     ImGui::SeparatorText("Mount");
     ImGui::InputTextWithHint("path", "directory, .zip or .scpak", mountPath, sizeof mountPath);
     ImGui::InputTextWithHint("mount point", "/ (root)", mountPoint, sizeof mountPoint);
     ImGui::InputInt("priority", &mountPriority);
     if (ImGui::Button("Mount")) {
-        if (auto st = MountPath(vfs, PathFromUtf8(mountPath), mountPoint, mountPriority); !st)
+        if (auto st = MountAssetSource(PathFromUtf8(mountPath), mountPoint, mountPriority); !st)
             log::Error("vfs", st.error);
         else InvalidateAssetBrowser();
     }
@@ -1905,7 +2046,7 @@ void Editor::DrawMounts() {
 void Editor::DrawScene() {
     if (!ImGui::Begin("Scene", &showScene)) { ImGui::End(); return; }
     if (projectStore) ImGui::TextWrapped("Project: %s  ·  scene: %s", projectRoot.generic_string().c_str(), document.id.c_str());
-    else ImGui::TextDisabled("In-memory scene · pass --project DIR to save");
+    else ImGui::TextDisabled("In-memory scene · use File > Open project to save in a project");
     ImGui::SeparatorText("Viewport gizmo");
     ImGui::BeginDisabled(transformGizmoGestureActive);
     if (ImGui::RadioButton("Move axes", gizmoMode == TransformGizmoMode::Move))
@@ -2087,6 +2228,21 @@ void Editor::DrawSceneBrowser() {
     ImGui::End();
 }
 
+void Editor::DrawProjectOpenDialog() {
+    if (!showProjectOpenDialog) return;
+    if (!ImGui::Begin("Open project", &showProjectOpenDialog)) { ImGui::End(); return; }
+    ImGui::TextWrapped("Enter the path to an existing project folder. The editor opens its main scene, or starts a new unsaved main scene if none exists.");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##project-path", "C:\\Users\\you\\Documents\\MyProject",
+                             projectPathBuffer, sizeof(projectPathBuffer));
+    ImGui::BeginDisabled(projectPathBuffer[0] == '\0');
+    if (ImGui::Button("Open project")) RequestOpenProject();
+    ImGui::EndDisabled();
+    if (!projectOpenStatus.empty()) ImGui::TextWrapped("%s", projectOpenStatus.c_str());
+    if (!projectRoot.empty()) ImGui::TextDisabled("Current project: %s", projectRoot.generic_string().c_str());
+    ImGui::End();
+}
+
 void Editor::DrawSceneChangeConfirmation(bool& quit) {
     ImGui::SetNextWindowPos({-1000, -1000}, ImGuiCond_Always);
     ImGui::SetNextWindowSize({1, 1}, ImGuiCond_Always);
@@ -2109,9 +2265,13 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
         return;
     }
     const bool quitting = pending->kind == scene::SceneActionKind::Quit;
-    ImGui::TextWrapped(quitting ? "Scene %s has unsaved changes. Save them before quitting?"
-                                : "Scene %s has unsaved changes. Save them before switching?",
-                       document.id.c_str());
+    const bool openingProject = pending->kind == scene::SceneActionKind::OpenProject;
+    if (quitting)
+        ImGui::TextWrapped("Scene %s has unsaved changes. Save them before quitting?", document.id.c_str());
+    else if (openingProject)
+        ImGui::TextWrapped("Scene %s has unsaved changes. Save them before opening another project?", document.id.c_str());
+    else
+        ImGui::TextWrapped("Scene %s has unsaved changes. Save them before switching?", document.id.c_str());
     ImGui::Separator();
     const char* saveLabel = quitting ? "Save and quit" : "Save and continue";
     ImGui::BeginDisabled(!projectStore.has_value());
@@ -2136,8 +2296,8 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
         pendingSceneConfirmation = false;
         ImGui::CloseCurrentPopup();
     }
-    if (quitting && !projectStore)
-        ImGui::TextWrapped("This in-memory scene has no project file; Save is unavailable.");
+    if (!projectStore && (quitting || openingProject))
+        ImGui::TextWrapped("This in-memory scene has no project file; Save is unavailable. Choose Discard or Cancel.");
     else if (!documentDirty.dirty() && sceneActionGate.pending())
         ImGui::TextWrapped("Save completed; the scene switch is waiting to finish.");
     else if (sceneStatus.starts_with("Save failed") || sceneStatus.starts_with("Saved, but"))
@@ -2450,6 +2610,7 @@ void Editor::DrawUi(bool& quit) {
         inspectorUndoNode.clear();
     }
     DrawSceneBrowser();
+    DrawProjectOpenDialog();
     DrawSceneChangeConfirmation(quit);
     if (showPlugins) DrawPlugins();
     if (showLoader) DrawLoader();
@@ -2598,9 +2759,9 @@ int Run(const Args& args) {
 #endif
 
     if (!content.empty() && fs::is_directory(content))
-        if (auto m = MountPath(ed.vfs, content, "", 0); !m) log::Warn("vfs", m.error);
+        if (auto m = ed.MountAssetSource(content, "", 0); !m) log::Warn("vfs", m.error);
     for (const auto& m : args.mounts)
-        if (auto r = MountPath(ed.vfs, PathFromUtf8(m.path), m.mountPoint, m.priority); !r) log::Error("vfs", r.error);
+        if (auto r = ed.MountAssetSource(PathFromUtf8(m.path), m.mountPoint, m.priority); !r) log::Error("vfs", r.error);
     ed.loader = std::make_unique<asset::ModelLoader>(ed.vfs, ed.jobs);
 
     if (args.project.empty()) {
@@ -2609,26 +2770,7 @@ int Run(const Args& args) {
             return 1;
         }
     } else {
-        std::vector<fs::path> readOnlyRoots;
-        if (!content.empty() && fs::is_directory(content, ec) && !ec) readOnlyRoots.push_back(content);
-        for (const auto& mount : args.mounts) {
-            const fs::path source = PathFromUtf8(mount.path);
-            ec.clear();
-            if (fs::is_directory(source, ec) && !ec) {
-                readOnlyRoots.push_back(source);
-            } else {
-                ec.clear();
-                const fs::path canonicalProject = fs::canonical(args.project, ec);
-                if (ec) { log::Error("scene", "project directory cannot be resolved: " + ec.message()); return 1; }
-                const fs::path canonicalSource = fs::canonical(source, ec);
-                if (ec) { log::Error("scene", "mounted asset archive cannot be resolved: " + ec.message()); return 1; }
-                if (PathsOverlap(canonicalProject, canonicalSource)) {
-                    log::Error("scene", "project directory overlaps a mounted asset archive");
-                    return 1;
-                }
-            }
-        }
-        if (auto sceneStatus = ed.OpenProject(args.project, args.sceneId, readOnlyRoots); !sceneStatus) {
+        if (auto sceneStatus = ed.OpenProject(args.project, args.sceneId); !sceneStatus) {
             log::Error("scene", sceneStatus.error);
             return 1;
         }

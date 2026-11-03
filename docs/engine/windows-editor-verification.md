@@ -2,9 +2,9 @@
 
 This checklist covers the native scene editor on Windows. It complements [Scene documents](scene-document.md), which defines the file format, editing behavior and limits.
 
-**Code target recorded for this checklist:** `codex/scene-document-v1` at `fde7084ddaf67da5a76706696328cdb9c9c59c93`. If the code changes before testing, record `git rev-parse HEAD` and use that exact SHA in the results.
+**Code target recorded for this checklist:** branch `codex/scene-document-v1`. Record `git rev-parse HEAD` immediately before testing and use that exact SHA in the results; do not treat an earlier snapshot as evidence for a later build.
 
-**Status at that SHA:** the portable `workspace_layout` CTest passed on Linux (1/1). The Windows editor build, interactive UI checks and game acceptance have not been run. A headless layout test does not establish Windows rendering or input behavior.
+**Status:** portable core checks are run during implementation and are not Windows evidence. The Windows editor build, interactive UI checks and game acceptance remain deferred until the scaffold is complete. A headless test does not establish Windows rendering or input behavior.
 
 ## Prerequisites and build
 
@@ -44,14 +44,16 @@ Check each item and record **Pass**, **Fail**, or **Blocked**, plus the evidence
 
 | Check | Expected result |
 | --- | --- |
+| Project path entry | From an in-memory scene, use File > Open project... and enter a valid existing temporary project folder. The `main` scene opens, or a new unsaved `main` scene is shown if the file is absent. A missing path, regular-file path, malformed scene, or project root overlapping a mounted directory/archive reports an error and leaves the current document and save state intact. |
 | First-run workspace | Scene is docked left, Inspector right, Content bottom, and the 3D viewport occupies the center. Scene, Inspector and Content are the selected tabs. Mounts, Plugins, Asset loader, Log and Stats share those docks. |
 | Saved workspace | Move a panel, leave the editor open long enough for ImGui’s settings save, close it, and relaunch from the same working directory. The moved layout is restored rather than reset to defaults. |
 | Project scene round trip | Start with the empty temporary project. Add a group, place `models/cube.obj` under it from Content, save with Ctrl+S, close cleanly, and reopen the same project. The group, model reference and transforms remain. Inspect `<project>\main.scene.json` as supporting evidence. |
-| Unsaved guard | Make an edit and close the window. Cancel keeps the editor and edit open; Save persists it; on a separate edit, Discard exits without changing the saved scene. Repeat through the scene browser when switching scenes if practical. |
+| Unsaved guard | Make an edit and close the window. Cancel keeps the editor and edit open; Save persists it; on a separate edit, Discard exits without changing the saved scene. Repeat through File > Open project... and the scene browser: Cancel keeps the current project, Save persists the current scene before switching, and Discard switches without saving. |
 | Hierarchy and Inspector | Add/nest groups, rename a node, reparent while preserving its world transform, and delete a test subtree. Confirm rejected cycle or unrepresentable reparent leaves the document unchanged. Edit translation, rotation and positive nonuniform scale in the Inspector. |
 | Viewport tools and history | Select the model. Try Move, Scale and Rotate gizmos, then Undo and Redo each drag. Escape cancels a valid active drag. A near-edge-on rotation ring may be refused with a status message; positive scale limits and unsupported mirrored scale must be enforced. |
 | Browser and placement | Browse `models`, search for `cube`, switch Tiles/List, and confirm `README.md` remains visible but unsupported. Tiles show text type placeholders, not image thumbnails. Check double-click placement, Place with click preview, Escape cancellation and viewport selection. |
 | Failure and recovery | Use the isolated missing-asset fixture below. The failed node remains in the outliner with a diagnostic; after repairing and remounting the asset source, Retry failed assets loads it without replacing the scene node. |
+| Source-directory protection | Record a checksum for a mounted asset file before and after project open/save attempts. The editor refuses a project root that is equal to, inside, or contains a mounted directory or archive, and the source file remains byte-identical. |
 
 ### Missing-asset and retry fixture
 

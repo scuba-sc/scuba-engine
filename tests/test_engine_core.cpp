@@ -1255,6 +1255,23 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(!actionGate.Request(createAction, true));
     CHECK(actionGate.Resolve(scene::SceneActionChoice::Discard) ==
           std::optional<scene::SceneAction>(createAction));
+    const scene::SceneAction openProjectAction{
+        scene::SceneActionKind::OpenProject, "C:/workspace/test-project"};
+    CHECK(!actionGate.Request(openProjectAction, true));
+    CHECK(actionGate.pending() == std::optional<scene::SceneAction>(openProjectAction));
+    CHECK(!actionGate.Resolve(scene::SceneActionChoice::Save, false));
+    CHECK(actionGate.pending() == std::optional<scene::SceneAction>(openProjectAction));
+    CHECK(!actionGate.Resolve(scene::SceneActionChoice::Cancel));
+    CHECK(!actionGate.pending());
+    CHECK(!actionGate.Request(openProjectAction, true));
+    CHECK(actionGate.pending() == std::optional<scene::SceneAction>(openProjectAction));
+    CHECK(actionGate.Resolve(scene::SceneActionChoice::Save, true) ==
+          std::optional<scene::SceneAction>(openProjectAction));
+    CHECK(!actionGate.pending());
+    CHECK(!actionGate.Request(openProjectAction, true));
+    CHECK(actionGate.Resolve(scene::SceneActionChoice::Discard) ==
+          std::optional<scene::SceneAction>(openProjectAction));
+    CHECK(!actionGate.pending());
     const scene::SceneAction quitAction{scene::SceneActionKind::Quit, {}};
     CHECK(!actionGate.Request(quitAction, true));
     CHECK(!actionGate.Resolve(scene::SceneActionChoice::Cancel));
@@ -1272,6 +1289,20 @@ void TestSceneDocument(const fs::path& root) {
     if (!project) return;
     CHECK(!scene::ProjectStore::Open(assetRoot, readOnlyRoots).has_value());
     CHECK(!scene::ProjectStore::Open(assetRoot / "nested", readOnlyRoots).has_value());
+    const fs::path notProjectDirectory = root / "not-a-project-directory";
+    WriteFile(notProjectDirectory, "regular file, not a project directory");
+    CHECK(!scene::ProjectStore::Open(notProjectDirectory, readOnlyRoots).has_value());
+    const fs::path projectContainingAssets = root / "project-containing-assets";
+    const fs::path nestedAssetRoot = projectContainingAssets / "mounted-assets";
+    fs::create_directories(nestedAssetRoot);
+    WriteFile(nestedAssetRoot / "source.txt", "nested read-only asset bytes");
+    const std::array<fs::path, 1> nestedReadOnlyRoots{nestedAssetRoot};
+    CHECK(!scene::ProjectStore::Open(projectContainingAssets, nestedReadOnlyRoots).has_value());
+    CHECK(!fs::exists(projectContainingAssets / "main.scene.json"));
+    std::ifstream nestedAssetInput(nestedAssetRoot / "source.txt", std::ios::binary);
+    std::string nestedAssetBytes((std::istreambuf_iterator<char>(nestedAssetInput)),
+                                 std::istreambuf_iterator<char>());
+    CHECK(nestedAssetBytes == "nested read-only asset bytes");
 
     // Failed persistence cannot satisfy Save-and-continue. The pending action survives until a
     // valid save updates the baseline; only then is the transition released.
