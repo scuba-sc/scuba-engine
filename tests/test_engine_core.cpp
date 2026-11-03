@@ -1287,6 +1287,7 @@ void TestSceneDocument(const fs::path& root) {
     auto project = scene::ProjectStore::Open(projectRoot, readOnlyRoots, &openStatus);
     CHECK(project && openStatus.ok());
     if (!project) return;
+    CHECK(scene::ProjectStore::ValidateSourceSeparation(projectRoot, readOnlyRoots).ok());
     CHECK(!scene::ProjectStore::Open(assetRoot, readOnlyRoots).has_value());
     CHECK(!scene::ProjectStore::Open(assetRoot / "nested", readOnlyRoots).has_value());
     const fs::path notProjectDirectory = root / "not-a-project-directory";
@@ -1303,6 +1304,134 @@ void TestSceneDocument(const fs::path& root) {
     std::string nestedAssetBytes((std::istreambuf_iterator<char>(nestedAssetInput)),
                                  std::istreambuf_iterator<char>());
     CHECK(nestedAssetBytes == "nested read-only asset bytes");
+
+    // Existing directory aliases resolve before overlap checks. Symlink creation may be disabled
+    // by the host policy, so run these checks when the platform permits the fixture.
+    std::error_code aliasError;
+    const fs::path assetRootAlias = root / "scene-assets-alias";
+    fs::create_directory_symlink(assetRoot, assetRootAlias, aliasError);
+    if (!aliasError) {
+        const std::array<fs::path, 1> assetAliasRoots{assetRootAlias};
+        CHECK(scene::ProjectStore::ValidateSourceSeparation(projectRoot, assetAliasRoots).ok());
+        CHECK(!scene::ProjectStore::ValidateSourceSeparation(assetRootAlias, readOnlyRoots).ok());
+    }
+    aliasError.clear();
+    const fs::path projectRootAlias = root / "scene-project-alias";
+    fs::create_directory_symlink(projectRoot, projectRootAlias, aliasError);
+    if (!aliasError) {
+        auto aliasedProject = scene::ProjectStore::Open(projectRootAlias, readOnlyRoots);
+        CHECK(aliasedProject.has_value());
+    }
+
+#ifdef _WIN32
+    // On a case-insensitive Windows directory, a case-only spelling of the same root must still
+    // collide. Skip per-directory case-sensitive folders where the paths are distinct.
+    std::string caseVariantName = projectRoot.filename().string();
+    for (char& c : caseVariantName)
+        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+    const fs::path caseVariantRoot = projectRoot.parent_path() / caseVariantName;
+    std::error_code caseError;
+    if (fs::equivalent(projectRoot, caseVariantRoot, caseError) && !caseError) {
+        const std::array<fs::path, 1> caseVariantRoots{caseVariantRoot};
+        CHECK(!scene::ProjectStore::ValidateSourceSeparation(projectRoot, caseVariantRoots).ok());
+    }
+
+    // If this temp parent permits distinct case-sensitive siblings, they are separate roots and
+    // must not be rejected just because their spellings compare equal ignoring case.
+    const fs::path caseDistinctLower = root / "case-distinct";
+    const fs::path caseDistinctUpper = root / "CASE-DISTINCT";
+    std::error_code distinctError;
+    fs::create_directories(caseDistinctLower, distinctError);
+    if (!distinctError) {
+        distinctError.clear();
+        fs::create_directories(caseDistinctUpper, distinctError);
+        std::error_code equivalentError;
+        if (!distinctError && fs::exists(caseDistinctUpper) &&
+            !fs::equivalent(caseDistinctLower, caseDistinctUpper, equivalentError) && !equivalentError) {
+            const std::array<fs::path, 1> separateCaseRoots{caseDistinctUpper};
+            CHECK(scene::ProjectStore::ValidateSourceSeparation(caseDistinctLower, separateCaseRoots).ok());
+        }
+    }
+#endif
+
+    // An archive is a file source, but its location is still protected from project writes.
+    const fs::path archiveProjectRoot = root / "archive-project";
+    const fs::path archiveSource = archiveProjectRoot / "asset-source.zip";
+    fs::create_directories(archiveProjectRoot);
+    WriteFile(archiveSource, "archive fixture bytes");
+    auto archiveProject = scene::ProjectStore::Open(archiveProjectRoot, std::span<const fs::path>{});
+    CHECK(archiveProject.has_value());
+    if (archiveProject) {
+        scene::Document archiveScene;
+        archiveScene.id = "archive-test";
+        archiveScene.name = "Archive overlap test";
+        const std::array<fs::path, 1> archiveSources{archiveSource};
+        CHECK(!archiveProject->Save(archiveScene, archiveSources).ok());
+        CHECK(!archiveProject->Create(archiveScene, archiveSources).ok());
+        CHECK(!fs::exists(archiveProjectRoot / "archive-test.scene.json"));
+        std::vector<std::string> archiveSceneList{"sentinel"};
+        CHECK(!archiveProject->ListScenes(archiveSceneList, archiveSources).ok());
+        CHECK(archiveSceneList == std::vector<std::string>{"sentinel"});
+    }
+
+    // Revalidate source paths at project-switch time and on later store operations. Here a mount
+    // path is retargeted after project selection to a directory symlink into the project.
+    const fs::path dynamicProjectRoot = root / "dynamic-project";
+    const fs::path dynamicSourceRoot = root / "dynamic-source";
+    const fs::path movedDynamicSource = root / "dynamic-source-original";
+    fs::create_directories(dynamicProjectRoot);
+    fs::create_directories(dynamicSourceRoot);
+    const std::array<fs::path, 0> noMountedSources{};
+    auto dynamicProject = scene::ProjectStore::Open(dynamicProjectRoot, noMountedSources);
+    CHECK(dynamicProject.has_value());
+    const std::array<fs::path, 1> dynamicSources{dynamicSourceRoot};
+    scene::Document originalDynamicScene;
+    originalDynamicScene.id = "main";
+    originalDynamicScene.name = "Before mount path changed";
+    if (dynamicProject) CHECK(dynamicProject->Save(originalDynamicScene, dynamicSources).ok());
+    CHECK(scene::ProjectStore::ValidateSourceSeparation(dynamicProjectRoot, dynamicSources).ok());
+    scene::SceneActionGate deferredProjectSwitch;
+    const scene::SceneAction deferredOpenAction{
+        scene::SceneActionKind::OpenProject, dynamicProjectRoot.string()};
+    CHECK(!deferredProjectSwitch.Request(deferredOpenAction, true));
+
+    std::error_code retargetError;
+    fs::rename(dynamicSourceRoot, movedDynamicSource, retargetError);
+    if (!retargetError) {
+        retargetError.clear();
+        fs::create_directory_symlink(dynamicProjectRoot, dynamicSourceRoot, retargetError);
+    }
+    if (!retargetError && dynamicProject) {
+        const auto releasedAction = deferredProjectSwitch.Resolve(scene::SceneActionChoice::Discard);
+        CHECK(releasedAction == std::optional<scene::SceneAction>(deferredOpenAction));
+        CHECK(!scene::ProjectStore::ValidateSourceSeparation(dynamicProjectRoot, dynamicSources).ok());
+
+        auto attemptedDynamicSave = originalDynamicScene;
+        attemptedDynamicSave.name = "Must not overwrite after mount retarget";
+        CHECK(!dynamicProject->Save(attemptedDynamicSave, dynamicSources).ok());
+        scene::Document attemptedDynamicCreate;
+        attemptedDynamicCreate.id = "dynamic-new";
+        attemptedDynamicCreate.name = "Must not create inside retargeted mount";
+        CHECK(!dynamicProject->Create(attemptedDynamicCreate, dynamicSources).ok());
+        CHECK(!fs::exists(dynamicProjectRoot / "dynamic-new.scene.json"));
+        scene::Document unchangedDynamicScene;
+        unchangedDynamicScene.id = "sentinel";
+        unchangedDynamicScene.name = "Must remain unchanged";
+        const auto dynamicSceneSentinel = unchangedDynamicScene;
+        CHECK(!dynamicProject->Load("main", unchangedDynamicScene, dynamicSources).ok());
+        CHECK(unchangedDynamicScene == dynamicSceneSentinel);
+        std::vector<std::string> unchangedSceneList{"sentinel"};
+        CHECK(!dynamicProject->ListScenes(unchangedSceneList, dynamicSources).ok());
+        CHECK(unchangedSceneList == std::vector<std::string>{"sentinel"});
+        scene::Document storedDynamicScene;
+        CHECK(dynamicProject->Load("main", storedDynamicScene).ok());
+        CHECK(storedDynamicScene == originalDynamicScene);
+    }
+    std::error_code cleanupLinkError;
+    if (fs::is_symlink(dynamicSourceRoot, cleanupLinkError)) fs::remove(dynamicSourceRoot, cleanupLinkError);
+    std::error_code restoreSourceError;
+    if (!fs::exists(dynamicSourceRoot) && fs::exists(movedDynamicSource))
+        fs::rename(movedDynamicSource, dynamicSourceRoot, restoreSourceError);
 
     // Failed persistence cannot satisfy Save-and-continue. The pending action survives until a
     // valid save updates the baseline; only then is the transition released.
@@ -1371,6 +1500,14 @@ void TestSceneDocument(const fs::path& root) {
     scene::Document preserved;
     CHECK(project->Load("hangar-test", preserved).ok());
     CHECK(preserved == document);
+
+    // A malformed existing main scene fails without changing the caller's document, matching the
+    // project-switch preflight behavior for malformed selected projects.
+    WriteFile(projectRoot / "main.scene.json", "not a scene document");
+    auto preserveOnLoadError = SceneFixture();
+    const auto loadErrorSentinel = preserveOnLoadError;
+    CHECK(!project->Load("main", preserveOnLoadError).ok());
+    CHECK(preserveOnLoadError == loadErrorSentinel);
 
     auto duplicate = SceneFixture();
     duplicate.nodes[2].id = duplicate.nodes[1].id;

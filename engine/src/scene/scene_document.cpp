@@ -94,14 +94,34 @@ bool FiniteBounded(float value, float bound) {
 
 bool IsWithin(const std::filesystem::path& candidate, const std::filesystem::path& root) {
     auto c = candidate.begin();
+#ifdef _WIN32
+    std::filesystem::path candidatePrefix;
+    std::filesystem::path rootPrefix;
+#endif
     for (auto r = root.begin(); r != root.end(); ++r, ++c) {
         if (c == candidate.end()) return false;
 #ifdef _WIN32
         const auto& candidatePart = c->native();
         const auto& rootPart = r->native();
-        if (CompareStringOrdinal(candidatePart.c_str(), static_cast<int>(candidatePart.size()),
-                                 rootPart.c_str(), static_cast<int>(rootPart.size()), TRUE) != CSTR_EQUAL)
-            return false;
+        candidatePrefix /= *c;
+        rootPrefix /= *r;
+        if (candidatePart != rootPart) {
+            if (CompareStringOrdinal(candidatePart.c_str(), static_cast<int>(candidatePart.size()),
+                                     rootPart.c_str(), static_cast<int>(rootPart.size()), TRUE) != CSTR_EQUAL)
+                return false;
+            // Drive/volume/UNC root components do not name complete filesystem objects on their
+            // own. Their case-folded spelling is the same root namespace; defer object identity
+            // checks until a relative component has formed a resolvable path prefix.
+            if (!candidatePrefix.has_relative_path()) continue;
+            // Windows can enable case-sensitive lookup on an individual directory. A folded
+            // string match is an overlap only if those existing path prefixes identify the same
+            // filesystem object. Unknown identity fails closed so an IO error cannot green-light
+            // a potentially overlapping project and mount.
+            std::error_code ec;
+            const bool sameObject = std::filesystem::equivalent(candidatePrefix, rootPrefix, ec);
+            if (ec) return true;
+            if (!sameObject) return false;
+        }
 #else
         if (*c != *r) return false;
 #endif
@@ -932,10 +952,32 @@ Status ReparentNode(Document& document, std::string_view nodeId,
     return Status::Ok();
 }
 
+Status ProjectStore::ValidateSourceSeparation(
+    const std::filesystem::path& projectRoot,
+    std::span<const std::filesystem::path> mountedSources) {
+    std::error_code ec;
+    const auto canonicalProject = std::filesystem::canonical(projectRoot, ec);
+    if (ec) return Fail("project directory cannot be resolved: " + ec.message());
+    if (!std::filesystem::is_directory(canonicalProject, ec) || ec)
+        return Fail("project root must be an existing directory");
+
+    for (const auto& source : mountedSources) {
+        const auto canonicalSource = std::filesystem::canonical(source, ec);
+        if (ec) return Fail("mounted asset source cannot be resolved: " + ec.message());
+        if (RootsOverlap(canonicalProject, canonicalSource))
+            return Fail("project directory overlaps a mounted asset source");
+    }
+    return Status::Ok();
+}
+
 std::optional<ProjectStore> ProjectStore::Open(
     const std::filesystem::path& projectRoot,
     std::span<const std::filesystem::path> readOnlyDirectoryRoots,
     Status* status) {
+    if (auto separation = ValidateSourceSeparation(projectRoot, readOnlyDirectoryRoots); !separation) {
+        if (status) *status = std::move(separation);
+        return std::nullopt;
+    }
     std::error_code ec;
     const auto canonical = std::filesystem::canonical(projectRoot, ec);
     if (ec) {
@@ -968,7 +1010,10 @@ std::filesystem::path ProjectStore::ScenePath(std::string_view sceneId) const {
     return root_ / (std::string(sceneId) + ".scene.json");
 }
 
-Status ProjectStore::ListScenes(std::vector<std::string>& sceneIds) const {
+Status ProjectStore::ListScenes(
+    std::vector<std::string>& sceneIds,
+    std::span<const std::filesystem::path> mountedSources) const {
+    if (auto status = ValidateSourceSeparation(root_, mountedSources); !status) return status;
     if (auto status = CheckRootSeparation(); !status) return status;
     constexpr size_t kMaxListedScenes = 4096;
     std::vector<std::string> listed;
@@ -1009,7 +1054,10 @@ Status ProjectStore::CheckRootSeparation() const {
     return Status::Ok();
 }
 
-Status ProjectStore::Save(const Document& document) const {
+Status ProjectStore::Save(
+    const Document& document,
+    std::span<const std::filesystem::path> mountedSources) const {
+    if (auto status = ValidateSourceSeparation(root_, mountedSources); !status) return status;
     if (auto status = CheckRootSeparation(); !status) return status;
     if (auto status = Validate(document); !status) return status;
     std::string json;
@@ -1017,7 +1065,10 @@ Status ProjectStore::Save(const Document& document) const {
     return AtomicWrite(root_, ScenePath(document.id), json, true);
 }
 
-Status ProjectStore::Create(const Document& document) const {
+Status ProjectStore::Create(
+    const Document& document,
+    std::span<const std::filesystem::path> mountedSources) const {
+    if (auto status = ValidateSourceSeparation(root_, mountedSources); !status) return status;
     if (auto status = CheckRootSeparation(); !status) return status;
     if (auto status = Validate(document); !status) return status;
     std::string json;
@@ -1025,7 +1076,10 @@ Status ProjectStore::Create(const Document& document) const {
     return AtomicWrite(root_, ScenePath(document.id), json, false);
 }
 
-Status ProjectStore::Load(std::string_view sceneId, Document& document) const {
+Status ProjectStore::Load(
+    std::string_view sceneId, Document& document,
+    std::span<const std::filesystem::path> mountedSources) const {
+    if (auto status = ValidateSourceSeparation(root_, mountedSources); !status) return status;
     if (auto status = CheckRootSeparation(); !status) return status;
     if (!ValidIdentifier(sceneId)) return Fail("scene id must be a safe identifier of at most 64 ASCII characters");
     const auto path = ScenePath(sceneId);

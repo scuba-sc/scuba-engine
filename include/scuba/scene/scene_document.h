@@ -122,15 +122,27 @@ Status ReparentNode(Document& document, std::string_view nodeId,
 // atomically, while Load rejects symlinked scene files and leaves its output unchanged on failure.
 class ProjectStore {
 public:
+    // Validates an existing project directory against the current mounted source paths, which may
+    // be files (archives) or directories. All paths are canonicalized before component comparison.
+    static Status ValidateSourceSeparation(const std::filesystem::path& projectRoot,
+                                           std::span<const std::filesystem::path> mountedSources);
+    // Retains and rechecks these read-only directory roots. Callers with archive mounts should
+    // also pass the complete current source set to each later store operation below.
     static std::optional<ProjectStore> Open(const std::filesystem::path& projectRoot,
                                             std::span<const std::filesystem::path> readOnlyDirectoryRoots,
                                             Status* status = nullptr);
 
-    Status ListScenes(std::vector<std::string>& sceneIds) const;
+    // mountedSources may include directory and archive paths added after Open. The default keeps
+    // source compatibility; callers that manage mounts should pass their current complete set.
+    Status ListScenes(std::vector<std::string>& sceneIds,
+                      std::span<const std::filesystem::path> mountedSources = {}) const;
     // Creates a new file atomically and refuses to replace an existing scene.
-    Status Create(const Document& document) const;
-    Status Save(const Document& document) const;
-    Status Load(std::string_view sceneId, Document& document) const;
+    Status Create(const Document& document,
+                  std::span<const std::filesystem::path> mountedSources = {}) const;
+    Status Save(const Document& document,
+                std::span<const std::filesystem::path> mountedSources = {}) const;
+    Status Load(std::string_view sceneId, Document& document,
+                std::span<const std::filesystem::path> mountedSources = {}) const;
 
 private:
     ProjectStore(std::filesystem::path canonicalRoot, std::vector<std::filesystem::path> readOnlyRoots)

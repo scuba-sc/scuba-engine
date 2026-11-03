@@ -36,15 +36,25 @@ document cannot be silently rewritten while losing fields this version does not 
 
 ## Project storage and editor session
 
-`ProjectStore` opens an existing project directory selected by its caller and receives the complete
-set of mounted read-only asset directories. It rejects project roots that equal, contain, or are
-contained by any of those asset directories, and rechecks that separation before reads and writes.
-It stores a document as `<scene-id>.scene.json` directly inside the project directory. The scene ID
-is validated before it is used as a filename; callers cannot supply a path. Saves write a unique
-sibling temporary file and atomically replace the destination. Loads reject symlinked scene files,
-enforce the file-size cap, and leave the caller's output document unchanged on failure. `ListScenes`
-returns sorted IDs for direct-child regular scene files and skips symlinks. `Create` writes atomically
-without replacing an existing scene file.
+`ProjectStore` opens an existing project directory selected by its caller. The editor checks that
+directory against all currently mounted read-only sources, including archive files, both before
+opening and again before each scene-store operation. `ProjectStore::Open` also records mounted
+directory roots and rechecks them on each operation. Paths are canonicalized before component
+comparison, so existing directory symlink aliases are resolved. On Windows, case-folded components
+count as the same path only when the filesystem reports those prefixes as the same object; this
+accounts for case-insensitive volumes while allowing distinct names in a case-sensitive directory.
+These checks catch a mount path that has been retargeted since project selection. They are path
+checks, not a filesystem lock: behavior under a concurrent external reparse-point swap between
+validation and I/O is not established.
+
+The store writes `<scene-id>.scene.json` directly inside the project directory. Scene IDs are
+validated before use as filenames; callers cannot supply a path. Saves write a unique sibling
+temporary file and atomically replace the destination. Loads reject symlinked scene files, enforce
+the file-size cap, and leave the caller's output document unchanged on failure. The editor loads
+into a candidate document and only installs it after the complete scene is valid, so a malformed
+existing scene does not replace the active document. `ListScenes` returns sorted IDs for direct-child
+regular scene files and skips symlinks. `Create` writes atomically without replacing an existing
+scene file.
 
 The project writer is separate from the VFS. Asset directories, archives, and `.scpak` mounts stay
 read-only inputs. The native editor can open one scene by stable ID with
@@ -58,9 +68,14 @@ created without restarting the editor or supplying a scene ID on the command lin
 from unsaved edits asks whether to save, discard the in-memory changes, or cancel; a failed save
 keeps the switch pending, and a failed project open leaves the current session in place. Creating a
 scene refuses to replace an existing file. If the default scene file does not exist, the editor
-starts an empty, unsaved scene. The app tracks mounted directory and archive sources and rejects a
-project root that overlaps them before opening or mounting the source; `ProjectStore` rechecks
-directory separation before reads and writes.
+starts an empty, unsaved scene. The app tracks mounted directory and archive sources. It rejects a
+project root that overlaps them before opening or mounting a source, and rechecks the current source
+paths for scene listing, opening, creating, and saving. A failed recheck/load leaves the current
+scene and its dirty state untouched; when a requested switch had a pending unsaved-changes prompt, a
+failed target open does not install the target document. Directory symlink aliases and archive
+files inside a project root are covered by portable tests. Junction behavior, case-only path
+spellings, and Windows reparse-point retargeting still require the Windows checklist; Linux tests do
+not establish those Windows semantics.
 
 The Scene panel is a document-backed outliner. Stable node IDs are used for selection and the
 Inspector edits local translation, local XYZ Euler rotation in degrees, and nonuniform scale. Euler

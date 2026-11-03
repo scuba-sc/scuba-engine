@@ -122,23 +122,6 @@ fs::path PathFromUtf8(const std::string& s) {
     return fs::path(std::u8string(reinterpret_cast<const char8_t*>(s.data()), s.size()));
 }
 
-bool PathWithin(const fs::path& candidate, const fs::path& root) {
-    auto c = candidate.begin();
-    for (auto r = root.begin(); r != root.end(); ++r, ++c) {
-        if (c == candidate.end()) return false;
-        const auto& candidatePart = c->native();
-        const auto& rootPart = r->native();
-        if (CompareStringOrdinal(candidatePart.c_str(), static_cast<int>(candidatePart.size()),
-                                 rootPart.c_str(), static_cast<int>(rootPart.size()), TRUE) != CSTR_EQUAL)
-            return false;
-    }
-    return true;
-}
-
-bool PathsOverlap(const fs::path& a, const fs::path& b) {
-    return PathWithin(a, b) || PathWithin(b, a);
-}
-
 std::optional<Args> ParseArgs() {
     int argc = 0;
     wchar_t** wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -363,14 +346,28 @@ struct Editor {
 #endif
     }
 
+    std::vector<fs::path> MountedSourcePaths() const {
+        std::vector<fs::path> paths;
+        paths.reserve(mountedSources.size());
+        for (const auto& [id, source] : mountedSources) {
+            (void)id;
+            paths.push_back(source.path);
+        }
+        return paths;
+    }
+
     Status MountAssetSource(const fs::path& path, const std::string& mountPoint, int priority) {
         std::error_code ec;
         const fs::path canonical = fs::canonical(path, ec);
         if (ec) return Status::Fail("asset source cannot be resolved: " + ec.message());
         const bool directory = fs::is_directory(canonical, ec);
         if (ec) return Status::Fail("asset source cannot be inspected: " + ec.message());
-        if (projectStore && PathsOverlap(projectRoot, canonical))
-            return Status::Fail("asset source overlaps the open project directory");
+        if (projectStore) {
+            auto sources = MountedSourcePaths();
+            sources.push_back(canonical);
+            if (auto status = scene::ProjectStore::ValidateSourceSeparation(projectRoot, sources); !status)
+                return status;
+        }
 
         vfs::MountId id = 0;
         if (auto status = MountPath(vfs, canonical, mountPoint, priority, &id); !status) return status;
@@ -759,7 +756,8 @@ struct Editor {
             sceneStatus = "No project session. Open a project from File or launch with --project DIR to save.";
             return;
         }
-        if (auto status = projectStore->Save(document); !status) {
+        const auto sources = MountedSourcePaths();
+        if (auto status = projectStore->Save(document, sources); !status) {
             sceneStatus = "Save failed: " + status.error;
             log::Error("scene", sceneStatus);
             return;
@@ -780,7 +778,8 @@ struct Editor {
             return;
         }
         std::vector<std::string> listed;
-        if (auto status = projectStore->ListScenes(listed); !status) {
+        const auto sources = MountedSourcePaths();
+        if (auto status = projectStore->ListScenes(listed, sources); !status) {
             sceneBrowserStatus = "Cannot list project scenes: " + status.error;
             return;
         }
@@ -893,14 +892,16 @@ struct Editor {
 
         scene::Document candidate;
         if (action.kind == scene::SceneActionKind::Open) {
-            if (auto status = projectStore->Load(sceneId, candidate); !status) {
+            const auto sources = MountedSourcePaths();
+            if (auto status = projectStore->Load(sceneId, candidate, sources); !status) {
                 sceneBrowserStatus = "Cannot open scene " + sceneId + ": " + status.error;
                 return;
             }
         } else {
             candidate.id = sceneId;
             candidate.name = sceneId;
-            if (auto status = projectStore->Create(candidate); !status) {
+            const auto sources = MountedSourcePaths();
+            if (auto status = projectStore->Create(candidate, sources); !status) {
                 const std::string failure = "Cannot create scene " + sceneId + ": " + status.error;
                 RefreshProjectScenes();
                 sceneBrowserStatus = failure;
@@ -1074,15 +1075,15 @@ struct Editor {
         if (!fs::is_directory(canonicalRoot, ec) || ec)
             return Status::Fail("project root must be an existing directory");
 
+        const auto sourcePaths = MountedSourcePaths();
+        if (auto status = scene::ProjectStore::ValidateSourceSeparation(canonicalRoot, sourcePaths); !status)
+            return status;
+
         std::vector<fs::path> readOnlyRoots;
         readOnlyRoots.reserve(mountedSources.size());
         for (const auto& [id, source] : mountedSources) {
             (void)id;
-            const fs::path currentSource = fs::canonical(source.path, ec);
-            if (ec) return Status::Fail("mounted asset source cannot be resolved: " + ec.message());
-            if (PathsOverlap(canonicalRoot, currentSource))
-                return Status::Fail("project directory overlaps a mounted asset source");
-            if (source.directory) readOnlyRoots.push_back(currentSource);
+            if (source.directory) readOnlyRoots.push_back(source.path);
         }
 
         Status status;
@@ -1097,7 +1098,7 @@ struct Editor {
         const auto fileStatus = fs::symlink_status(scenePath, ec);
         bool saved = false;
         if (!ec && (fs::exists(fileStatus) || fs::is_symlink(fileStatus))) {
-            if (auto loaded = store->Load(sceneId, initial); !loaded) return loaded;
+            if (auto loaded = store->Load(sceneId, initial, sourcePaths); !loaded) return loaded;
             saved = true;
         } else if (ec && ec != std::errc::no_such_file_or_directory) {
             return Status::Fail("cannot inspect project scene file: " + ec.message());
