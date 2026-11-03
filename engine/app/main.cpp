@@ -751,6 +751,28 @@ struct Editor {
         if (CommitDocument(std::move(candidate))) selectedNode = id;
     }
 
+    void DuplicateSelected() {
+        if (!FindNode(selectedNode)) return;
+        scene::Document candidate = document;
+        std::unordered_set<std::string> generatedIds;
+        const auto generateId = [&]() {
+            for (unsigned attempt = 0; attempt < 128; ++attempt) {
+                std::string id = NewNodeId();
+                if (!id.empty() && generatedIds.insert(id).second) return id;
+            }
+            return std::string{};
+        };
+        std::string duplicateRootId;
+        if (auto status = scene::DuplicateSubtree(candidate, selectedNode, generateId, duplicateRootId); !status) {
+            sceneStatus = "Duplicate refused: " + status.error;
+            return;
+        }
+        if (CommitDocument(std::move(candidate))) {
+            selectedNode = std::move(duplicateRootId);
+            sceneStatus = "Subtree duplicated · unsaved";
+        }
+    }
+
     void SaveScene() {
         if (!projectStore) {
             sceneStatus = "No project session. Open a project from File or launch with --project DIR to save.";
@@ -1706,6 +1728,10 @@ public:
         case ui::InputKind::KeyDown:
             if (ev.key == ImGuiKey_Z && ev.ctrl) { e_.UndoScene(); return ui::Reply::Handled(); }
             if (ev.key == ImGuiKey_Y && ev.ctrl) { e_.RedoScene(); return ui::Reply::Handled(); }
+            if (ev.key == ImGuiKey_D && ev.ctrl && !e_.selectedNode.empty()) {
+                e_.DuplicateSelected();
+                return ui::Reply::Handled();
+            }
             if (ev.key == ImGuiKey_S && ev.ctrl) { e_.SaveScene(); return ui::Reply::Handled(); }
             if (ev.key == ImGuiKey_F) { if (auto* s = e_.FindNodeInstance(e_.selectedNode)) e_.FrameInstance(*s); return ui::Reply::Handled(); }
             if (ev.key == ImGuiKey_Delete && !e_.selectedNode.empty()) { e_.RemoveSelected(); return ui::Reply::Handled(); }
@@ -2152,6 +2178,7 @@ void Editor::DrawScene() {
         ImGui::EndDisabled();
 
         ImGui::BeginDisabled(selectedNode.empty());
+        if (ImGui::Button("Duplicate subtree (Ctrl+D)")) DuplicateSelected();
         const char* deleteLabel = selectedKind == scene::NodeKind::Group ? "Delete group + children" : "Delete node";
         if (ImGui::Button(deleteLabel)) RemoveSelected();
         ImGui::EndDisabled();

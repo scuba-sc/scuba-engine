@@ -1674,6 +1674,163 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(editable.nodes.empty());
     CHECK(scene::RemoveSubtree(editable, "missing").ok() == false);
 
+    auto duplicateDocument = SceneFixture();
+    const auto beforeDuplicate = duplicateDocument;
+    const std::vector<std::string> duplicateIds{"copy-bay", "copy-ship"};
+    size_t nextDuplicateId = 0;
+    const auto duplicateIdGenerator = [&]() {
+        if (nextDuplicateId >= duplicateIds.size()) return std::string{};
+        return duplicateIds[nextDuplicateId++];
+    };
+    std::string duplicateRootId = "unchanged-output";
+    CHECK(scene::DuplicateSubtree(duplicateDocument, "bay-a", duplicateIdGenerator,
+                                  duplicateRootId).ok());
+    CHECK(duplicateRootId == "copy-bay");
+    CHECK(duplicateDocument.nodes.size() == beforeDuplicate.nodes.size() + 2);
+    CHECK(duplicateDocument.nodes[0] == beforeDuplicate.nodes[0]);
+    CHECK(duplicateDocument.nodes[1] == beforeDuplicate.nodes[1]);
+    CHECK(duplicateDocument.nodes[2] == beforeDuplicate.nodes[2]);
+    const auto copiedBay = std::find_if(duplicateDocument.nodes.begin(), duplicateDocument.nodes.end(),
+                                        [](const auto& node) { return node.id == "copy-bay"; });
+    const auto copiedShip = std::find_if(duplicateDocument.nodes.begin(), duplicateDocument.nodes.end(),
+                                         [](const auto& node) { return node.id == "copy-ship"; });
+    CHECK(copiedBay != duplicateDocument.nodes.end() && copiedBay->kind == scene::NodeKind::Group);
+    CHECK(copiedShip != duplicateDocument.nodes.end() && copiedShip->kind == scene::NodeKind::ModelInstance);
+    if (copiedBay != duplicateDocument.nodes.end()) {
+        CHECK(copiedBay->name == "Bay A Copy");
+        CHECK(copiedBay->parentId == std::optional<std::string>("root"));
+        CHECK(copiedBay->localTransform.translation == scene::Vec3(11.0f, -2.5f, 0.25f));
+    }
+    if (copiedShip != duplicateDocument.nodes.end()) {
+        CHECK(copiedShip->parentId == std::optional<std::string>("copy-bay"));
+        CHECK(copiedShip->assetPath == beforeDuplicate.nodes[2].assetPath);
+        CHECK(copiedShip->localTransform == beforeDuplicate.nodes[2].localTransform);
+    }
+    std::vector<scene::ResolvedTransform> duplicateWorlds;
+    CHECK(scene::ResolveWorldTransforms(duplicateDocument, duplicateWorlds).ok());
+
+    auto longNameDocument = SceneFixture();
+    longNameDocument.nodes[2].name.assign(128, 'n');
+    std::string longNameCopyId;
+    CHECK(scene::DuplicateSubtree(longNameDocument, "ship-01",
+                                  [] { return std::string("copy-long-name"); }, longNameCopyId).ok());
+    const auto longNameCopy = std::find_if(longNameDocument.nodes.begin(), longNameDocument.nodes.end(),
+        [&](const auto& node) { return node.id == longNameCopyId; });
+    CHECK(longNameCopy != longNameDocument.nodes.end());
+    if (longNameCopy != longNameDocument.nodes.end())
+        CHECK(longNameCopy->name == std::string(128, 'n'));
+
+    auto nestedDuplicateDocument = SceneFixture();
+    std::vector<std::string> nestedDuplicateIds{"copy-root", "copy-nested-bay", "copy-nested-ship"};
+    size_t nextNestedDuplicateId = 0;
+    std::string nestedDuplicateRootId;
+    CHECK(scene::DuplicateSubtree(nestedDuplicateDocument, "root", [&]() {
+        if (nextNestedDuplicateId >= nestedDuplicateIds.size()) return std::string{};
+        return nestedDuplicateIds[nextNestedDuplicateId++];
+    }, nestedDuplicateRootId).ok());
+    CHECK(nestedDuplicateRootId == "copy-root");
+    const auto nestedBayCopy = std::find_if(nestedDuplicateDocument.nodes.begin(), nestedDuplicateDocument.nodes.end(),
+        [](const auto& node) { return node.id == "copy-nested-bay"; });
+    const auto nestedShipCopy = std::find_if(nestedDuplicateDocument.nodes.begin(), nestedDuplicateDocument.nodes.end(),
+        [](const auto& node) { return node.id == "copy-nested-ship"; });
+    CHECK(nestedBayCopy != nestedDuplicateDocument.nodes.end() &&
+          nestedBayCopy->parentId == std::optional<std::string>("copy-root"));
+    CHECK(nestedShipCopy != nestedDuplicateDocument.nodes.end() &&
+          nestedShipCopy->parentId == std::optional<std::string>("copy-nested-bay"));
+
+    auto reverseOrderedDuplicate = SceneFixture();
+    std::reverse(reverseOrderedDuplicate.nodes.begin(), reverseOrderedDuplicate.nodes.end());
+    CHECK(scene::Validate(reverseOrderedDuplicate).ok());
+    std::vector<std::string> reverseOrderIds{"reverse-bay", "reverse-ship"};
+    size_t nextReverseOrderId = 0;
+    std::string reverseOrderRootId;
+    CHECK(scene::DuplicateSubtree(reverseOrderedDuplicate, "bay-a", [&]() {
+        if (nextReverseOrderId >= reverseOrderIds.size()) return std::string{};
+        return reverseOrderIds[nextReverseOrderId++];
+    }, reverseOrderRootId).ok());
+    const auto reverseOrderShip = std::find_if(reverseOrderedDuplicate.nodes.begin(), reverseOrderedDuplicate.nodes.end(),
+        [](const auto& node) { return node.id == "reverse-ship"; });
+    CHECK(reverseOrderRootId == "reverse-bay" && reverseOrderShip != reverseOrderedDuplicate.nodes.end());
+    if (reverseOrderShip != reverseOrderedDuplicate.nodes.end())
+        CHECK(reverseOrderShip->parentId == std::optional<std::string>("reverse-bay"));
+
+    auto translationLimitDocument = SceneFixture();
+    translationLimitDocument.nodes[2].localTransform.translation.x = 10000000.0f;
+    const auto translationLimitBefore = translationLimitDocument;
+    std::string translationLimitOutput = "unchanged-output";
+    size_t translationLimitGeneratorCalls = 0;
+    CHECK(!scene::DuplicateSubtree(translationLimitDocument, "ship-01", [&]() {
+        ++translationLimitGeneratorCalls;
+        return std::string("copy-at-limit");
+    }, translationLimitOutput).ok());
+    CHECK(translationLimitGeneratorCalls == 1);
+    CHECK(translationLimitDocument == translationLimitBefore);
+    CHECK(translationLimitOutput == "unchanged-output");
+
+    scene::DocumentHistory duplicateHistory;
+    CHECK(duplicateHistory.RecordBefore(beforeDuplicate).ok());
+    scene::Document duplicateUndo;
+    CHECK(duplicateHistory.Undo(duplicateDocument, duplicateUndo).ok());
+    CHECK(duplicateUndo == beforeDuplicate);
+    scene::Document duplicateRedo;
+    CHECK(duplicateHistory.Redo(duplicateUndo, duplicateRedo).ok());
+    CHECK(duplicateRedo == duplicateDocument);
+    scene::DocumentDirtyState duplicateDirty;
+    CHECK(duplicateDirty.SetBaseline(beforeDuplicate, true).ok());
+    CHECK(duplicateDirty.Update(duplicateDocument).ok() && duplicateDirty.dirty());
+    CHECK(duplicateDirty.Update(duplicateUndo).ok() && !duplicateDirty.dirty());
+
+    auto duplicateFailure = beforeDuplicate;
+    std::string unchangedDuplicateRoot = "keep-this-output";
+    size_t missingGeneratorCalls = 0;
+    CHECK(!scene::DuplicateSubtree(duplicateFailure, "missing",
+                                   [&]() { ++missingGeneratorCalls; return std::string("unused"); },
+                                   unchangedDuplicateRoot).ok());
+    CHECK(missingGeneratorCalls == 0 && duplicateFailure == beforeDuplicate);
+    CHECK(unchangedDuplicateRoot == "keep-this-output");
+    CHECK(!scene::DuplicateSubtree(duplicateFailure, "bay-a",
+                                   [] { return std::string("root"); }, unchangedDuplicateRoot).ok());
+    CHECK(duplicateFailure == beforeDuplicate && unchangedDuplicateRoot == "keep-this-output");
+    size_t partialGeneratorCalls = 0;
+    CHECK(!scene::DuplicateSubtree(duplicateFailure, "bay-a", [&]() {
+        return partialGeneratorCalls++ == 0 ? std::string("copy-bay") : std::string{};
+    }, unchangedDuplicateRoot).ok());
+    CHECK(duplicateFailure == beforeDuplicate && unchangedDuplicateRoot == "keep-this-output");
+    CHECK(!scene::DuplicateSubtree(duplicateFailure, "bay-a", duplicateIdGenerator,
+                                   unchangedDuplicateRoot, {std::numeric_limits<float>::infinity(), 0, 0}).ok());
+    CHECK(duplicateFailure == beforeDuplicate && unchangedDuplicateRoot == "keep-this-output");
+
+    auto fullDocument = scene::Document{};
+    fullDocument.id = "duplicate-limit";
+    fullDocument.name = "Duplicate limit";
+    scene::Node limitRoot;
+    limitRoot.id = "limit-root";
+    limitRoot.name = "Limit root";
+    limitRoot.kind = scene::NodeKind::Group;
+    scene::Node limitChild;
+    limitChild.id = "limit-child";
+    limitChild.name = "Limit child";
+    limitChild.kind = scene::NodeKind::Group;
+    limitChild.parentId = "limit-root";
+    fullDocument.nodes = {limitRoot, limitChild};
+    for (size_t i = 0; i < scene::kMaxSceneNodes - 3; ++i) {
+        scene::Node filler;
+        filler.id = "filler-" + std::to_string(i);
+        filler.name = "Filler";
+        filler.kind = scene::NodeKind::Group;
+        fullDocument.nodes.push_back(std::move(filler));
+    }
+    CHECK(fullDocument.nodes.size() == scene::kMaxSceneNodes - 1);
+    CHECK(scene::Validate(fullDocument).ok());
+    const auto fullDocumentBeforeDuplicate = fullDocument;
+    size_t limitGeneratorCalls = 0;
+    CHECK(!scene::DuplicateSubtree(fullDocument, "limit-root", [&]() {
+        ++limitGeneratorCalls;
+        return std::string("limit-copy");
+    }, unchangedDuplicateRoot).ok());
+    CHECK(limitGeneratorCalls == 0 && fullDocument == fullDocumentBeforeDuplicate);
+    CHECK(unchangedDuplicateRoot == "keep-this-output");
+
     auto renameDocument = SceneFixture();
     CHECK(scene::RenameNode(renameDocument, "bay-a", "Hangar Bay").ok());
     CHECK(renameDocument.nodes[1].name == "Hangar Bay");

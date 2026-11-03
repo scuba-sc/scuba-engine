@@ -105,9 +105,14 @@ unstable translation. An active asset-placement preview hides the transform gizm
 clicks. The native Content and viewport UI remain Windows-only and still need a Windows compile and
 visual validation.
 Groups can be added and nested. Selected nodes can be renamed, deleted (groups remove their
-subtrees), or reparented from the selected-node controls. Reparenting keeps the selected node's
-world transform and rejects cycles or moves that would need local shear, which this TRS schema
-cannot represent. The Content panel browses the mounted VFS hierarchically. Because VFS listings
+subtrees), duplicated (including descendants), or reparented from the selected-node controls.
+**Duplicate subtree** and `Ctrl+D` create fresh stable IDs for every copied node, remap the copied
+hierarchy, retain model asset references and descendant-local transforms, and move the copied root
+one local X unit. The copied root gets a ` Copy` name suffix when it fits the name limit; longer
+valid names are preserved unchanged. The edit is transactional: an invalid ID, invalid resulting
+transform, or scene node-limit failure leaves the document unchanged. Reparenting keeps the selected node's world
+transform and rejects cycles or moves that would need local shear, which this TRS schema cannot
+represent. The Content panel browses the mounted VFS hierarchically. Because VFS listings
 return files rather than directory records, folder rows are inferred from normalized file paths; the
 panel does not invent empty folders or parse game-specific object-container formats. Search is
 ASCII-case-insensitive and recursive within the current folder; it filters immediate folder names
@@ -162,9 +167,9 @@ unsaved, and save-error states; there is no automatic save. Switching scenes or 
 changes asks to save, discard, or cancel; a window-close request is deferred until that choice is
 made. Undo and redo are available from the File menu, Scene panel, and `Ctrl+Z` / `Ctrl+Y`. They
 retain up to 64 snapshots or 32 MiB, whichever limit is reached first. A continuous Inspector edit,
-Ctrl+left-drag, or transform-gizmo drag is one history action; uniform-scale steps, group, place,
-delete, rename, reparent, clear, and double-click spawn each form one action. Asynchronous grounding
-is folded into its spawn action when no later scene edit intervenes. Returning to the last saved
+Ctrl+left-drag, or transform-gizmo drag is one history action; uniform-scale steps, group, duplicate,
+place, delete, rename, reparent, clear, and double-click spawn each form one action. Asynchronous
+grounding is folded into its spawn action when no later scene edit intervenes. Returning to the last saved
 document clears the unsaved state; saving establishes a new baseline without discarding undo history.
 Without `--project`, the editor still uses the same document and outliner in memory and says that
 the session will not persist.

@@ -88,6 +88,12 @@ bool ValidLabel(std::string_view value, size_t maxBytes) {
     return true;
 }
 
+std::string DuplicateNodeName(std::string_view name) {
+    constexpr std::string_view suffix = " Copy";
+    if (name.size() + suffix.size() > kMaxNameBytes) return std::string(name);
+    return std::string(name) + std::string(suffix);
+}
+
 bool FiniteBounded(float value, float bound) {
     return std::isfinite(value) && std::fabs(value) <= bound;
 }
@@ -843,6 +849,74 @@ Status RemoveSubtree(Document& document, std::string_view rootId) {
                           candidate.nodes.end());
     if (auto status = Validate(candidate); !status) return status;
     document = std::move(candidate);
+    return Status::Ok();
+}
+
+Status DuplicateSubtree(Document& document, std::string_view rootId,
+                        const std::function<std::string()>& generateId,
+                        std::string& duplicatedRootId, Vec3 localOffset) {
+    if (auto status = Validate(document); !status) return status;
+    if (!generateId) return Fail("scene node ID generator is unavailable");
+    if (!std::isfinite(localOffset.x) || !std::isfinite(localOffset.y) || !std::isfinite(localOffset.z))
+        return Fail("duplicate offset must be finite");
+
+    const auto root = std::find_if(document.nodes.begin(), document.nodes.end(),
+                                   [&](const Node& node) { return node.id == rootId; });
+    if (root == document.nodes.end()) return Fail("scene node does not exist");
+
+    std::unordered_map<std::string, std::vector<const Node*>> childrenByParent;
+    childrenByParent.reserve(document.nodes.size());
+    for (const auto& node : document.nodes)
+        if (node.parentId) childrenByParent[*node.parentId].push_back(&node);
+
+    // Parent-first traversal gives deterministic ID assignment even when the stored document is
+    // not arranged parent-first. Child ordering follows the source document.
+    std::vector<const Node*> subtree;
+    subtree.reserve(document.nodes.size());
+    subtree.push_back(&*root);
+    for (size_t cursor = 0; cursor < subtree.size(); ++cursor) {
+        const auto found = childrenByParent.find(subtree[cursor]->id);
+        if (found == childrenByParent.end()) continue;
+        subtree.insert(subtree.end(), found->second.begin(), found->second.end());
+    }
+    if (subtree.size() > kMaxSceneNodes - document.nodes.size())
+        return Fail("duplicated subtree would exceed the scene node limit");
+
+    std::unordered_set<std::string> usedIds;
+    usedIds.reserve(document.nodes.size() + subtree.size());
+    for (const auto& node : document.nodes) usedIds.insert(node.id);
+
+    std::unordered_map<std::string, std::string> idRemap;
+    idRemap.reserve(subtree.size());
+    for (const Node* source : subtree) {
+        std::string generated = generateId();
+        if (!ValidIdentifier(generated) || !usedIds.insert(generated).second)
+            return Fail("scene node ID generator returned an invalid or reused ID");
+        idRemap.emplace(source->id, std::move(generated));
+    }
+
+    std::vector<Node> copies;
+    copies.reserve(subtree.size());
+    for (const Node* source : subtree) {
+        Node copy = *source;
+        copy.id = idRemap.at(source->id);
+        if (source == &*root) {
+            copy.name = DuplicateNodeName(source->name);
+            copy.localTransform.translation.x += localOffset.x;
+            copy.localTransform.translation.y += localOffset.y;
+            copy.localTransform.translation.z += localOffset.z;
+        } else if (source->parentId) {
+            copy.parentId = idRemap.at(*source->parentId);
+        }
+        copies.push_back(std::move(copy));
+    }
+
+    Document candidate = document;
+    candidate.nodes.insert(candidate.nodes.end(), copies.begin(), copies.end());
+    if (auto status = Validate(candidate); !status) return status;
+    const std::string newRootId = copies.front().id;
+    document = std::move(candidate);
+    duplicatedRootId = newRootId;
     return Status::Ok();
 }
 

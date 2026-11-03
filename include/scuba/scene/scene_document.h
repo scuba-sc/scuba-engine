@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -111,6 +112,12 @@ Status AddModelInstance(Document& document, std::string id, std::string name, st
                         std::optional<std::string> parentId = std::nullopt,
                         LocalTransform transform = {});
 Status RemoveSubtree(Document& document, std::string_view rootId);
+// Duplicates a node and its descendants atomically. The callback must supply a fresh persistent ID
+// for each cloned node; the duplicated root is shifted by localOffset and descendants retain their
+// local transforms. The output root ID and document are unchanged on failure.
+Status DuplicateSubtree(Document& document, std::string_view rootId,
+                        const std::function<std::string()>& generateId,
+                        std::string& duplicatedRootId, Vec3 localOffset = {1, 0, 0});
 Status RenameNode(Document& document, std::string_view nodeId, std::string name);
 // Reparents a node only under another group (or to the root). With preserveWorldTransform=true,
 // the operation refuses a result that cannot be represented by a non-sheared local TRS.
