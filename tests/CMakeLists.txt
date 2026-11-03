@@ -475,6 +475,11 @@ if(TARGET scuba_engine_core)
   add_test(NAME engine_core COMMAND test_engine_core)
   set_tests_properties(engine_core PROPERTIES TIMEOUT 60)
 
+  add_executable(test_scene_outliner_search test_scene_outliner_search.cpp)
+  target_link_libraries(test_scene_outliner_search PRIVATE scuba_engine_core)
+  scuba_warnings(test_scene_outliner_search)
+  add_test(NAME scene_outliner_search COMMAND test_scene_outliner_search)
+
   add_executable(test_input_router test_input_router.cpp ../engine/src/ui/input_router.cpp)
   target_include_directories(test_input_router PRIVATE "${PROJECT_SOURCE_DIR}/include")
   scuba_warnings(test_input_router)

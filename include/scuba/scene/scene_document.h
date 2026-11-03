@@ -80,6 +80,20 @@ struct ResolvedTransform {
 Status Validate(const Document& document);
 Status Serialize(const Document& document, std::string& json);
 Status Deserialize(std::string_view json, Document& document);
+inline constexpr size_t kMaxOutlinerSearchQueryBytes = 256;
+struct OutlinerSearchResult {
+    // IDs are copied from the document and remain stable across node-vector reordering.
+    // Both lists preserve document order; visibleNodeIds also contains matched nodes' ancestors.
+    std::vector<std::string> visibleNodeIds;
+    std::vector<std::string> matchingNodeIds;
+
+    friend bool operator==(const OutlinerSearchResult&, const OutlinerSearchResult&) = default;
+};
+// Empty query returns every node. A nonempty query searches names, stable IDs, and model asset
+// paths, returning the matches plus their ancestor groups so callers can retain hierarchy context.
+// ASCII letters match case-insensitively; non-ASCII UTF-8 bytes match exactly. Queries over the
+// byte limit, malformed UTF-8, or control characters fail safely without changing result.
+Status SearchOutliner(const Document& document, std::string_view query, OutlinerSearchResult& result);
 // Resolves row-vector local transforms in document order, composing child-local * parent-world.
 // Returns failure without changing the output if composition overflows or becomes singular.
 Status ResolveWorldTransforms(const Document& document, std::vector<ResolvedTransform>& transforms);

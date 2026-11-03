@@ -98,6 +98,34 @@ std::string DuplicateNodeName(std::string_view name) {
     return std::string(name) + std::string(suffix);
 }
 
+unsigned char FoldAscii(unsigned char value) {
+    return value >= 'A' && value <= 'Z' ? static_cast<unsigned char>(value + ('a' - 'A')) : value;
+}
+
+std::vector<size_t> SearchPrefix(std::string_view pattern) {
+    std::vector<size_t> prefix(pattern.size(), 0);
+    for (size_t i = 1, matched = 0; i < pattern.size(); ++i) {
+        const auto current = FoldAscii(static_cast<unsigned char>(pattern[i]));
+        while (matched > 0 && current != FoldAscii(static_cast<unsigned char>(pattern[matched])))
+            matched = prefix[matched - 1];
+        if (current == FoldAscii(static_cast<unsigned char>(pattern[matched]))) ++matched;
+        prefix[i] = matched;
+    }
+    return prefix;
+}
+
+bool ContainsFolded(std::string_view text, std::string_view pattern, const std::vector<size_t>& prefix) {
+    size_t matched = 0;
+    for (const char raw : text) {
+        const auto current = FoldAscii(static_cast<unsigned char>(raw));
+        while (matched > 0 && current != FoldAscii(static_cast<unsigned char>(pattern[matched])))
+            matched = prefix[matched - 1];
+        if (current == FoldAscii(static_cast<unsigned char>(pattern[matched]))) ++matched;
+        if (matched == pattern.size()) return true;
+    }
+    return false;
+}
+
 bool FiniteBounded(float value, float bound) {
     return std::isfinite(value) && std::fabs(value) <= bound;
 }
@@ -583,6 +611,63 @@ Status Validate(const Document& document) {
             color[node->id] = 2;
         }
     }
+    return Status::Ok();
+}
+
+Status SearchOutliner(const Document& document, std::string_view query, OutlinerSearchResult& result) {
+    if (query.size() > kMaxOutlinerSearchQueryBytes)
+        return Fail("outliner search query exceeds the 256-byte limit");
+    if (!query.empty() && !ValidLabel(query, kMaxOutlinerSearchQueryBytes))
+        return Fail("outliner search query is not valid UTF-8 or contains a control character");
+    if (auto status = Validate(document); !status)
+        return Fail("cannot search an invalid scene: " + status.error);
+
+    OutlinerSearchResult candidate;
+    candidate.visibleNodeIds.reserve(document.nodes.size());
+    candidate.matchingNodeIds.reserve(document.nodes.size());
+    if (query.empty()) {
+        for (const auto& node : document.nodes) candidate.visibleNodeIds.push_back(node.id);
+        result = std::move(candidate);
+        return Status::Ok();
+    }
+
+    std::unordered_map<std::string_view, size_t> indexById;
+    indexById.reserve(document.nodes.size());
+    for (size_t i = 0; i < document.nodes.size(); ++i) indexById.emplace(document.nodes[i].id, i);
+
+    const auto prefix = SearchPrefix(query);
+    std::vector<uint8_t> matches(document.nodes.size(), 0);
+    std::vector<uint8_t> visible(document.nodes.size(), 0);
+    for (size_t i = 0; i < document.nodes.size(); ++i) {
+        const auto& node = document.nodes[i];
+        const bool match = ContainsFolded(node.name, query, prefix) ||
+                           ContainsFolded(node.id, query, prefix) ||
+                           (node.kind == NodeKind::ModelInstance &&
+                            ContainsFolded(node.assetPath, query, prefix));
+        if (match) {
+            matches[i] = 1;
+            visible[i] = 1;
+        }
+    }
+
+    for (size_t i = 0; i < document.nodes.size(); ++i) {
+        if (!matches[i]) continue;
+        const Node* ancestor = &document.nodes[i];
+        size_t depth = 0;
+        while (ancestor->parentId) {
+            const auto parent = indexById.find(*ancestor->parentId);
+            if (parent == indexById.end()) return Fail("scene hierarchy changed during outliner search");
+            if (++depth > kMaxHierarchyDepth) return Fail("scene hierarchy exceeds the outliner search limit");
+            visible[parent->second] = 1;
+            ancestor = &document.nodes[parent->second];
+        }
+    }
+
+    for (size_t i = 0; i < document.nodes.size(); ++i) {
+        if (visible[i]) candidate.visibleNodeIds.push_back(document.nodes[i].id);
+        if (matches[i]) candidate.matchingNodeIds.push_back(document.nodes[i].id);
+    }
+    result = std::move(candidate);
     return Status::Ok();
 }
 
