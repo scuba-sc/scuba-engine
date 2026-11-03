@@ -14,6 +14,13 @@ This handoff describes the current native editor scaffold and the next dependenc
 | Rendering and picking | Loaded model instances render in the central viewport; CPU picking and document-backed transforms use resolved world matrices. | D3D12 visuals, input feel, DPI behavior and the new default docking layout remain unverified on Windows. No thumbnail render path or bounded GPU thumbnail cache exists. |
 | Game connection | The editor uses the repository's mock game services. | No live-game execution, native provider integration or gameplay acceptance is established. |
 
+## Incremental outliner handoff
+
+This snapshot reconstructs the saved editor patch on its exact base and adds only the bounded
+scene-outliner search slice. Later offline work from a separate workspace is not present. Project
+creation, node duplication, and transform snapping still need to be integrated and reviewed
+separately before treating the editor scaffold as complete.
+
 More scene schema, storage, validation and failure behavior is in [Scene documents](scene-document.md). Model decoding details are in [Asset formats](../assets.md), and VFS mount/listing behavior is in [VFS](vfs.md).
 
 ## Recommended order

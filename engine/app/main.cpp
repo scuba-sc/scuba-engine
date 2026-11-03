@@ -293,6 +293,7 @@ struct Editor {
     }
 
     scene::Document document;
+    uint64_t documentRevision = 0;
     scene::DocumentHistory sceneHistory;
     scene::DocumentDirtyState documentDirty;
     scene::SceneActionGate sceneActionGate;
@@ -319,6 +320,12 @@ struct Editor {
     bool transformGizmoGestureActive = false;
     TransformGizmoMode gizmoMode = TransformGizmoMode::Move;
     int transformGizmoAxis = -1;
+    char outlinerSearchBuffer[scene::kMaxOutlinerSearchQueryBytes + 1] = "";
+    uint64_t outlinerFilterRevision = 0;
+    std::string outlinerFilterQuery;
+    scene::OutlinerSearchResult outlinerFilterResults;
+    Status outlinerFilterStatus;
+    std::unordered_set<std::string_view> outlinerVisibleNodeIds;
     char renameBuffer[129] = "";  // scene node names are capped at 128 UTF-8 bytes
     std::string renameTarget;
     std::string renameSourceName;
@@ -669,6 +676,7 @@ struct Editor {
         if (recordUndo)
             if (auto status = sceneHistory.RecordBefore(document); !status) return status;
         document = std::move(candidate);
+        ++documentRevision;
         worldByNode = std::move(worlds);
         RefreshInstances();
         sceneStatus = "Scene loaded";
@@ -2159,6 +2167,31 @@ void Editor::DrawScene() {
     if (!sceneStatus.empty()) ImGui::TextWrapped("%s", sceneStatus.c_str());
     ImGui::Separator();
 
+    ImGui::SeparatorText("Outliner");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##outliner-search", "Search names, IDs, or asset paths",
+                             outlinerSearchBuffer, sizeof(outlinerSearchBuffer));
+    const std::string_view outlinerQuery(outlinerSearchBuffer);
+    const bool searchRequested = !outlinerQuery.empty();
+    if (searchRequested && (outlinerFilterQuery != outlinerQuery || outlinerFilterRevision != documentRevision)) {
+        outlinerFilterStatus = scene::SearchOutliner(document, outlinerQuery, outlinerFilterResults);
+        outlinerFilterQuery.assign(outlinerQuery);
+        outlinerFilterRevision = documentRevision;
+        outlinerVisibleNodeIds.clear();
+        if (outlinerFilterStatus) {
+            outlinerVisibleNodeIds.reserve(outlinerFilterResults.visibleNodeIds.size());
+            for (const auto& id : outlinerFilterResults.visibleNodeIds) outlinerVisibleNodeIds.insert(id);
+        }
+    }
+    const bool filteringOutliner = searchRequested && outlinerFilterStatus.ok();
+    if (searchRequested && !outlinerFilterStatus)
+        ImGui::TextDisabled("Search ignored: %s. Showing all nodes.", outlinerFilterStatus.error.c_str());
+    const auto isVisible = [&](const scene::Node& node) {
+        return !filteringOutliner || outlinerVisibleNodeIds.contains(std::string_view(node.id));
+    };
+    if (filteringOutliner && outlinerFilterResults.visibleNodeIds.empty())
+        ImGui::TextDisabled("No scene nodes match that search.");
+
     std::unordered_map<std::string, std::vector<const scene::Node*>> children;
     std::vector<const scene::Node*> roots;
     for (const auto& node : document.nodes) {
@@ -2166,17 +2199,22 @@ void Editor::DrawScene() {
         else roots.push_back(&node);
     }
     const auto drawNode = [&](const auto& self, const scene::Node& node) -> void {
+        if (!isVisible(node)) return;
         const auto foundChildren = children.find(node.id);
-        const bool hasChildren = foundChildren != children.end() && !foundChildren->second.empty();
+        const bool hasChildren = foundChildren != children.end() && std::any_of(
+            foundChildren->second.begin(), foundChildren->second.end(),
+            [&](const scene::Node* child) { return isVisible(*child); });
         ImGui::PushID(node.id.c_str());
         if (node.kind == scene::NodeKind::Group) {
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
             if (selectedNode == node.id) flags |= ImGuiTreeNodeFlags_Selected;
             if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+            if (filteringOutliner && hasChildren) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
             const bool open = ImGui::TreeNodeEx("node", flags, "%s", node.name.c_str());
             if (ImGui::IsItemClicked()) selectedNode = node.id;
             if (open && hasChildren) {
-                for (const auto* child : foundChildren->second) self(self, *child);
+                for (const auto* child : foundChildren->second)
+                    if (isVisible(*child)) self(self, *child);
                 ImGui::TreePop();
             }
         } else {

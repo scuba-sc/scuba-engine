@@ -77,8 +77,12 @@ files inside a project root are covered by portable tests. Junction behavior, ca
 spellings, and Windows reparse-point retargeting still require the Windows checklist; Linux tests do
 not establish those Windows semantics.
 
-The Scene panel is a document-backed outliner. Stable node IDs are used for selection and the
-Inspector edits local translation, local XYZ Euler rotation in degrees, and nonuniform scale. Euler
+The Scene panel is a document-backed outliner. Its bounded search accepts up to 256 UTF-8 bytes and
+matches names, stable IDs, and model asset paths. It shows each match with its ancestor groups,
+expands the context needed to reach matches, and leaves selection and scene data untouched. ASCII
+letters match case-insensitively; non-ASCII UTF-8 bytes match exactly. Invalid UTF-8, control
+characters, and oversized queries are rejected and the full tree remains visible. Stable node IDs
+are used for selection and the Inspector edits local translation, local XYZ Euler rotation in degrees, and nonuniform scale. Euler
 angles are converted to normalized quaternions for the version 1 document format. Uniform scale
 step buttons multiply all local axes together and preserve their ratios. These edits participate in
 the same bounded undo history as other scene changes. The viewport shows screen-space hit handles
