@@ -3,6 +3,8 @@
 
 #include "scuba/render/camera.h"
 
+#include <array>
+#include <cstddef>
 #include <span>
 
 namespace scuba::render {
@@ -15,6 +17,8 @@ struct ScreenSegment {
     ScreenPoint start;
     ScreenPoint end;
 };
+
+inline constexpr size_t kRotationRingSegments = 64;
 
 // Projects a world point through row-vector view/projection matrices into client-pixel viewport
 // coordinates. Points behind the camera or outside the depth range are rejected; output is intact.
@@ -40,6 +44,29 @@ bool AxisTranslationFromParameter(Float3 startWorldPosition, Float3 unitAxis,
 // scale axes through a rotated or nonuniformly scaled parent transform.
 bool NormalizeTransformedDirection(Float3 direction, const Float4x4& matrix,
                                    Float3& normalizedDirection);
+
+// Applies the linear part of a row-vector affine matrix to a direction. Output stays intact on
+// invalid input.
+bool TransformDirection(Float3 direction, const Float4x4& matrix, Float3& transformedDirection);
+
+// Intersects a forward ray with the plane spanned by basisU/basisV. Rejects parallel or
+// ill-conditioned planes and leaves output unchanged on failure.
+bool IntersectRayPlane(const Ray& ray, Float3 planeOrigin, Float3 basisU, Float3 basisV,
+                       Float3& intersection);
+
+// Returns coordinates for a point in the (possibly nonorthogonal) plane basis. The caller may
+// project an approximate point into the plane first. Output stays unchanged on failure.
+bool PlaneBasisCoordinates(Float3 planeOrigin, Float3 basisU, Float3 basisV, Float3 point,
+                           float& coordinateU, float& coordinateV);
+
+// Computes the signed shortest angle from one nonzero 2D vector to another, in radians.
+bool SignedPlanarAngleDelta(float fromU, float fromV, float toU, float toV, float& deltaRadians);
+
+// Projects an affine local-space circle into screen-space line segments. The basis vectors include
+// the parent linear transform, so nonuniform parents correctly produce an ellipse.
+bool ProjectRotationRing(Float3 center, Float3 basisU, Float3 basisV, float radius,
+                         const Float4x4& view, const Float4x4& projection, Rect viewport,
+                         std::span<ScreenSegment> segments);
 
 // Maps one complete projected gizmo span to one local scale unit. The caller applies document
 // scale limits transactionally after this input-space calculation.

@@ -511,6 +511,47 @@ Status EulerXYZDegreesToQuaternion(Vec3 degrees, Quaternion& rotation) {
     return Status::Ok();
 }
 
+Status RotateLocalAxis(Quaternion startingRotation, size_t axis, float deltaRadians,
+                       Quaternion& rotation) {
+    if (axis >= 3) return Fail("local rotation axis index is out of range");
+    if (!std::isfinite(deltaRadians)) return Fail("local rotation delta must be finite");
+    const double input[] = {startingRotation.x, startingRotation.y, startingRotation.z,
+                            startingRotation.w};
+    double normSquared = 0;
+    for (const double component : input) {
+        if (!std::isfinite(component)) return Fail("starting quaternion must be finite");
+        normSquared += component * component;
+    }
+    if (!std::isfinite(normSquared) || normSquared <= 1e-24)
+        return Fail("starting quaternion must be nonzero");
+    const double startInverseNorm = 1.0 / std::sqrt(normSquared);
+    const double sx = startingRotation.x * startInverseNorm;
+    const double sy = startingRotation.y * startInverseNorm;
+    const double sz = startingRotation.z * startInverseNorm;
+    const double sw = startingRotation.w * startInverseNorm;
+    constexpr double kTau = 6.283185307179586476925286766559;
+    const double halfAngle = std::remainder(static_cast<double>(deltaRadians), kTau) * 0.5;
+    const double sine = std::sin(halfAngle), cosine = std::cos(halfAngle);
+    double dx = 0, dy = 0, dz = 0;
+    if (axis == 0) dx = sine;
+    else if (axis == 1) dy = sine;
+    else dz = sine;
+    const double rx = sw * dx + sx * cosine + sy * dz - sz * dy;
+    const double ry = sw * dy - sx * dz + sy * cosine + sz * dx;
+    const double rz = sw * dz + sx * dy - sy * dx + sz * cosine;
+    const double rw = sw * cosine - sx * dx - sy * dy - sz * dz;
+    const double resultNorm = std::sqrt(rx * rx + ry * ry + rz * rz + rw * rw);
+    if (!std::isfinite(resultNorm) || resultNorm <= 1e-12)
+        return Fail("local rotation result could not be normalized");
+    const Quaternion candidate{static_cast<float>(rx / resultNorm), static_cast<float>(ry / resultNorm),
+                               static_cast<float>(rz / resultNorm), static_cast<float>(rw / resultNorm)};
+    if (!std::isfinite(candidate.x) || !std::isfinite(candidate.y) ||
+        !std::isfinite(candidate.z) || !std::isfinite(candidate.w))
+        return Fail("local rotation result is not finite");
+    rotation = candidate;
+    return Status::Ok();
+}
+
 Status QuaternionToEulerXYZDegrees(Quaternion rotation, Vec3& degrees) {
     constexpr double kPi = 3.1415926535897932384626433832795;
     constexpr double kRadiansToDegrees = 180.0 / kPi;

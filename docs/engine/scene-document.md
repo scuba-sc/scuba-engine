@@ -64,15 +64,21 @@ the same bounded undo history as other scene changes. The viewport shows screen-
 for the selected node's world X, Y, and Z translation axes. Dragging an arrow moves the node only
 along that world axis; the result is transformed through the parent inverse before writing local
 translation, and the drag is one undo action. Ctrl+left-drag retains its ground-plane move behavior.
-The Scene panel switches the viewport gizmo between Move and Scale. Scale mode changes one positive
+The Scene panel switches the viewport gizmo between Move, Scale, and Rotate. Scale mode changes one positive
 local scale component per drag; handles follow the node's local rotation and full parent transform.
 Under a nonuniform parent those handles may not be perpendicular. Values outside the scene's
 positive scale limits are refused, and mirrored scale is not representable by the scene schema.
+Rotate mode drags a local-axis ring; the pointer ray is intersected with the affine-transformed ring
+plane, so nonuniform parents can make the rings elliptical. The gesture accumulates wrapped angle
+steps and records one undo action. If the ring plane is edge-on or ill-conditioned from the current
+view, the drag is refused. Rotation changes local TRS; it does not promise rotation around a world
+axis or a circular ring under a nonuniform parent.
 Escape rolls back the active gizmo gesture if no separate scene edit has superseded it. If another
-edit intervenes, rollback is refused and the current position is kept. If pointer capture is
-interrupted, the last applied position is kept as one undoable edit. Handles that project end-on
+edit intervenes, rollback is refused and the current transform is kept. If pointer capture is
+interrupted, the last valid transform is kept as one undoable edit. Handles that project end-on
 are not pickable; the tool refuses near-parallel ray/axis movement instead of applying an unstable
-translation. A viewport rotation gizmo is not implemented yet.
+translation. The native viewport UI remains Windows-only and still needs Windows compile and visual
+validation.
 Groups can be added and nested. Selected nodes can be renamed, deleted (groups remove their
 subtrees), or reparented from the selected-node controls. Reparenting keeps the selected node's
 world transform and rejects cycles or moves that would need local shear, which this TRS schema

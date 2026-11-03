@@ -86,6 +86,10 @@ Status ResolveWorldTransforms(const Document& document, std::vector<ResolvedTran
 // transactional and rejects non-finite input; quaternion-to-Euler returns the canonical range.
 Status EulerXYZDegreesToQuaternion(Vec3 degrees, Quaternion& rotation);
 Status QuaternionToEulerXYZDegrees(Quaternion rotation, Vec3& degrees);
+// Applies a delta about one canonical local axis to a starting rotation. The row-vector TRS
+// convention composes the delta before the starting local rotation. Output is transactional.
+Status RotateLocalAxis(Quaternion startingRotation, size_t axis, float deltaRadians,
+                       Quaternion& rotation);
 // Multiplies all local scale axes by one positive factor, preserving their ratios. Refuses invalid
 // or out-of-range results without changing the transform.
 Status ScaleUniform(LocalTransform& transform, float factor);

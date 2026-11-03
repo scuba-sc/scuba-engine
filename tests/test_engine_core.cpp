@@ -625,6 +625,63 @@ void TestTransformGizmoMath() {
     render::Float3 unchangedDirection{7, 8, 9};
     CHECK(!render::NormalizeTransformedDirection({1, 0, 0}, collapsedFrame, unchangedDirection));
     CHECK(unchangedDirection.x == 7 && unchangedDirection.y == 8 && unchangedDirection.z == 9);
+
+    const render::Float3 planeOrigin{1, -2, 0.5f};
+    const render::Float3 planeU{2, 0, 0};
+    const render::Float3 planeV{1, 1, 0};  // Affine image of a local ring under a nonuniform parent.
+    constexpr double kRadians = 3.14159265358979323846 / 180.0;
+    const float startU = static_cast<float>(std::cos(179.0 * kRadians));
+    const float startV = static_cast<float>(std::sin(179.0 * kRadians));
+    const render::Float3 ringPoint{planeOrigin.x + startU * planeU.x + startV * planeV.x,
+                                   planeOrigin.y + startU * planeU.y + startV * planeV.y,
+                                   planeOrigin.z + startU * planeU.z + startV * planeV.z};
+    render::Float3 ringIntersection{88, 88, 88};
+    CHECK(render::IntersectRayPlane({{ringPoint.x, ringPoint.y, ringPoint.z + 4}, {0, 0, -1}},
+                                    planeOrigin, planeU, planeV, ringIntersection));
+    CHECK(std::fabs(ringIntersection.x - ringPoint.x) < 1e-5f &&
+          std::fabs(ringIntersection.y - ringPoint.y) < 1e-5f &&
+          std::fabs(ringIntersection.z - ringPoint.z) < 1e-5f);
+    float ringCoordinateU = -8, ringCoordinateV = -9;
+    CHECK(render::PlaneBasisCoordinates(planeOrigin, planeU, planeV, ringIntersection,
+                                       ringCoordinateU, ringCoordinateV));
+    CHECK(std::fabs(ringCoordinateU - startU) < 1e-5f && std::fabs(ringCoordinateV - startV) < 1e-5f);
+    float angleDelta = 7;
+    const float endU = static_cast<float>(std::cos(-179.0 * kRadians));
+    const float endV = static_cast<float>(std::sin(-179.0 * kRadians));
+    CHECK(render::SignedPlanarAngleDelta(ringCoordinateU, ringCoordinateV, endU, endV, angleDelta));
+    CHECK(std::fabs(angleDelta - static_cast<float>(2.0 * kRadians)) < 1e-5f);
+    CHECK(render::SignedPlanarAngleDelta(endU, endV, ringCoordinateU, ringCoordinateV, angleDelta));
+    CHECK(std::fabs(angleDelta + static_cast<float>(2.0 * kRadians)) < 1e-5f);
+    angleDelta = 7;
+    CHECK(!render::SignedPlanarAngleDelta(0, 0, 1, 0, angleDelta) && angleDelta == 7);
+    ringIntersection = {88, 88, 88};
+    CHECK(!render::IntersectRayPlane({{0, 0, 3}, {1, 0, 0}}, planeOrigin, planeU, planeV,
+                                     ringIntersection));
+    CHECK(ringIntersection.x == 88 && ringIntersection.y == 88 && ringIntersection.z == 88);
+    CHECK(!render::IntersectRayPlane({{ringPoint.x, ringPoint.y, ringPoint.z - 4}, {0, 0, -1}},
+                                     planeOrigin, planeU, planeV, ringIntersection));
+    CHECK(ringIntersection.x == 88 && ringIntersection.y == 88 && ringIntersection.z == 88);
+    ringCoordinateU = -8;
+    ringCoordinateV = -9;
+    CHECK(!render::PlaneBasisCoordinates(planeOrigin, planeU, {4, 0, 0}, ringPoint,
+                                         ringCoordinateU, ringCoordinateV));
+    CHECK(ringCoordinateU == -8 && ringCoordinateV == -9);
+
+    std::array<render::ScreenSegment, render::kRotationRingSegments> projectedRing{};
+    CHECK(render::ProjectRotationRing({0, 0, 0}, planeU, planeV, 0.75f,
+                                     view, projection, viewport, projectedRing));
+    const auto& ringHandle = projectedRing[0];
+    const float ringPickX = (ringHandle.start.x + ringHandle.end.x) * 0.5f;
+    const float ringPickY = (ringHandle.start.y + ringHandle.end.y) * 0.5f;
+    CHECK(render::HitTestScreenSegments(ringPickX, ringPickY, projectedRing, 9.0f, 1.5f) >= 0);
+    auto unchangedRing = projectedRing;
+    CHECK(!render::ProjectRotationRing({0, 0, 0}, planeU, {4, 0, 0}, 0.75f,
+                                       view, projection, viewport, projectedRing));
+    for (size_t i = 0; i < projectedRing.size(); ++i)
+        CHECK(projectedRing[i].start.x == unchangedRing[i].start.x &&
+              projectedRing[i].start.y == unchangedRing[i].start.y &&
+              projectedRing[i].end.x == unchangedRing[i].end.x &&
+              projectedRing[i].end.y == unchangedRing[i].end.y);
 }
 
 scene::Document SceneFixture() {
@@ -687,6 +744,33 @@ void TestSceneDocument(const fs::path& root) {
     scene::Vec3 unchangedEuler{1, 2, 3};
     CHECK(!scene::QuaternionToEulerXYZDegrees({0, 0, 0, 0}, unchangedEuler).ok());
     CHECK(unchangedEuler == (scene::Vec3{1, 2, 3}));
+
+    constexpr float kHalfPi = 1.57079632679489661923f;
+    scene::Quaternion quarterTurnAroundZ, localXTurn;
+    CHECK(scene::EulerXYZDegreesToQuaternion({0, 0, 90}, quarterTurnAroundZ).ok());
+    CHECK(scene::RotateLocalAxis(quarterTurnAroundZ, 0, kHalfPi, localXTurn).ok());
+    render::Float4x4 startLocalRotation, changedLocalRotation;
+    CHECK(render::AffineFromTrs({}, {quarterTurnAroundZ.x, quarterTurnAroundZ.y,
+                                     quarterTurnAroundZ.z, quarterTurnAroundZ.w},
+                                {1, 1, 1}, startLocalRotation));
+    CHECK(render::AffineFromTrs({}, {localXTurn.x, localXTurn.y, localXTurn.z, localXTurn.w},
+                                {1, 1, 1}, changedLocalRotation));
+    render::Float3 startLocalXAxis, changedLocalXAxis, changedLocalYAxis;
+    CHECK(render::TransformDirection({1, 0, 0}, startLocalRotation, startLocalXAxis));
+    CHECK(render::TransformDirection({1, 0, 0}, changedLocalRotation, changedLocalXAxis));
+    CHECK(render::TransformDirection({0, 1, 0}, changedLocalRotation, changedLocalYAxis));
+    CHECK(std::fabs(startLocalXAxis.x - changedLocalXAxis.x) < 1e-5f &&
+          std::fabs(startLocalXAxis.y - changedLocalXAxis.y) < 1e-5f &&
+          std::fabs(startLocalXAxis.z - changedLocalXAxis.z) < 1e-5f);
+    CHECK(std::fabs(changedLocalYAxis.x) < 1e-5f && std::fabs(changedLocalYAxis.y) < 1e-5f &&
+          std::fabs(changedLocalYAxis.z - 1.0f) < 1e-5f);
+    auto unchangedLocalRotation = quarterTurnAroundZ;
+    CHECK(!scene::RotateLocalAxis(quarterTurnAroundZ, 3, kHalfPi, unchangedLocalRotation).ok());
+    CHECK(unchangedLocalRotation == quarterTurnAroundZ);
+    CHECK(!scene::RotateLocalAxis(quarterTurnAroundZ, 1,
+                                  std::numeric_limits<float>::quiet_NaN(),
+                                  unchangedLocalRotation).ok());
+    CHECK(unchangedLocalRotation == quarterTurnAroundZ);
 
     auto scaledTransform = document.nodes[2].localTransform;
     const auto originalScale = scaledTransform.scale;
@@ -754,6 +838,48 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(scaleDragHistory.Redo(scaleDragRestored, scaleDragRedone).ok());
     CHECK(scaleDragRedone == scaleDragDocument);
 
+    const auto rotationDragBaseline = document;
+    auto rotationDragDocument = rotationDragBaseline;
+    const auto rotationDragStart = rotationDragDocument.nodes[2].localTransform.rotation;
+    scene::DocumentHistory rotationDragHistory;
+    bool rotationDragUndoCaptured = false;
+    for (const float angle : {0.25f, 0.5f, 0.75f}) {
+        auto candidate = rotationDragDocument;
+        scene::Quaternion changedRotation;
+        CHECK(scene::RotateLocalAxis(rotationDragStart, 1, angle, changedRotation).ok());
+        candidate.nodes[2].localTransform.rotation = changedRotation;
+        if (!rotationDragUndoCaptured) {
+            CHECK(rotationDragHistory.RecordBefore(rotationDragDocument).ok());
+            rotationDragUndoCaptured = true;
+        }
+        rotationDragDocument = std::move(candidate);
+        std::vector<scene::ResolvedTransform> rotationDragWorld;
+        CHECK(scene::ResolveWorldTransforms(rotationDragDocument, rotationDragWorld).ok());
+    }
+    CHECK(rotationDragHistory.retainedEntries() == 1);
+    scene::Document rotationDragRestored;
+    CHECK(rotationDragHistory.Undo(rotationDragDocument, rotationDragRestored).ok());
+    CHECK(rotationDragRestored == rotationDragBaseline);
+    scene::Document rotationDragRedone;
+    CHECK(rotationDragHistory.Redo(rotationDragRestored, rotationDragRedone).ok());
+    CHECK(rotationDragRedone == rotationDragDocument);
+
+    scene::DocumentHistory rotationCancelHistory;
+    CHECK(rotationCancelHistory.RecordBefore(rotationDragBaseline).ok());
+    auto rotationBeforeGesture = rotationDragBaseline;
+    rotationBeforeGesture.name = "Prior edit before rotation drag";
+    CHECK(rotationCancelHistory.RecordBefore(rotationBeforeGesture).ok());
+    auto rotationDuringGesture = rotationBeforeGesture;
+    CHECK(scene::RotateLocalAxis(rotationBeforeGesture.nodes[2].localTransform.rotation, 2,
+                                 0.8f, rotationDuringGesture.nodes[2].localTransform.rotation).ok());
+    CHECK(rotationDuringGesture != rotationBeforeGesture);
+    scene::Document rotationCanceled;
+    CHECK(rotationCancelHistory.CancelLatestChange(rotationBeforeGesture, rotationCanceled).ok());
+    CHECK(rotationCanceled == rotationBeforeGesture && rotationCancelHistory.retainedEntries() == 1);
+    scene::Document rotationPriorUndo;
+    CHECK(rotationCancelHistory.Undo(rotationCanceled, rotationPriorUndo).ok());
+    CHECK(rotationPriorUndo == rotationDragBaseline);
+
     auto scaledHierarchy = document;
     std::vector<scene::ResolvedTransform> scaleWorldBefore;
     CHECK(scene::ResolveWorldTransforms(scaledHierarchy, scaleWorldBefore).ok());
@@ -807,6 +933,52 @@ void TestSceneDocument(const fs::path& root) {
                       scaleNode->localTransform.scale.z == child.localTransform.scale.z);
             }
         }
+    }
+    auto rotatedHierarchy = document;
+    std::vector<scene::ResolvedTransform> rotationWorldBefore;
+    CHECK(scene::ResolveWorldTransforms(rotatedHierarchy, rotationWorldBefore).ok());
+    const auto rotationParent = std::find_if(rotationWorldBefore.begin(), rotationWorldBefore.end(), [](const auto& item) {
+        return item.nodeId == "bay-a";
+    });
+    const auto rotationChild = std::find_if(rotationWorldBefore.begin(), rotationWorldBefore.end(), [](const auto& item) {
+        return item.nodeId == "ship-01";
+    });
+    CHECK(rotationParent != rotationWorldBefore.end() && rotationChild != rotationWorldBefore.end());
+    auto rotationNode = std::find_if(rotatedHierarchy.nodes.begin(), rotatedHierarchy.nodes.end(), [](const auto& item) {
+        return item.id == "ship-01";
+    });
+    CHECK(rotationNode != rotatedHierarchy.nodes.end());
+    if (rotationParent != rotationWorldBefore.end() && rotationChild != rotationWorldBefore.end() &&
+        rotationNode != rotatedHierarchy.nodes.end()) {
+        const auto initialRotation = rotationNode->localTransform.rotation;
+        render::Float4x4 initialLocalRotation;
+        CHECK(render::AffineFromTrs({}, {initialRotation.x, initialRotation.y,
+                                         initialRotation.z, initialRotation.w},
+                                    {1, 1, 1}, initialLocalRotation));
+        const auto initialAxisFrame = render::Multiply(initialLocalRotation, rotationParent->world);
+        render::Float3 initialLocalXAxis;
+        CHECK(render::TransformDirection({1, 0, 0}, initialAxisFrame, initialLocalXAxis));
+        scene::Quaternion turnedRotation;
+        CHECK(scene::RotateLocalAxis(initialRotation, 0, kHalfPi, turnedRotation).ok());
+        rotationNode->localTransform.rotation = turnedRotation;
+        std::vector<scene::ResolvedTransform> rotationWorldAfter;
+        CHECK(scene::ResolveWorldTransforms(rotatedHierarchy, rotationWorldAfter).ok());
+        const auto changedParent = std::find_if(rotationWorldAfter.begin(), rotationWorldAfter.end(), [](const auto& item) {
+            return item.nodeId == "bay-a";
+        });
+        render::Float4x4 hierarchyChangedLocalRotation;
+        CHECK(render::AffineFromTrs({}, {turnedRotation.x, turnedRotation.y, turnedRotation.z, turnedRotation.w},
+                                    {1, 1, 1}, hierarchyChangedLocalRotation));
+        if (changedParent != rotationWorldAfter.end()) {
+            const auto changedAxisFrame = render::Multiply(hierarchyChangedLocalRotation, changedParent->world);
+            render::Float3 hierarchyChangedLocalXAxis;
+            CHECK(render::TransformDirection({1, 0, 0}, changedAxisFrame, hierarchyChangedLocalXAxis));
+            CHECK(std::fabs(initialLocalXAxis.x - hierarchyChangedLocalXAxis.x) < 1e-4f &&
+                  std::fabs(initialLocalXAxis.y - hierarchyChangedLocalXAxis.y) < 1e-4f &&
+                  std::fabs(initialLocalXAxis.z - hierarchyChangedLocalXAxis.z) < 1e-4f);
+        }
+        CHECK(rotatedHierarchy.nodes[2].localTransform.scale == document.nodes[2].localTransform.scale);
+        CHECK(scene::Validate(rotatedHierarchy).ok());
     }
     auto mirroredHierarchy = document;
     mirroredHierarchy.nodes[1].localTransform.scale.x = -2.0f;

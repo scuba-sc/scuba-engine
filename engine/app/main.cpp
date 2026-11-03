@@ -223,11 +223,17 @@ struct Instance {
     uint64_t autoPlaceHistoryRevision = 0;
 };
 
+enum class TransformGizmoMode : uint8_t { Move, Scale, Rotate };
+
 struct TransformGizmoGeometry {
     render::ScreenPoint center;
+    render::Float3 worldCenter;
     std::array<render::Float3, 3> directions;
     std::array<render::ScreenSegment, 3> axes;
     std::array<render::ScreenSegment, 3> hitHandles;
+    std::array<render::Float3, 3> rotationBasisU;
+    std::array<render::Float3, 3> rotationBasisV;
+    std::array<render::ScreenSegment, render::kRotationRingSegments * 3> rotationHandles;
     float worldLength = 0;
 };
 
@@ -308,7 +314,7 @@ struct Editor {
     bool inspectorRotationActive = false;
     bool transformGizmoDragging = false;
     bool transformGizmoGestureActive = false;
-    bool scaleGizmoMode = false;
+    TransformGizmoMode gizmoMode = TransformGizmoMode::Move;
     int transformGizmoAxis = -1;
     char renameBuffer[129] = "";  // scene node names are capped at 128 UTF-8 bytes
     std::string renameTarget;
@@ -483,12 +489,13 @@ struct Editor {
         const auto viewport = ui.viewport();
         if (viewport.w <= 1 || viewport.h <= 1) return false;
         const auto origin = TransformPoint({0, 0, 0}, *world);
+        geometry.worldCenter = origin;
         const auto view = camera.View();
         const auto projection = camera.Projection(viewport.w / viewport.h);
         if (!render::ProjectPoint(origin, view, projection, viewport, geometry.center)) return false;
 
         constexpr render::Float3 worldAxes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-        if (scaleGizmoMode) {
+        if (gizmoMode != TransformGizmoMode::Move) {
             render::Float4x4 localRotation;
             const auto& q = node->localTransform.rotation;
             if (!render::AffineFromTrs({}, {q.x, q.y, q.z, q.w}, {1, 1, 1}, localRotation)) return false;
@@ -498,10 +505,21 @@ struct Editor {
                 if (!parentWorld) return false;
                 localAxesToWorld = render::Multiply(localRotation, *parentWorld);
             }
-            for (size_t axis = 0; axis < 3; ++axis)
-                if (!render::NormalizeTransformedDirection(worldAxes[axis], localAxesToWorld,
-                                                          geometry.directions[axis]))
-                    return false;
+            for (size_t axis = 0; axis < 3; ++axis) {
+                if (gizmoMode == TransformGizmoMode::Scale) {
+                    if (!render::NormalizeTransformedDirection(worldAxes[axis], localAxesToWorld,
+                                                              geometry.directions[axis]))
+                        return false;
+                } else {
+                    const size_t uAxis = (axis + 1) % 3;
+                    const size_t vAxis = (axis + 2) % 3;
+                    if (!render::TransformDirection(worldAxes[uAxis], localAxesToWorld,
+                                                    geometry.rotationBasisU[axis]) ||
+                        !render::TransformDirection(worldAxes[vAxis], localAxesToWorld,
+                                                    geometry.rotationBasisV[axis]))
+                        return false;
+                }
+            }
         } else {
             for (size_t axis = 0; axis < 3; ++axis) geometry.directions[axis] = worldAxes[axis];
         }
@@ -515,6 +533,17 @@ struct Editor {
             0.01f, 100000.0f);
         if (!std::isfinite(worldLength) || worldLength <= 0) return false;
         geometry.worldLength = worldLength;
+        if (gizmoMode == TransformGizmoMode::Rotate) {
+            for (size_t axis = 0; axis < 3; ++axis) {
+                auto ring = std::span<render::ScreenSegment>(geometry.rotationHandles).subspan(
+                    axis * render::kRotationRingSegments, render::kRotationRingSegments);
+                if (!render::ProjectRotationRing(origin, geometry.rotationBasisU[axis],
+                                                 geometry.rotationBasisV[axis], worldLength,
+                                                 view, projection, viewport, ring))
+                    for (auto& segment : ring) segment = {geometry.center, geometry.center};
+            }
+            return true;
+        }
         for (size_t axis = 0; axis < 3; ++axis) {
             const auto direction = geometry.directions[axis];
             const render::Float3 endpoint{origin.x + direction.x * worldLength,
@@ -1179,34 +1208,59 @@ public:
             if (event.ctrl) return ui::Reply::Unhandled();  // Keep Ctrl+drag's legacy ground-plane move.
             TransformGizmoGeometry geometry;
             if (!editor_.BuildGizmoGeometry(geometry)) return ui::Reply::Unhandled();
-            const int axisIndex = render::HitTestScreenSegments(event.x, event.y, geometry.hitHandles);
+            int axisIndex = -1;
+            const auto gestureMode = editor_.gizmoMode;
+            if (gestureMode == TransformGizmoMode::Rotate) {
+                const int ringSegment = render::HitTestScreenSegments(event.x, event.y,
+                    geometry.rotationHandles, 9.0f, 1.5f);
+                if (ringSegment >= 0)
+                    axisIndex = ringSegment / static_cast<int>(render::kRotationRingSegments);
+            } else {
+                axisIndex = render::HitTestScreenSegments(event.x, event.y, geometry.hitHandles);
+            }
             if (axisIndex < 0) return ui::Reply::Unhandled();
             const scene::Node* selected = editor_.FindNode(editor_.selectedNode);
             const auto* world = selected ? editor_.World(selected->id) : nullptr;
             if (!selected || !world) return ui::Reply::Unhandled();
             gestureCaptured_ = true;
             editor_.transformGizmoGestureActive = true;
-            scaleMode_ = editor_.scaleGizmoMode;
+            mode_ = gestureMode;
             axisIndex_ = axisIndex;
 
-            axis_ = geometry.directions[axisIndex];
-            scaleHandleWorldLength_ = geometry.worldLength;
-            startScale_ = axisIndex == 0 ? selected->localTransform.scale.x :
-                          axisIndex == 1 ? selected->localTransform.scale.y : selected->localTransform.scale.z;
             startWorldPosition_ = TransformPoint({0, 0, 0}, *world);
             const auto startRay = editor_.camera.ScreenRay(event.x, event.y, editor_.ui.viewport());
-            if (!render::ClosestRayAxisParameter(startRay, startWorldPosition_, axis_, startParameter_)) {
-                editor_.sceneStatus = "Transform axis unavailable from this view direction";
-                return ui::Reply::Capture();
-            }
-            if (!scaleMode_ && selected->parentId) {
-                const auto* parentWorld = editor_.World(*selected->parentId);
-                if (!parentWorld || !render::InvertAffine(*parentWorld, parentInverse_)) {
-                    editor_.sceneStatus = "Axis translation unavailable: parent transform cannot be inverted";
+            if (mode_ == TransformGizmoMode::Rotate) {
+                rotationBasisU_ = geometry.rotationBasisU[axisIndex];
+                rotationBasisV_ = geometry.rotationBasisV[axisIndex];
+                render::Float3 hit;
+                if (!render::IntersectRayPlane(startRay, geometry.worldCenter,
+                                               rotationBasisU_, rotationBasisV_, hit) ||
+                    !render::PlaneBasisCoordinates(geometry.worldCenter, rotationBasisU_,
+                                                   rotationBasisV_, hit,
+                                                   rotationLastU_, rotationLastV_)) {
+                    editor_.sceneStatus = "Rotation ring unavailable from this view direction";
                     return ui::Reply::Capture();
                 }
+                rotationStart_ = selected->localTransform.rotation;
+                rotationAccumulated_ = 0;
             } else {
-                parentInverse_ = {};
+                axis_ = geometry.directions[axisIndex];
+                scaleHandleWorldLength_ = geometry.worldLength;
+                startScale_ = axisIndex == 0 ? selected->localTransform.scale.x :
+                              axisIndex == 1 ? selected->localTransform.scale.y : selected->localTransform.scale.z;
+                if (!render::ClosestRayAxisParameter(startRay, startWorldPosition_, axis_, startParameter_)) {
+                    editor_.sceneStatus = "Transform axis unavailable from this view direction";
+                    return ui::Reply::Capture();
+                }
+                if (mode_ == TransformGizmoMode::Move && selected->parentId) {
+                    const auto* parentWorld = editor_.World(*selected->parentId);
+                    if (!parentWorld || !render::InvertAffine(*parentWorld, parentInverse_)) {
+                        editor_.sceneStatus = "Axis translation unavailable: parent transform cannot be inverted";
+                        return ui::Reply::Capture();
+                    }
+                } else {
+                    parentInverse_ = {};
+                }
             }
             draggedNode_ = selected->id;
             undoCaptured_ = false;
@@ -1217,21 +1271,54 @@ public:
         }
         if (event.kind == ui::InputKind::PointerMove && dragging_ && event.leftHeld) {
             if (undoCaptured_ && editor_.historyRevision != dragHistoryRevision_) {
-                editor_.sceneStatus = "Transform drag stopped because another scene edit completed; current position kept";
+                editor_.sceneStatus = "Transform drag stopped because another scene edit completed; current transform kept";
                 ResetGesture();
                 return ui::Reply::Release();
             }
             if (!editor_.FindNode(draggedNode_)) return ui::Reply::Handled();
             const auto ray = editor_.camera.ScreenRay(event.x, event.y, editor_.ui.viewport());
-            float currentParameter = 0;
-            if (!render::ClosestRayAxisParameter(ray, startWorldPosition_, axis_, currentParameter))
-                return ui::Reply::Handled();
             scene::Document candidate = editor_.document;
             const auto node = std::find_if(candidate.nodes.begin(), candidate.nodes.end(), [&](const auto& item) {
                 return item.id == draggedNode_;
             });
             if (node == candidate.nodes.end()) return ui::Reply::Handled();
-            if (scaleMode_) {
+            if (mode_ == TransformGizmoMode::Rotate) {
+                render::Float3 hit;
+                float coordinateU = 0, coordinateV = 0, stepRadians = 0;
+                if (!render::IntersectRayPlane(ray, startWorldPosition_, rotationBasisU_,
+                                               rotationBasisV_, hit) ||
+                    !render::PlaneBasisCoordinates(startWorldPosition_, rotationBasisU_,
+                                                   rotationBasisV_, hit, coordinateU, coordinateV) ||
+                    !render::SignedPlanarAngleDelta(rotationLastU_, rotationLastV_,
+                                                    coordinateU, coordinateV, stepRadians))
+                    return ui::Reply::Handled();
+                constexpr double kMaxDragAngleRadians = 200.0 * 3.14159265358979323846;
+                const double nextAngle = rotationAccumulated_ + stepRadians;
+                if (!std::isfinite(nextAngle) || std::fabs(nextAngle) > kMaxDragAngleRadians) {
+                    editor_.sceneStatus = "Rotation drag reached the 100-turn gesture limit";
+                    return ui::Reply::Handled();
+                }
+                scene::Quaternion rotation;
+                if (auto status = scene::RotateLocalAxis(rotationStart_, static_cast<size_t>(axisIndex_),
+                                                         static_cast<float>(nextAngle), rotation); !status) {
+                    editor_.sceneStatus = "Rotation refused: " + status.error;
+                    return ui::Reply::Handled();
+                }
+                node->localTransform.rotation = rotation;
+                if (!undoCaptured_) historyBeforeDocument_ = editor_.document;
+                if (auto status = editor_.CommitInteractiveDocument(std::move(candidate), undoCaptured_); !status)
+                    return ui::Reply::Handled();
+                rotationAccumulated_ = nextAngle;
+                rotationLastU_ = coordinateU;
+                rotationLastV_ = coordinateV;
+                if (undoCaptured_) dragHistoryRevision_ = editor_.historyRevision;
+                return ui::Reply::Handled();
+            }
+
+            float currentParameter = 0;
+            if (!render::ClosestRayAxisParameter(ray, startWorldPosition_, axis_, currentParameter))
+                return ui::Reply::Handled();
+            if (mode_ == TransformGizmoMode::Scale) {
                 if (!std::isfinite(scaleHandleWorldLength_) || scaleHandleWorldLength_ <= 0) return ui::Reply::Handled();
                 float desiredScale = 0;
                 if (!render::AxisScaleFromParameter(startScale_, startParameter_, currentParameter,
@@ -1269,8 +1356,13 @@ private:
         draggedNode_.clear();
         historyBeforeDocument_ = {};
         dragHistoryRevision_ = 0;
-        scaleMode_ = false;
+        mode_ = TransformGizmoMode::Move;
         axisIndex_ = -1;
+        rotationBasisU_ = {};
+        rotationBasisV_ = {};
+        rotationStart_ = {};
+        rotationLastU_ = rotationLastV_ = 0;
+        rotationAccumulated_ = 0;
         editor_.transformGizmoDragging = false;
         editor_.transformGizmoGestureActive = false;
         editor_.transformGizmoAxis = -1;
@@ -1281,7 +1373,7 @@ private:
             scene::Document restored;
             if (auto status = editor_.sceneHistory.CancelLatestChange(historyBeforeDocument_, restored); !status) {
                 editor_.sceneStatus = "Transform drag could not be canceled safely: " + status.error +
-                                      "; current position kept";
+                                      "; current transform kept";
                 ResetGesture();
                 return;
             }
@@ -1311,8 +1403,14 @@ private:
     uint64_t dragHistoryRevision_ = 0;
     float startScale_ = 1;
     float scaleHandleWorldLength_ = 0;
+    render::Float3 rotationBasisU_{};
+    render::Float3 rotationBasisV_{};
+    scene::Quaternion rotationStart_{};
+    float rotationLastU_ = 0;
+    float rotationLastV_ = 0;
+    double rotationAccumulated_ = 0;
     int axisIndex_ = -1;
-    bool scaleMode_ = false;
+    TransformGizmoMode mode_ = TransformGizmoMode::Move;
     bool gestureCaptured_ = false;
     bool dragging_ = false;
     bool undoCaptured_ = false;
@@ -1543,12 +1641,19 @@ void Editor::DrawScene() {
     if (projectStore) ImGui::TextWrapped("Project: %s  ·  scene: %s", projectRoot.generic_string().c_str(), document.id.c_str());
     else ImGui::TextDisabled("In-memory scene · pass --project DIR to save");
     ImGui::SeparatorText("Viewport gizmo");
-    if (ImGui::RadioButton("Move axes", !scaleGizmoMode)) scaleGizmoMode = false;
+    if (ImGui::RadioButton("Move axes", gizmoMode == TransformGizmoMode::Move))
+        gizmoMode = TransformGizmoMode::Move;
     ImGui::SameLine();
-    if (ImGui::RadioButton("Scale axes", scaleGizmoMode)) scaleGizmoMode = true;
-    if (scaleGizmoMode)
+    if (ImGui::RadioButton("Scale axes", gizmoMode == TransformGizmoMode::Scale))
+        gizmoMode = TransformGizmoMode::Scale;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Rotate rings", gizmoMode == TransformGizmoMode::Rotate))
+        gizmoMode = TransformGizmoMode::Rotate;
+    if (gizmoMode == TransformGizmoMode::Scale)
         ImGui::TextDisabled("Scale follows local axes through the parent transform; "
                             "only positive scale is supported.");
+    else if (gizmoMode == TransformGizmoMode::Rotate)
+        ImGui::TextDisabled("Rotate around the node's local axis; nonuniform parents distort ring shape.");
     ImGui::BeginDisabled(!sceneHistory.CanUndo());
     if (ImGui::Button("Undo")) UndoScene();
     ImGui::EndDisabled();
@@ -2109,6 +2214,27 @@ void Editor::DrawTransformGizmo() const {
     constexpr ImU32 colors[3] = {IM_COL32(236, 82, 82, 255), IM_COL32(86, 214, 126, 255),
                                  IM_COL32(84, 154, 250, 255)};
     constexpr const char* labels[3] = {"X", "Y", "Z"};
+    if (gizmoMode == TransformGizmoMode::Rotate) {
+        for (size_t axis = 0; axis < 3; ++axis) {
+            const ImU32 color = transformGizmoDragging && transformGizmoAxis == static_cast<int>(axis)
+                ? IM_COL32(255, 236, 128, 255) : colors[axis];
+            const size_t first = axis * render::kRotationRingSegments;
+            for (size_t segmentIndex = 0; segmentIndex < render::kRotationRingSegments; ++segmentIndex) {
+                const auto& segment = geometry.rotationHandles[first + segmentIndex];
+                const float dx = segment.end.x - segment.start.x;
+                const float dy = segment.end.y - segment.start.y;
+                if (!std::isfinite(dx) || !std::isfinite(dy) || dx * dx + dy * dy < 1.0f) continue;
+                draw->AddLine({segment.start.x, segment.start.y}, {segment.end.x, segment.end.y}, color, 2.5f);
+            }
+            const auto& labelSegment = geometry.rotationHandles[first];
+            if (std::hypot(labelSegment.end.x - geometry.center.x,
+                           labelSegment.end.y - geometry.center.y) >= 12.0f)
+                draw->AddText({labelSegment.end.x + 4.0f, labelSegment.end.y - 7.0f}, color, labels[axis]);
+        }
+        draw->AddCircleFilled({geometry.center.x, geometry.center.y}, 4.0f, IM_COL32(28, 31, 38, 255));
+        draw->PopClipRect();
+        return;
+    }
     for (size_t axis = 0; axis < geometry.axes.size(); ++axis) {
         const auto& segment = geometry.axes[axis];
         const float dx = segment.end.x - segment.start.x;
@@ -2124,7 +2250,7 @@ void Editor::DrawTransformGizmo() const {
         const ImU32 color = transformGizmoDragging && transformGizmoAxis == static_cast<int>(axis)
             ? IM_COL32(255, 236, 128, 255) : colors[axis];
         draw->AddLine({segment.start.x, segment.start.y}, tip, color, 3.0f);
-        if (scaleGizmoMode) {
+        if (gizmoMode == TransformGizmoMode::Scale) {
             draw->AddRectFilled({tip.x - 5.0f, tip.y - 5.0f}, {tip.x + 5.0f, tip.y + 5.0f}, color);
             draw->AddRect({tip.x - 5.0f, tip.y - 5.0f}, {tip.x + 5.0f, tip.y + 5.0f},
                           IM_COL32(25, 28, 34, 255), 0.0f, 1.5f, 0);
