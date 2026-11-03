@@ -528,6 +528,24 @@ void TestSceneDocument(const fs::path& root) {
     std::vector<scene::ResolvedTransform> resolved;
     CHECK(scene::ResolveWorldTransforms(document, resolved).ok());
     CHECK(resolved.size() == document.nodes.size());
+    scene::LocalTransform placedLocal;
+    placedLocal.translation = {123, 456, 789};
+    render::Float4x4 placedWorld;
+    placedWorld.m[3][0] = -999;
+    CHECK(resolved.size() > 1 && scene::ComputeGroundPlacement(resolved[1].world, {25, 7, 42},
+                {-1, -1, -1}, {1, 1, 1}, placedLocal, placedWorld).ok());
+    std::array<float, 3> placedMin{}, placedMax{};
+    CHECK(render::TransformBounds({-1, -1, -1}, {1, 1, 1}, placedWorld, placedMin, placedMax));
+    const auto placedOrigin = ApplyPoint({0, 0, 0}, placedWorld);
+    CHECK(std::fabs(placedMin[2]) < 1e-4f && std::fabs(placedOrigin.x - 25) < 1e-4f &&
+          std::fabs(placedOrigin.y - 7) < 1e-4f);
+    const auto unchangedPlacement = placedLocal;
+    const auto unchangedPlacementWorld = placedWorld;
+    render::Float4x4 singularParent;
+    singularParent.m[0][0] = 0;
+    CHECK(!scene::ComputeGroundPlacement(singularParent, {1, 2, 0}, {-1, -1, -1}, {1, 1, 1},
+                                         placedLocal, placedWorld).ok());
+    CHECK(placedLocal == unchangedPlacement && placedWorld.m[3][0] == unchangedPlacementWorld.m[3][0]);
     if (resolved.size() == 3) {
         CHECK(resolved[0].nodeId == "root" && resolved[1].nodeId == "bay-a" && resolved[2].nodeId == "ship-01");
         const auto shipOrigin = ApplyPoint({0, 0, 0}, resolved[2].world);
@@ -651,6 +669,22 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(!fs::exists(root / "escape.scene.json"));
     CHECK(!project->Load("../escape", reopened).ok());
     CHECK(reopened == preserved);
+
+    scene::Document editable;
+    editable.id = "editor-session";
+    editable.name = "Editor session";
+    CHECK(scene::AddGroup(editable, "group-root", "Group").ok());
+    CHECK(scene::AddGroup(editable, "group-child", "Nested group", "group-root").ok());
+    CHECK(scene::AddModelInstance(editable, "model-1", "Cube", "content/models/cube.glb", "group-child").ok());
+    const scene::Document withPlacedModel = editable;
+    CHECK(scene::AddModelInstance(editable, "model-1", "Duplicate", "content/models/other.glb").ok() == false);
+    CHECK(editable == withPlacedModel);
+    CHECK(scene::AddModelInstance(editable, "bad-path", "Invalid", "../outside.glb").ok() == false);
+    CHECK(editable == withPlacedModel);
+    CHECK(scene::Validate(editable).ok());
+    CHECK(scene::RemoveSubtree(editable, "group-root").ok());
+    CHECK(editable.nodes.empty());
+    CHECK(scene::RemoveSubtree(editable, "missing").ok() == false);
 
     scene::Document unknownFields;
     CHECK(!scene::Deserialize(R"({"format":"scuba.scene","format":"scuba.scene","schema_version":1,"scene_id":"x","name":"x","nodes":[]})", unknownFields).ok());

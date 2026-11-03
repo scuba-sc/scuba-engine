@@ -142,7 +142,7 @@ std::vector<InputEvent> UiLayer::Events() const {
             e.button = kButtons[b];
             out.push_back(e);
         }
-    for (ImGuiKey key : {ImGuiKey_F, ImGuiKey_Delete, ImGuiKey_Escape, ImGuiKey_G})
+    for (ImGuiKey key : {ImGuiKey_F, ImGuiKey_Delete, ImGuiKey_Escape, ImGuiKey_G, ImGuiKey_S})
         if (ImGui::IsKeyPressed(key, false)) {
             InputEvent e = base;
             e.kind = InputKind::KeyDown;

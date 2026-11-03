@@ -13,6 +13,7 @@
 #include <string>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -466,6 +467,105 @@ Status ResolveWorldTransforms(const Document& document, std::vector<ResolvedTran
         }
     }
     transforms = std::move(resolved);
+    return Status::Ok();
+}
+
+Status ComputeGroundPlacement(std::optional<render::Float4x4> parentWorld,
+                              render::Float3 worldPoint, const std::array<float, 3>& modelBoundsMin,
+                              const std::array<float, 3>& modelBoundsMax, LocalTransform& local,
+                              render::Float4x4& world) {
+    if (!std::isfinite(worldPoint.x) || !std::isfinite(worldPoint.y))
+        return Fail("placement point must be finite");
+    const render::Float4x4 parent = parentWorld.value_or(render::Float4x4{});
+    render::Float4x4 parentInverse;
+    if (!render::InvertAffine(parent, parentInverse)) return Fail("placement parent transform is singular or unstable");
+
+    auto applyPoint = [](render::Float3 point, const render::Float4x4& matrix) {
+        return render::Float3{
+            point.x * matrix.m[0][0] + point.y * matrix.m[1][0] + point.z * matrix.m[2][0] + matrix.m[3][0],
+            point.x * matrix.m[0][1] + point.y * matrix.m[1][1] + point.z * matrix.m[2][1] + matrix.m[3][1],
+            point.x * matrix.m[0][2] + point.y * matrix.m[1][2] + point.z * matrix.m[2][2] + matrix.m[3][2]};
+    };
+    LocalTransform candidate;
+    const auto initialLocal = applyPoint({worldPoint.x, worldPoint.y, 0}, parentInverse);
+    candidate.translation = {initialLocal.x, initialLocal.y, initialLocal.z};
+    render::Float4x4 localMatrix;
+    auto makeLocalMatrix = [&](render::Float4x4& output) {
+        return render::AffineFromTrs({candidate.translation.x, candidate.translation.y, candidate.translation.z},
+                                     {candidate.rotation.x, candidate.rotation.y,
+                                      candidate.rotation.z, candidate.rotation.w},
+                                     {candidate.scale.x, candidate.scale.y, candidate.scale.z}, output);
+    };
+    if (!makeLocalMatrix(localMatrix)) return Fail("placement transform cannot be represented");
+    render::Float4x4 candidateWorld = render::Multiply(localMatrix, parent);
+    std::array<float, 3> boundsMin{}, boundsMax{};
+    if (!render::TransformBounds(modelBoundsMin, modelBoundsMax, candidateWorld, boundsMin, boundsMax))
+        return Fail("model bounds cannot be transformed for placement");
+    render::Float3 adjustedWorldOrigin = applyPoint({0, 0, 0}, candidateWorld);
+    adjustedWorldOrigin.z -= boundsMin[2];
+    const auto adjustedLocal = applyPoint(adjustedWorldOrigin, parentInverse);
+    candidate.translation = {adjustedLocal.x, adjustedLocal.y, adjustedLocal.z};
+    if (!makeLocalMatrix(localMatrix)) return Fail("ground-adjusted placement transform cannot be represented");
+    candidateWorld = render::Multiply(localMatrix, parent);
+    if (!render::TransformBounds(modelBoundsMin, modelBoundsMax, candidateWorld, boundsMin, boundsMax))
+        return Fail("ground-adjusted model bounds cannot be transformed");
+    local = candidate;
+    world = candidateWorld;
+    return Status::Ok();
+}
+
+Status AddGroup(Document& document, std::string id, std::string name,
+                std::optional<std::string> parentId, LocalTransform transform) {
+    if (auto status = Validate(document); !status) return status;
+    Document candidate = document;
+    Node node;
+    node.id = std::move(id);
+    node.name = std::move(name);
+    node.kind = NodeKind::Group;
+    node.parentId = std::move(parentId);
+    node.localTransform = transform;
+    candidate.nodes.push_back(std::move(node));
+    if (auto status = Validate(candidate); !status) return status;
+    document = std::move(candidate);
+    return Status::Ok();
+}
+
+Status AddModelInstance(Document& document, std::string id, std::string name, std::string assetPath,
+                        std::optional<std::string> parentId, LocalTransform transform) {
+    if (auto status = Validate(document); !status) return status;
+    Document candidate = document;
+    Node node;
+    node.id = std::move(id);
+    node.name = std::move(name);
+    node.kind = NodeKind::ModelInstance;
+    node.parentId = std::move(parentId);
+    node.assetPath = std::move(assetPath);
+    node.localTransform = transform;
+    candidate.nodes.push_back(std::move(node));
+    if (auto status = Validate(candidate); !status) return status;
+    document = std::move(candidate);
+    return Status::Ok();
+}
+
+Status RemoveSubtree(Document& document, std::string_view rootId) {
+    if (auto status = Validate(document); !status) return status;
+    if (std::none_of(document.nodes.begin(), document.nodes.end(),
+                     [&](const Node& node) { return node.id == rootId; }))
+        return Fail("scene node does not exist");
+    std::unordered_set<std::string> removed{std::string(rootId)};
+    bool expanded = true;
+    while (expanded) {
+        expanded = false;
+        for (const auto& node : document.nodes)
+            if (node.parentId && removed.contains(*node.parentId) && removed.insert(node.id).second)
+                expanded = true;
+    }
+    Document candidate = document;
+    candidate.nodes.erase(std::remove_if(candidate.nodes.begin(), candidate.nodes.end(),
+                                         [&](const Node& node) { return removed.contains(node.id); }),
+                          candidate.nodes.end());
+    if (auto status = Validate(candidate); !status) return status;
+    document = std::move(candidate);
     return Status::Ok();
 }
 

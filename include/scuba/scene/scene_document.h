@@ -81,6 +81,22 @@ Status Deserialize(std::string_view json, Document& document);
 // Resolves row-vector local transforms in document order, composing child-local * parent-world.
 // Returns failure without changing the output if composition overflows or becomes singular.
 Status ResolveWorldTransforms(const Document& document, std::vector<ResolvedTransform>& transforms);
+// Places a unit-rotation/unit-scale model so its transformed bounds rest on world Z=0 at the
+// requested world XY. An optional resolved parent transform is respected; outputs remain unchanged
+// on failure. The caller validates that the parent is an allowed group node.
+Status ComputeGroundPlacement(std::optional<render::Float4x4> parentWorld, render::Float3 worldPoint,
+                              const std::array<float, 3>& modelBoundsMin,
+                              const std::array<float, 3>& modelBoundsMax, LocalTransform& local,
+                              render::Float4x4& world);
+// Transactional editor mutations. Appending requires a unique stable ID and a group parent (if any);
+// removing a group removes its descendants. The document is unchanged on failure.
+Status AddGroup(Document& document, std::string id, std::string name,
+                std::optional<std::string> parentId = std::nullopt,
+                LocalTransform transform = {});
+Status AddModelInstance(Document& document, std::string id, std::string name, std::string assetPath,
+                        std::optional<std::string> parentId = std::nullopt,
+                        LocalTransform transform = {});
+Status RemoveSubtree(Document& document, std::string_view rootId);
 
 // Opens an existing, explicitly selected project directory. Scene files are direct children named
 // <scene-id>.scene.json; IDs are restricted to safe filename characters. Save replaces a scene

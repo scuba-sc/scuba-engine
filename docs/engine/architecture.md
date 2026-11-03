@@ -162,15 +162,16 @@ picking (right drag orbit, middle drag pan, wheel dolly, left click select, F fr
 | Phase | Scope | Exit |
 |---|---|---|
 | 1 (this branch) | core, VFS, sco host, D3D12 loop, ImGui shell, async OBJ/glTF/CGF intake, PBR-lite, CPU picking, move tool | `engine_core` + `engine_smoke` (WARP) green on Windows |
-| 2 | gizmos (translate/rotate/scale, snapping), GPU id-buffer picking, document-backed project UI/outliner, glTF node hierarchy | editor round-trips a scene |
+| 2 | gizmos (translate/rotate/scale, snapping), GPU id-buffer picking, project/scene browser, undo/redo, glTF node hierarchy | editor round-trips a scene |
 | 3 | textures and mip streaming (priority IO queue, budget-driven residency), material textures, DDS | Asset Lab parity |
 | 4 | studio parity: Widgets, Designer, Viewport (diegetic panels), NetSandbox panels in native UI | browser studio retired; hostd remains for headless CI |
 | 5 | Vulkan backend; Linux build of the editor | cross-platform CI (roadmap E-5) |
 
 The scene-document groundwork in the current branch provides versioned project files, hierarchy
-validation and affine world-transform resolution. The renderer/picker matrix path can represent
-those resolved transforms, including parent-induced shear. The current sample editor scene is still
-flat and is not yet bound to the document store; the Phase 2 UI round-trip remains outstanding.
+validation and affine world-transform resolution. The editor's Scene panel is a document-backed
+outliner with stable selection, group nesting, explicit save state, and asset placement preview.
+The renderer/picker matrix path represents resolved transforms, including parent-induced shear.
+Project browsing, undo/redo, and Windows D3D12 visual validation remain outstanding.
 
 ## Provenance
 

@@ -94,6 +94,7 @@ float4 PSMesh(VOut i, bool front : SV_IsFrontFace) : SV_Target {
     float3 c = (kd * base / PI + spec) * sunColor.rgb * nl;
     c += lerp(groundColor.rgb, skyColor.rgb, n.z * 0.5 + 0.5) * base * (1 - 0.5 * metallic);
     if (i.params.z > 0.5) c = lerp(c, float3(1.0, 0.62, 0.15), 0.35);
+    if (i.params.w > 0.5) c = lerp(c, float3(0.28, 0.82, 1.0), 0.58);
     c = c / (1 + c);
     return float4(pow(c, 1 / 2.2), 1);
 }
@@ -822,7 +823,8 @@ private:
             std::memcpy(p, item.world.m, 64);
             std::memcpy(p + 16, normalMatrices[index].m, sizeof(float) * 12);
             p[28] = item.material.baseColor.x; p[29] = item.material.baseColor.y; p[30] = item.material.baseColor.z; p[31] = item.material.baseColor.w;
-            p[32] = item.material.metallic; p[33] = item.material.roughness; p[34] = item.selected ? 1.0f : 0.0f; p[35] = 0;
+            p[32] = item.material.metallic; p[33] = item.material.roughness;
+            p[34] = item.selected ? 1.0f : 0.0f; p[35] = item.preview ? 1.0f : 0.0f;
             at += kInstanceStride;
         }
 

@@ -33,7 +33,7 @@ more than 8,192 nodes, and files larger than 8 MiB. Rotations must be normalized
 components must be finite and positive. Unknown fields and schema versions are rejected so a future
 document cannot be silently rewritten while losing fields this version does not understand.
 
-## Project storage
+## Project storage and editor session
 
 `ProjectStore` opens an existing project directory selected by its caller and receives the complete
 set of mounted read-only asset directories. It rejects project roots that equal, contain, or are
@@ -44,12 +44,27 @@ sibling temporary file and atomically replace the destination. Loads reject syml
 enforce the file-size cap, and leave the caller's output document unchanged on failure.
 
 The project writer is separate from the VFS. Asset directories, archives, and `.scpak` mounts stay
-read-only inputs. This slice does not create a project UI, asset browser, click-to-place tool,
-hierarchy panel, transform gizmo, undo system, or game adapter; those can build on this document
-contract in later slices.
+read-only inputs. The native editor opens one scene by stable ID with
+`scuba-engine.exe --project <existing-project-directory> --scene <scene-id>`; `--scene` defaults to
+`main`. If the scene file does not exist, the editor starts an empty, unsaved scene. It does not
+create the project directory. The app checks directory mounts through `ProjectStore` and checks
+archive mount paths separately before opening the session.
+
+The Scene panel is a document-backed outliner. Stable node IDs are used for selection and the
+Inspector edits local translation, quaternion rotation, and nonuniform scale. Groups can be added
+and nested; deleting a group removes its subtree. The Content panel keeps its existing double-click
+quick placement and adds a “Place with click” mode: it shows a cyan-tinted viewport preview, click
+places the model, and Escape cancels. If a group is selected when placement starts, the new model
+is parented to that group. Material edits are currently session-only because materials are not in
+scene schema version 1.
+
+Saving is explicit through the Scene panel or File menu (`Ctrl+S`). The Scene panel reports saved,
+unsaved, and save-error states; there is no automatic save. Without `--project`, the editor still
+uses the same document and outliner in memory and says that the session will not persist.
 
 `ResolveWorldTransforms` first validates the document, then emits resolved matrices in the original
 node order regardless of parent ordering in the serialized array. It leaves its output unchanged
-if composition overflows or a world transform is singular or numerically unstable. The editor's
-existing flat in-memory sample scene is not yet loaded from or saved back to `Document`; project
-UI, outliner, click-to-place and undo/redo remain follow-on work.
+if composition overflows or a world transform is singular or numerically unstable. The editor now
+loads and saves the selected document, draws its model nodes with resolved matrices, routes viewport
+picks back to stable node selection, and stores asset placement in the document. Scene browser,
+undo/redo, drag-and-drop placement, and Windows D3D12 visual validation remain follow-on work.

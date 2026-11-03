@@ -3,7 +3,8 @@
 // render thread inside the renderer, and a job pool for asset intake.
 //
 //   scuba-engine [--content DIR] [--mount PATH[=MOUNTPOINT][@PRIORITY]]... [--plugins DIR | --no-plugins]
-//                [--data DIR] [--product DIR] [--open VFS_PATH]... [--warp] [--debug-layer] [--no-vsync]
+//                [--data DIR] [--product DIR] [--project DIR [--scene ID]] [--open VFS_PATH]...
+//                [--warp] [--debug-layer] [--no-vsync]
 //                [--hidden] [--frames N] [--scenario FILE] [--diegetic [PANEL_ID]] [--readback FILE]
 //                [--export DIR | --export-pack FILE]
 //
@@ -35,6 +36,7 @@
 #include "scuba/product/export.h"
 #include "scuba/render/picking.h"
 #include "scuba/render/renderer.h"
+#include "scuba/scene/scene_document.h"
 #include "scuba/sco/sco_host.h"
 #include "scuba/ui/input_router.h"
 #include "scuba/ui/plugin_surface.h"
@@ -58,9 +60,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
+#include <random>
 #include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -82,6 +89,9 @@ struct Args {
     fs::path plugins = SCUBA_DEFAULT_PLUGIN_ROOT;
     fs::path data;
     fs::path product;
+    fs::path project;
+    std::string sceneId = "main";
+    bool sceneSet = false;
     bool contentSet = false, pluginsSet = false, dataSet = false;
     struct MountArg { std::string path, mountPoint; int priority = 10; };
     std::vector<MountArg> mounts;
@@ -106,6 +116,23 @@ fs::path PathFromUtf8(const std::string& s) {
     return fs::path(std::u8string(reinterpret_cast<const char8_t*>(s.data()), s.size()));
 }
 
+bool PathWithin(const fs::path& candidate, const fs::path& root) {
+    auto c = candidate.begin();
+    for (auto r = root.begin(); r != root.end(); ++r, ++c) {
+        if (c == candidate.end()) return false;
+        const auto& candidatePart = c->native();
+        const auto& rootPart = r->native();
+        if (CompareStringOrdinal(candidatePart.c_str(), static_cast<int>(candidatePart.size()),
+                                 rootPart.c_str(), static_cast<int>(rootPart.size()), TRUE) != CSTR_EQUAL)
+            return false;
+    }
+    return true;
+}
+
+bool PathsOverlap(const fs::path& a, const fs::path& b) {
+    return PathWithin(a, b) || PathWithin(b, a);
+}
+
 std::optional<Args> ParseArgs() {
     int argc = 0;
     wchar_t** wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -121,6 +148,8 @@ std::optional<Args> ParseArgs() {
         else if (k == "--no-plugins") { args.plugins_on = false; args.pluginsSet = true; }
         else if (k == "--data") { if (auto v = next()) { args.data = PathFromUtf8(*v); args.dataSet = true; } else return std::nullopt; }
         else if (k == "--product") { if (auto v = next()) args.product = PathFromUtf8(*v); else return std::nullopt; }
+        else if (k == "--project") { if (auto v = next()) args.project = PathFromUtf8(*v); else return std::nullopt; }
+        else if (k == "--scene") { if (auto v = next()) { args.sceneId = *v; args.sceneSet = true; } else return std::nullopt; }
         else if (k == "--open") { if (auto v = next()) args.open.push_back(*v); else return std::nullopt; }
         else if (k == "--scenario") { if (auto v = next()) args.scenario = PathFromUtf8(*v); else return std::nullopt; }
         else if (k == "--export") { if (auto v = next()) args.exportDir = PathFromUtf8(*v); else return std::nullopt; }
@@ -149,10 +178,12 @@ std::optional<Args> ParseArgs() {
     }
     // A product profile derives all three of its roots; mixing them would be ambiguous.
     if (!args.product.empty() && (args.pluginsSet || args.dataSet || args.contentSet)) return std::nullopt;
+    if (args.sceneSet && args.project.empty()) return std::nullopt;
     // An export is a product distribution or nothing: it reads the mounted root, so it needs one,
     // and the two destinations are different artifacts.
     if (!args.exportDir.empty() && !args.exportPack.empty()) return std::nullopt;
     if ((!args.exportDir.empty() || !args.exportPack.empty()) && args.product.empty()) return std::nullopt;
+    if ((!args.exportDir.empty() || !args.exportPack.empty()) && !args.project.empty()) return std::nullopt;
     return args;
 }
 
@@ -176,13 +207,35 @@ Status MountPath(vfs::VirtualFileSystem& vfs, const fs::path& path, const std::s
 
 struct Instance {
     uint32_t id = 0;
+    std::string nodeId;
     std::string name;
+    std::string assetPath;
     asset::ModelHandle handle = 0;
     render::GpuModel gpu = 0;
     std::shared_ptr<const asset::ModelData> model;
-    render::Transform transform;
+    render::Float4x4 world;
     render::Material material;
+    bool autoPlaceOnLoad = false;
 };
+
+struct Placement {
+    bool active = false;
+    bool hasPreview = false;
+    std::string assetPath;
+    std::optional<std::string> parentId;
+    asset::ModelHandle handle = 0;
+    render::GpuModel gpu = 0;
+    std::shared_ptr<const asset::ModelData> model;
+    render::Float4x4 world;
+    scene::LocalTransform localTransform;
+    std::string status;
+};
+
+render::Float3 TransformPoint(render::Float3 point, const render::Float4x4& matrix) {
+    return {point.x * matrix.m[0][0] + point.y * matrix.m[1][0] + point.z * matrix.m[2][0] + matrix.m[3][0],
+            point.x * matrix.m[0][1] + point.y * matrix.m[1][1] + point.z * matrix.m[2][1] + matrix.m[3][1],
+            point.x * matrix.m[0][2] + point.y * matrix.m[1][2] + point.z * matrix.m[2][2] + matrix.m[3][2]};
+}
 
 struct Editor {
     vfs::VirtualFileSystem vfs;
@@ -218,11 +271,19 @@ struct Editor {
         return world;
     }
 
-    std::vector<Instance> scene;
+    scene::Document document;
+    std::optional<scene::ProjectStore> projectStore;
+    fs::path projectRoot;
+    std::vector<Instance> instances;
+    std::unordered_map<std::string, render::Float4x4> worldByNode;
     uint32_t nextInstance = 1;
-    uint32_t selected = 0;
+    std::string selectedNode;
     std::map<asset::ModelHandle, render::GpuModel> uploaded;   // one GPU copy per loaded model
     std::vector<asset::ModelHandle> requested;
+    Placement placement;
+    std::string selectedAssetPath;
+    bool sceneDirty = false;
+    std::string sceneStatus;
     bool frameOnLoad = true;
 
     ~Editor() {
@@ -255,50 +316,371 @@ struct Editor {
     std::vector<log::Line> logLines;
 
     Instance* Find(uint32_t id) {
-        for (auto& i : scene) if (i.id == id) return &i;
+        for (auto& i : instances) if (i.id == id) return &i;
         return nullptr;
     }
 
-    void Spawn(const std::string& path) {
-        const asset::ModelHandle h = loader->Request(path, JobPriority::High);
-        requested.push_back(h);
-        Instance inst;
-        inst.id = nextInstance++;
-        inst.name = path.substr(path.find_last_of('/') == std::string::npos ? 0 : path.find_last_of('/') + 1);
-        inst.handle = h;
-        // Spread new instances along +X so repeated spawns don't overlap.
-        inst.transform.position = {static_cast<float>(scene.size()) * 2.5f, 0, 0};
-        scene.push_back(inst);
-        selected = inst.id;
+    scene::Node* FindNode(std::string_view id) {
+        for (auto& node : document.nodes) if (node.id == id) return &node;
+        return nullptr;
     }
 
-    // Finished loads: upload once per model, attach to the instances waiting for it.
+    const scene::Node* FindNode(std::string_view id) const {
+        for (const auto& node : document.nodes) if (node.id == id) return &node;
+        return nullptr;
+    }
+
+    Instance* FindNodeInstance(std::string_view id) {
+        for (auto& inst : instances) if (inst.nodeId == id) return &inst;
+        return nullptr;
+    }
+
+    const render::Float4x4* World(std::string_view id) const {
+        const auto it = worldByNode.find(std::string(id));
+        return it == worldByNode.end() ? nullptr : &it->second;
+    }
+
+    asset::ModelHandle RequestModel(const std::string& path) {
+        const asset::ModelHandle h = loader->Request(path, JobPriority::High);
+        requested.push_back(h);
+        return h;
+    }
+
+    void AttachCachedModel(Instance& inst) {
+        if (const auto it = uploaded.find(inst.handle); it != uploaded.end()) {
+            inst.gpu = it->second;
+            inst.model = loader->Get(inst.handle);
+            return;
+        }
+        if (auto model = loader->Get(inst.handle)) {
+            inst.model = std::move(model);
+            inst.gpu = renderer->Upload(inst.model);
+            if (inst.gpu) uploaded[inst.handle] = inst.gpu;
+        }
+    }
+
+    std::string NewNodeId() {
+        static std::random_device random;
+        for (unsigned attempt = 0; attempt < 128; ++attempt) {
+            const uint64_t value = (static_cast<uint64_t>(random()) << 32u) | random();
+            char suffix[17]{};
+            std::snprintf(suffix, sizeof(suffix), "%016llx", static_cast<unsigned long long>(value));
+            const std::string id = "node-" + std::string(suffix);
+            if (!FindNode(id)) return id;
+        }
+        return {};
+    }
+
+    Status ResolveDocument(const scene::Document& candidate,
+                          std::unordered_map<std::string, render::Float4x4>& worlds) const {
+        std::vector<scene::ResolvedTransform> resolved;
+        if (auto status = scene::ResolveWorldTransforms(candidate, resolved); !status) return status;
+        std::unordered_map<std::string, render::Float4x4> result;
+        result.reserve(resolved.size());
+        for (const auto& item : resolved) result.emplace(item.nodeId, item.world);
+        worlds = std::move(result);
+        return Status::Ok();
+    }
+
+    void RefreshInstances() {
+        std::unordered_set<std::string> keep;
+        keep.reserve(document.nodes.size());
+        for (const auto& node : document.nodes) {
+            if (node.kind != scene::NodeKind::ModelInstance) continue;
+            keep.insert(node.id);
+            Instance* inst = FindNodeInstance(node.id);
+            if (!inst) {
+                Instance added;
+                added.id = nextInstance++;
+                if (added.id == 0) added.id = nextInstance++;
+                added.nodeId = node.id;
+                added.name = node.name;
+                added.assetPath = node.assetPath;
+                added.handle = RequestModel(node.assetPath);
+                AttachCachedModel(added);
+                if (const auto it = worldByNode.find(node.id); it != worldByNode.end()) added.world = it->second;
+                instances.push_back(std::move(added));
+                continue;
+            }
+            inst->name = node.name;
+            if (inst->assetPath != node.assetPath) {
+                inst->assetPath = node.assetPath;
+                inst->handle = RequestModel(node.assetPath);
+                inst->gpu = 0;
+                inst->model.reset();
+                AttachCachedModel(*inst);
+            }
+            if (const auto it = worldByNode.find(node.id); it != worldByNode.end()) inst->world = it->second;
+        }
+        instances.erase(std::remove_if(instances.begin(), instances.end(), [&](const Instance& inst) {
+            return !keep.contains(inst.nodeId);
+        }), instances.end());
+        if (!selectedNode.empty() && !FindNode(selectedNode)) selectedNode.clear();
+    }
+
+    Status InstallDocument(scene::Document candidate, bool dirty) {
+        std::unordered_map<std::string, render::Float4x4> worlds;
+        if (auto status = ResolveDocument(candidate, worlds); !status) return status;
+        document = std::move(candidate);
+        worldByNode = std::move(worlds);
+        sceneDirty = dirty;
+        RefreshInstances();
+        sceneStatus = dirty ? "Unsaved changes" : "Scene loaded";
+        if (placement.active && placement.parentId && !FindNode(*placement.parentId))
+            CancelPlacement("Placement canceled because its parent node was removed");
+        return Status::Ok();
+    }
+
+    Status CommitDocument(scene::Document candidate) {
+        if (auto status = InstallDocument(std::move(candidate), true); !status) {
+            sceneStatus = "Edit refused: " + status.error;
+            return status;
+        }
+        return Status::Ok();
+    }
+
+    void AddGroup() {
+        const std::string id = NewNodeId();
+        if (id.empty()) { sceneStatus = "Cannot allocate a stable scene node ID"; return; }
+        std::optional<std::string> parentId;
+        if (const scene::Node* selected = FindNode(selectedNode); selected && selected->kind == scene::NodeKind::Group)
+            parentId = selected->id;
+        scene::Document candidate = document;
+        if (auto status = scene::AddGroup(candidate, id, "Group", parentId); !status) {
+            sceneStatus = "Group creation refused: " + status.error;
+            return;
+        }
+        if (CommitDocument(std::move(candidate))) selectedNode = id;
+    }
+
+    void SaveScene() {
+        if (!projectStore) {
+            sceneStatus = "No project session. Start with --project DIR to save.";
+            return;
+        }
+        if (auto status = projectStore->Save(document); !status) {
+            sceneStatus = "Save failed: " + status.error;
+            log::Error("scene", sceneStatus);
+            return;
+        }
+        sceneDirty = false;
+        sceneStatus = "Saved " + document.id;
+        log::Info("scene", sceneStatus);
+    }
+
+    void Spawn(const std::string& path) {
+        if (document.nodes.size() >= scene::kMaxSceneNodes) {
+            sceneStatus = "Cannot place model: scene node limit reached";
+            return;
+        }
+        const std::string id = NewNodeId();
+        if (id.empty()) { sceneStatus = "Cannot allocate a stable scene node ID"; return; }
+        scene::LocalTransform transform;
+        transform.translation = {static_cast<float>(instances.size()) * 2.5f, 0, 0};
+        scene::Document candidate = document;
+        if (auto status = scene::AddModelInstance(candidate, id,
+                path.substr(path.find_last_of('/') == std::string::npos ? 0 : path.find_last_of('/') + 1),
+                path, std::nullopt, transform); !status) {
+            sceneStatus = "Spawn refused: " + status.error;
+            return;
+        }
+        if (!CommitDocument(std::move(candidate))) return;
+        selectedNode = id;
+        if (Instance* inst = FindNodeInstance(id)) {
+            inst->autoPlaceOnLoad = true;
+            if (inst->model) {
+                AutoPlace(id);
+                if (frameOnLoad) {
+                    if (const Instance* placed = FindNodeInstance(id)) FrameInstance(*placed);
+                    frameOnLoad = false;
+                }
+            }
+        }
+    }
+
+    void StartPlacement(const std::string& path) {
+        placement = {};
+        placement.active = true;
+        placement.assetPath = path;
+        placement.handle = RequestModel(path);
+        if (const auto it = uploaded.find(placement.handle); it != uploaded.end()) {
+            placement.gpu = it->second;
+            placement.model = loader->Get(placement.handle);
+        } else if (auto model = loader->Get(placement.handle)) {
+            placement.model = std::move(model);
+            placement.gpu = renderer->Upload(placement.model);
+            if (placement.gpu) uploaded[placement.handle] = placement.gpu;
+        }
+        if (const scene::Node* selected = FindNode(selectedNode); selected && selected->kind == scene::NodeKind::Group)
+            placement.parentId = selected->id;
+        placement.status = placement.model ? "Click the viewport to place · Esc cancels" : "Loading preview · Esc cancels";
+    }
+
+    void CancelPlacement(std::string reason = "Placement canceled") {
+        placement = {};
+        sceneStatus = std::move(reason);
+    }
+
+    bool BuildPlacement(float worldX, float worldY, scene::LocalTransform& local,
+                        render::Float4x4& world) const {
+        if (!placement.model) return false;
+        std::optional<render::Float4x4> parentWorld;
+        if (placement.parentId) {
+            const scene::Node* parent = FindNode(*placement.parentId);
+            const auto* resolvedParent = World(*placement.parentId);
+            if (!parent || parent->kind != scene::NodeKind::Group || !resolvedParent) return false;
+            parentWorld = *resolvedParent;
+        }
+        return scene::ComputeGroundPlacement(parentWorld, {worldX, worldY, 0},
+                                             placement.model->boundsMin, placement.model->boundsMax,
+                                             local, world).ok();
+    }
+
+    void UpdatePlacementPreview(float x, float y) {
+        placement.hasPreview = false;
+        if (!placement.active || !placement.model || !ui.viewport().Contains(x, y) || ui.pointerOverUi()) return;
+        const auto hit = render::RayPlaneZ(camera.ScreenRay(x, y, ui.viewport()), 0);
+        if (!hit || !BuildPlacement(hit->x, hit->y, placement.localTransform, placement.world)) return;
+        placement.hasPreview = true;
+        placement.status = "Click the viewport to place · Esc cancels";
+    }
+
+    void PlacePreview() {
+        if (!placement.active || !placement.hasPreview || !placement.model) return;
+        const std::string id = NewNodeId();
+        if (id.empty()) { sceneStatus = "Cannot allocate a stable scene node ID"; return; }
+        scene::Document candidate = document;
+        if (auto status = scene::AddModelInstance(candidate, id,
+                placement.assetPath.substr(placement.assetPath.find_last_of('/') == std::string::npos ? 0 : placement.assetPath.find_last_of('/') + 1),
+                placement.assetPath, placement.parentId, placement.localTransform); !status) {
+            sceneStatus = "Placement refused: " + status.error;
+            return;
+        }
+        if (!CommitDocument(std::move(candidate))) return;
+        selectedNode = id;
+        placement = {};
+        sceneStatus = "Model placed · unsaved";
+    }
+
+    void AutoPlace(std::string_view nodeId) {
+        const scene::Node* node = FindNode(nodeId);
+        Instance* inst = FindNodeInstance(nodeId);
+        if (!node || !inst || !inst->model || node->parentId || node->localTransform.translation.z != 0) return;
+        scene::Document candidate = document;
+        for (auto& item : candidate.nodes)
+            if (item.id == nodeId) item.localTransform.translation.z = -inst->model->boundsMin[2] * item.localTransform.scale.z;
+        if (CommitDocument(std::move(candidate)))
+            if (Instance* updated = FindNodeInstance(nodeId)) updated->autoPlaceOnLoad = false;
+    }
+
+    Status OpenProject(const fs::path& root, std::string_view sceneId,
+                       std::span<const fs::path> readOnlyRoots) {
+        scene::Document initial;
+        initial.id = std::string(sceneId);
+        initial.name = "Untitled";
+        if (auto status = scene::Validate(initial); !status) return status;
+        Status status;
+        auto store = scene::ProjectStore::Open(root, readOnlyRoots, &status);
+        if (!store) return status;
+        std::error_code rootError;
+        projectRoot = fs::canonical(root, rootError);
+        if (rootError) return Status::Fail("project directory cannot be resolved: " + rootError.message());
+        projectStore = std::move(*store);
+        const fs::path scenePath = projectRoot / (initial.id + ".scene.json");
+        std::error_code ec;
+        const auto fileStatus = fs::symlink_status(scenePath, ec);
+        if (!ec && (fs::exists(fileStatus) || fs::is_symlink(fileStatus))) {
+            if (auto loaded = projectStore->Load(sceneId, initial); !loaded) return loaded;
+            if (auto installed = InstallDocument(std::move(initial), false); !installed) return installed;
+            sceneStatus = "Loaded " + std::string(sceneId);
+        } else if (ec && ec != std::errc::no_such_file_or_directory) {
+            return Status::Fail("cannot inspect project scene file: " + ec.message());
+        } else {
+            if (auto installed = InstallDocument(std::move(initial), false); !installed) return installed;
+            sceneDirty = true;
+            sceneStatus = "New scene · unsaved";
+        }
+        return Status::Ok();
+    }
+
+    Status InitializeEmptyScene() {
+        document = {};
+        document.id = "untitled";
+        document.name = "Untitled";
+        if (auto status = InstallDocument(document, false); !status) return status;
+        sceneStatus = "In-memory scene · pass --project DIR to save";
+        return Status::Ok();
+    }
+
+    void ClearScene() {
+        scene::Document candidate = document;
+        candidate.nodes.clear();
+        if (CommitDocument(std::move(candidate))) {
+            selectedNode.clear();
+            CancelPlacement("Scene cleared · unsaved");
+        }
+    }
+
+    void RemoveSelected() {
+        if (selectedNode.empty()) return;
+        scene::Document candidate = document;
+        if (auto status = scene::RemoveSubtree(candidate, selectedNode); !status) {
+            sceneStatus = "Delete refused: " + status.error;
+            return;
+        }
+        if (CommitDocument(std::move(candidate))) {
+            selectedNode.clear();
+            sceneStatus = "Node removed · unsaved";
+        }
+    }
+
+    // Finished loads: upload once per model, attach to document instances and the active preview.
     void PumpLoader() {
         for (asset::ModelHandle h : loader->TakeCompleted()) {
             const auto info = loader->Info(h);
             auto model = loader->Get(h);
             if (!model) {
                 log::Error("assets", info.path + ": " + info.error);
+                if (placement.active && placement.handle == h) placement.status = "Preview load failed: " + info.error;
                 continue;
             }
+            const bool needed = (placement.active && placement.handle == h) ||
+                                std::any_of(instances.begin(), instances.end(),
+                                            [&](const Instance& inst) { return inst.handle == h; });
+            if (!needed) continue;
             const render::GpuModel gpu = renderer->Upload(model);
             uploaded[h] = gpu;
-            for (auto& inst : scene)
+            std::vector<std::string> autoPlace;
+            std::string firstLoadedNode;
+            for (auto& inst : instances)
                 if (inst.handle == h) {
                     inst.gpu = gpu;
                     inst.model = model;
-                    // Sit the model on the ground plane.
-                    if (inst.transform.position.z == 0) inst.transform.position.z = -model->boundsMin[2] * inst.transform.scale;
-                    if (frameOnLoad) FrameInstance(inst);
+                    if (firstLoadedNode.empty()) firstLoadedNode = inst.nodeId;
+                    if (inst.autoPlaceOnLoad) autoPlace.push_back(inst.nodeId);
                 }
-            frameOnLoad = false;
+            if (placement.active && placement.handle == h) {
+                placement.gpu = gpu;
+                placement.model = model;
+                placement.status = "Click the viewport to place · Esc cancels";
+            }
+            for (const auto& id : autoPlace) AutoPlace(id);
+            if (frameOnLoad && !firstLoadedNode.empty()) {
+                if (const Instance* firstLoaded = FindNodeInstance(firstLoadedNode)) FrameInstance(*firstLoaded);
+                frameOnLoad = false;
+            }
         }
-        for (auto& inst : scene)
+        for (auto& inst : instances)
             if (!inst.gpu)
                 if (auto it = uploaded.find(inst.handle); it != uploaded.end()) {
                     inst.gpu = it->second;
                     inst.model = loader->Get(inst.handle);
                 }
+        if (placement.active && !placement.gpu)
+            if (auto it = uploaded.find(placement.handle); it != uploaded.end()) {
+                placement.gpu = it->second;
+                placement.model = loader->Get(placement.handle);
+            }
     }
 
     // Runs a scenario file on the game thread. The dock and --scenario both come through here, so
@@ -326,19 +708,15 @@ struct Editor {
     void FrameInstance(const Instance& inst) {
         if (!inst.model) return;
         std::array<float, 3> mn{}, mx{};
-        if (render::TransformBounds(inst.model->boundsMin, inst.model->boundsMax, inst.transform.Matrix(), mn, mx))
+        if (render::TransformBounds(inst.model->boundsMin, inst.model->boundsMax, inst.world, mn, mx))
             camera.Frame(mn, mx);
     }
 
-    void Remove(uint32_t id) {
-        scene.erase(std::remove_if(scene.begin(), scene.end(), [id](const Instance& i) { return i.id == id; }), scene.end());
-        if (selected == id) selected = 0;
-    }
-
     std::vector<render::PickTarget> PickTargets() const {
-        std::vector<render::PickTarget> t;
-        for (const auto& i : scene) if (i.model) t.push_back({i.id, i.model.get(), i.transform.Matrix()});
-        return t;
+        std::vector<render::PickTarget> targets;
+        for (const auto& inst : instances)
+            if (inst.model) targets.push_back({inst.id, inst.model.get(), inst.world});
+        return targets;
     }
 
     void DrawUi();
@@ -363,8 +741,39 @@ public:
     explicit UiBlocker(Editor& e) : e_(e) {}
     const char* Name() const override { return "ui"; }
     ui::Reply OnInput(const ui::InputEvent& ev) override {
-        if (ev.kind == ui::InputKind::KeyDown) return e_.ui.keyboardToUi() ? ui::Reply::Handled() : ui::Reply::Unhandled();
+        if (ev.kind == ui::InputKind::KeyDown) {
+            if (e_.placement.active && ev.key == ImGuiKey_Escape) return ui::Reply::Unhandled();
+            return e_.ui.keyboardToUi() ? ui::Reply::Handled() : ui::Reply::Unhandled();
+        }
         if (e_.ui.pointerOverUi() || !e_.ui.viewport().Contains(ev.x, ev.y)) return ui::Reply::Handled();
+        return ui::Reply::Unhandled();
+    }
+
+private:
+    Editor& e_;
+};
+
+class PlacementTool final : public ui::InputLayer {
+public:
+    explicit PlacementTool(Editor& e) : e_(e) {}
+    const char* Name() const override { return "placement"; }
+    ui::Reply OnInput(const ui::InputEvent& ev) override {
+        if (!e_.placement.active) return ui::Reply::Unhandled();
+        if (ev.kind == ui::InputKind::KeyDown && ev.key == ImGuiKey_Escape) {
+            e_.CancelPlacement();
+            return ui::Reply::Handled();
+        }
+        if (ev.kind == ui::InputKind::PointerMove) {
+            e_.UpdatePlacementPreview(ev.x, ev.y);
+            return ui::Reply::Handled();
+        }
+        if (ev.kind == ui::InputKind::PointerDown && ev.button == ui::PointerButton::Left) {
+            e_.UpdatePlacementPreview(ev.x, ev.y);
+            if (e_.placement.hasPreview) e_.PlacePreview();
+            else if (!e_.placement.model) e_.placement.status = "Preview still loading · Esc cancels";
+            else e_.placement.status = "Move into the viewport to preview · Esc cancels";
+            return ui::Reply::Capture();
+        }
         return ui::Reply::Unhandled();
     }
 
@@ -378,17 +787,27 @@ public:
     explicit MoveTool(Editor& e) : e_(e) {}
     const char* Name() const override { return "move"; }
     ui::Reply OnInput(const ui::InputEvent& ev) override {
-        Instance* sel = e_.Find(e_.selected);
-        if (!sel) return ui::Reply::Unhandled();
+        const scene::Node* selected = e_.FindNode(e_.selectedNode);
+        const render::Float4x4* world = selected ? e_.World(selected->id) : nullptr;
+        if (!selected || !world) return ui::Reply::Unhandled();
         const auto ray = e_.camera.ScreenRay(ev.x, ev.y, e_.ui.viewport());
-        const auto hit = render::RayPlaneZ(ray, sel->transform.position.z);
+        const auto origin = TransformPoint({0, 0, 0}, *world);
+        const auto hit = render::RayPlaneZ(ray, origin.z);
         if (ev.kind == ui::InputKind::PointerDown && ev.button == ui::PointerButton::Left && ev.ctrl && hit) {
-            grab_ = {hit->x - sel->transform.position.x, hit->y - sel->transform.position.y, 0};
+            grab_ = {hit->x - origin.x, hit->y - origin.y, 0};
             return ui::Reply::Capture();
         }
         if (ev.kind == ui::InputKind::PointerMove && ev.leftHeld && hit) {
-            sel->transform.position.x = hit->x - grab_.x;
-            sel->transform.position.y = hit->y - grab_.y;
+            render::Float4x4 parentInverse;
+            if (selected->parentId) {
+                const auto* parent = e_.World(*selected->parentId);
+                if (!parent || !render::InvertAffine(*parent, parentInverse)) return ui::Reply::Handled();
+            }
+            const auto local = TransformPoint({hit->x - grab_.x, hit->y - grab_.y, origin.z}, parentInverse);
+            scene::Document candidate = e_.document;
+            for (auto& node : candidate.nodes)
+                if (node.id == selected->id) node.localTransform.translation = {local.x, local.y, local.z};
+            e_.CommitDocument(std::move(candidate));
             return ui::Reply::Handled();
         }
         if (ev.kind == ui::InputKind::PointerUp && ev.button == ui::PointerButton::Left) return ui::Reply::Release();
@@ -424,16 +843,18 @@ public:
             if (ev.button == ui::PointerButton::Left && std::fabs(ev.x - downX_) < 4 && std::fabs(ev.y - downY_) < 4) {
                 const auto targets = e_.PickTargets();
                 const auto hit = render::Pick(e_.camera.ScreenRay(ev.x, ev.y, e_.ui.viewport()), targets);
-                e_.selected = hit ? hit->id : 0;
+                const Instance* instance = hit ? e_.Find(hit->id) : nullptr;
+                e_.selectedNode = instance ? instance->nodeId : std::string{};
             }
             return ui::Reply::Release();
         case ui::InputKind::Wheel:
             e_.camera.Dolly(ev.wheel);
             return ui::Reply::Handled();
         case ui::InputKind::KeyDown:
-            if (ev.key == ImGuiKey_F) { if (auto* s = e_.Find(e_.selected)) e_.FrameInstance(*s); return ui::Reply::Handled(); }
-            if (ev.key == ImGuiKey_Delete && e_.selected) { e_.Remove(e_.selected); return ui::Reply::Handled(); }
-            if (ev.key == ImGuiKey_Escape) { e_.selected = 0; return ui::Reply::Handled(); }
+            if (ev.key == ImGuiKey_S && ev.ctrl) { e_.SaveScene(); return ui::Reply::Handled(); }
+            if (ev.key == ImGuiKey_F) { if (auto* s = e_.FindNodeInstance(e_.selectedNode)) e_.FrameInstance(*s); return ui::Reply::Handled(); }
+            if (ev.key == ImGuiKey_Delete && !e_.selectedNode.empty()) { e_.RemoveSelected(); return ui::Reply::Handled(); }
+            if (ev.key == ImGuiKey_Escape) { e_.selectedNode.clear(); return ui::Reply::Handled(); }
             break;
         }
         return ui::Reply::Unhandled();
@@ -449,7 +870,8 @@ private:
 void Editor::DrawMenu(bool& quit) {
     if (!ImGui::BeginMainMenuBar()) return;
     if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("Clear scene")) { scene.clear(); selected = 0; }
+        if (ImGui::MenuItem("Save scene", "Ctrl+S", false, projectStore.has_value())) SaveScene();
+        if (ImGui::MenuItem("Clear scene")) ClearScene();
         ImGui::Separator();
         if (ImGui::MenuItem("Quit", "Alt+F4")) quit = true;
         ImGui::EndMenu();
@@ -491,13 +913,24 @@ void Editor::DrawContent() {
             if (asset::FormatOf(e.path) == asset::ModelFormat::Unknown) continue;
             if (!filter.empty() && e.path.find(filter) == std::string::npos) continue;
             ImGui::PushID(e.path.c_str());
-            if (ImGui::Selectable(e.path.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick) && ImGui::IsMouseDoubleClicked(0)) Spawn(e.path);
+            if (ImGui::Selectable(e.path.c_str(), selectedAssetPath == e.path, ImGuiSelectableFlags_AllowDoubleClick)) {
+                selectedAssetPath = e.path;
+                if (ImGui::IsMouseDoubleClicked(0)) Spawn(e.path);  // Keep the existing quick-place gesture.
+            }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%llu bytes\nfrom %s\ndouble-click to place", e.path.c_str(),
                                                           static_cast<unsigned long long>(e.size), vfs.Resolve(e.path).c_str());
             ImGui::PopID();
         }
     }
     ImGui::EndChild();
+    if (!selectedAssetPath.empty()) {
+        if (ImGui::Button("Place with click")) StartPlacement(selectedAssetPath);
+        if (placement.active) {
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) CancelPlacement();
+        }
+    }
+    if (placement.active) ImGui::TextWrapped("%s", placement.status.c_str());
     ImGui::End();
 }
 
@@ -537,35 +970,111 @@ void Editor::DrawMounts() {
 
 void Editor::DrawScene() {
     if (!ImGui::Begin("Scene", &showScene)) { ImGui::End(); return; }
-    for (const auto& inst : scene) {
-        const std::string label = inst.name + (inst.gpu ? "" : "  (loading)") + "##" + std::to_string(inst.id);
-        if (ImGui::Selectable(label.c_str(), selected == inst.id)) selected = inst.id;
+    if (projectStore) ImGui::TextWrapped("Project: %s  ·  scene: %s", projectRoot.generic_string().c_str(), document.id.c_str());
+    else ImGui::TextDisabled("In-memory scene · pass --project DIR to save");
+    if (projectStore) {
+        if (ImGui::Button("Save scene")) SaveScene();
+        ImGui::SameLine();
+        ImGui::TextUnformatted(sceneDirty ? "Unsaved" : "Saved");
     }
+    if (ImGui::Button("Add group")) AddGroup();
+    if (!sceneStatus.empty()) ImGui::TextWrapped("%s", sceneStatus.c_str());
+    ImGui::Separator();
+
+    std::unordered_map<std::string, std::vector<const scene::Node*>> children;
+    std::vector<const scene::Node*> roots;
+    for (const auto& node : document.nodes) {
+        if (node.parentId) children[*node.parentId].push_back(&node);
+        else roots.push_back(&node);
+    }
+    const auto drawNode = [&](const auto& self, const scene::Node& node) -> void {
+        const auto foundChildren = children.find(node.id);
+        const bool hasChildren = foundChildren != children.end() && !foundChildren->second.empty();
+        ImGui::PushID(node.id.c_str());
+        if (node.kind == scene::NodeKind::Group) {
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
+            if (selectedNode == node.id) flags |= ImGuiTreeNodeFlags_Selected;
+            if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+            const bool open = ImGui::TreeNodeEx("node", flags, "%s", node.name.c_str());
+            if (ImGui::IsItemClicked()) selectedNode = node.id;
+            if (open && hasChildren) {
+                for (const auto* child : foundChildren->second) self(self, *child);
+                ImGui::TreePop();
+            }
+        } else {
+            const Instance* inst = nullptr;
+            for (const auto& candidate : instances) if (candidate.nodeId == node.id) { inst = &candidate; break; }
+            std::string label = node.name;
+            bool failed = false;
+            std::string loadError;
+            if (inst && !inst->model) {
+                const auto info = loader->Info(inst->handle);
+                failed = info.state == asset::LoadState::Failed;
+                label += failed ? "  (failed)" : "  (loading)";
+                loadError = info.error;
+            } else if (!inst) label += "  (unavailable)";
+            if (ImGui::Selectable(label.c_str(), selectedNode == node.id, ImGuiSelectableFlags_SpanAvailWidth))
+                selectedNode = node.id;
+            if (failed && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", loadError.c_str());
+        }
+        ImGui::PopID();
+    };
+    for (const auto* root : roots) drawNode(drawNode, *root);
+    if (document.nodes.empty()) ImGui::TextDisabled("Scene is empty. Choose a model in Content to place it.");
+    if (placement.active) ImGui::TextWrapped("Placement preview: %s · click viewport to place · Esc cancels",
+                                               placement.assetPath.c_str());
     ImGui::End();
 }
 
 void Editor::DrawInspector() {
     if (!ImGui::Begin("Inspector", &showInspector)) { ImGui::End(); return; }
-    Instance* s = Find(selected);
-    if (!s) {
+    scene::Node* selected = FindNode(selectedNode);
+    if (!selected) {
         ImGui::TextDisabled("Nothing selected");
         ImGui::End();
         return;
     }
-    ImGui::Text("%s", s->name.c_str());
-    if (s->model) ImGui::TextDisabled("%s  %zu mesh(es)  %zu triangles", s->model->path.c_str(), s->model->meshes.size(), s->model->triangleCount());
-    ImGui::SeparatorText("Transform");
-    ImGui::DragFloat3("position", &s->transform.position.x, 0.05f);
-    float yawDeg = s->transform.yaw * 57.29578f;
-    if (ImGui::DragFloat("yaw", &yawDeg, 0.5f)) s->transform.yaw = yawDeg / 57.29578f;
-    ImGui::DragFloat("scale", &s->transform.scale, 0.01f, 0.001f, 1000.0f);
-    ImGui::SeparatorText("Material (metallic-roughness)");
-    ImGui::ColorEdit3("base color", &s->material.baseColor.x);
-    ImGui::SliderFloat("metallic", &s->material.metallic, 0, 1);
-    ImGui::SliderFloat("roughness", &s->material.roughness, 0.04f, 1);
-    if (ImGui::Button("Frame (F)")) FrameInstance(*s);
-    ImGui::SameLine();
-    if (ImGui::Button("Remove (Del)")) Remove(s->id);
+    ImGui::Text("%s", selected->name.c_str());
+    Instance* inst = selected->kind == scene::NodeKind::ModelInstance ? FindNodeInstance(selected->id) : nullptr;
+    if (inst && inst->model)
+        ImGui::TextDisabled("%s  %zu mesh(es)  %zu triangles", inst->model->path.c_str(),
+                            inst->model->meshes.size(), inst->model->triangleCount());
+    ImGui::SeparatorText("Local transform");
+    scene::Document candidate = document;
+    auto nodeIt = std::find_if(candidate.nodes.begin(), candidate.nodes.end(),
+                               [&](const scene::Node& node) { return node.id == selectedNode; });
+    if (nodeIt == candidate.nodes.end()) { ImGui::End(); return; }
+    bool changed = ImGui::DragFloat3("translation", &nodeIt->localTransform.translation.x, 0.05f);
+    if (ImGui::DragFloat4("rotation quaternion", &nodeIt->localTransform.rotation.x, 0.005f)) {
+        auto& rotation = nodeIt->localTransform.rotation;
+        const double norm = std::sqrt(static_cast<double>(rotation.x) * rotation.x +
+                                      static_cast<double>(rotation.y) * rotation.y +
+                                      static_cast<double>(rotation.z) * rotation.z +
+                                      static_cast<double>(rotation.w) * rotation.w);
+        if (std::isfinite(norm) && norm > 1e-8) {
+            rotation.x = static_cast<float>(rotation.x / norm);
+            rotation.y = static_cast<float>(rotation.y / norm);
+            rotation.z = static_cast<float>(rotation.z / norm);
+            rotation.w = static_cast<float>(rotation.w / norm);
+            changed = true;
+        } else sceneStatus = "Rotation edit refused: quaternion must be nonzero";
+    }
+    changed |= ImGui::DragFloat3("scale", &nodeIt->localTransform.scale.x, 0.01f, 0.001f, 1000.0f);
+    if (changed) {
+        CommitDocument(std::move(candidate));
+        inst = FindNodeInstance(selectedNode);
+    }
+    if (inst) {
+        ImGui::SeparatorText("Material (session only)");
+        ImGui::ColorEdit3("base color", &inst->material.baseColor.x);
+        ImGui::SliderFloat("metallic", &inst->material.metallic, 0, 1);
+        ImGui::SliderFloat("roughness", &inst->material.roughness, 0.04f, 1);
+    }
+    if (inst) {
+        if (ImGui::Button("Frame (F)")) FrameInstance(*inst);
+        ImGui::SameLine();
+    }
+    if (ImGui::Button("Delete (Del)")) RemoveSelected();
     ImGui::End();
 }
 
@@ -851,6 +1360,37 @@ int Run(const Args& args) {
         if (auto r = MountPath(ed.vfs, PathFromUtf8(m.path), m.mountPoint, m.priority); !r) log::Error("vfs", r.error);
     ed.loader = std::make_unique<asset::ModelLoader>(ed.vfs, ed.jobs);
 
+    if (args.project.empty()) {
+        if (auto sceneStatus = ed.InitializeEmptyScene(); !sceneStatus) {
+            log::Error("scene", sceneStatus.error);
+            return 1;
+        }
+    } else {
+        std::vector<fs::path> readOnlyRoots;
+        if (!content.empty() && fs::is_directory(content, ec) && !ec) readOnlyRoots.push_back(content);
+        for (const auto& mount : args.mounts) {
+            const fs::path source = PathFromUtf8(mount.path);
+            ec.clear();
+            if (fs::is_directory(source, ec) && !ec) {
+                readOnlyRoots.push_back(source);
+            } else {
+                ec.clear();
+                const fs::path canonicalProject = fs::canonical(args.project, ec);
+                if (ec) { log::Error("scene", "project directory cannot be resolved: " + ec.message()); return 1; }
+                const fs::path canonicalSource = fs::canonical(source, ec);
+                if (ec) { log::Error("scene", "mounted asset archive cannot be resolved: " + ec.message()); return 1; }
+                if (PathsOverlap(canonicalProject, canonicalSource)) {
+                    log::Error("scene", "project directory overlaps a mounted asset archive");
+                    return 1;
+                }
+            }
+        }
+        if (auto sceneStatus = ed.OpenProject(args.project, args.sceneId, readOnlyRoots); !sceneStatus) {
+            log::Error("scene", sceneStatus.error);
+            return 1;
+        }
+    }
+
     ScoHostOptions so;
     if (args.plugins_on && args.product.empty()) so.pluginRoot = args.plugins;
     so.productRoot = args.product;
@@ -903,10 +1443,12 @@ int Run(const Args& args) {
     for (const auto& p : args.open) ed.Spawn(p);
 
     UiBlocker blocker(ed);
+    PlacementTool placementTool(ed);
     MoveTool move(ed);
     CameraTool cameraTool(ed);
     ui::InputRouter router;
     router.Add(&blocker);
+    router.Add(&placementTool);
     router.Add(&move);
     router.Add(&cameraTool);
 
@@ -919,6 +1461,7 @@ int Run(const Args& args) {
 
         ed.ui.BeginFrame();
         ImGuiIO& io = ImGui::GetIO();
+        ed.UpdatePlacementPreview(io.MousePos.x, io.MousePos.y);
         ui::SurfaceInput surfaceInput;
         ui::PanelHit hit;
         const bool overSurface = ed.surfaceEnabled && !ed.surfacePanel.empty() &&
@@ -929,7 +1472,9 @@ int Run(const Args& args) {
             clicked |= io.MouseClicked[b];
             held |= io.MouseDown[b];
         }
-        const bool escape = ed.surfaceFocused && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        const bool escapePressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        const bool escape = (ed.surfaceFocused || ed.placement.active) && escapePressed;
+        if (ed.placement.active && escapePressed) ed.CancelPlacement();
         if (!ed.surfaceEnabled || escape || (clicked && !overSurface)) {
             ed.surfaceFocused = false;
             ed.surfaceDragging = false;
@@ -1007,9 +1552,14 @@ int Run(const Args& args) {
         packet.view.view = ed.camera.View();
         packet.view.projection = ed.camera.Projection(vp.w / std::max(vp.h, 1.0f));
         packet.view.eye = ed.camera.Eye();
-        for (const auto& inst : ed.scene) {
+        for (const auto& inst : ed.instances) {
             if (!inst.gpu) continue;
-            packet.items.push_back({inst.gpu, inst.transform.Matrix(), inst.material, inst.id == ed.selected});
+            packet.items.push_back({inst.gpu, inst.world, inst.material, inst.nodeId == ed.selectedNode});
+        }
+        if (ed.placement.active && ed.placement.hasPreview && ed.placement.gpu) {
+            render::Material previewMaterial;
+            previewMaterial.baseColor = {0.35f, 0.8f, 1.0f, 0.65f};
+            packet.items.push_back({ed.placement.gpu, ed.placement.world, previewMaterial, false, true});
         }
         if (ed.surfaceEnabled && surfaceFrame) {
             render::PanelDraw pd;
@@ -1027,7 +1577,7 @@ int Run(const Args& args) {
     if (args.frames) {
         ed.renderer->Flush();
         ed.PumpLoader();
-        for (const auto& inst : ed.scene)
+        for (const auto& inst : ed.instances)
             if (!inst.gpu || !ed.renderer->Resident(inst.gpu)) {
                 log::Error("app", inst.name + " did not become resident");
                 code = 1;
@@ -1066,9 +1616,11 @@ int Run(const Args& args) {
                 }
             }
         }
-        std::fprintf(stderr, "scuba-engine: %d frame(s), %zu instance(s), %d error(s) -> exit %d\n", frame, ed.scene.size(), gErrors.load(), code);
+        std::fprintf(stderr, "scuba-engine: %d frame(s), %zu instance(s), %d error(s) -> exit %d\n", frame, ed.instances.size(), gErrors.load(), code);
     }
 
+    if (ed.projectStore && ed.sceneDirty)
+        log::Warn("scene", "unsaved scene changes were not saved: " + ed.document.id);
     if (ed.netSandbox && !ed.netSandbox->Shutdown())
         log::Warn("netsandbox", "a peer did not exit cleanly; child termination was confirmed");
     ed.netSandbox.reset();
