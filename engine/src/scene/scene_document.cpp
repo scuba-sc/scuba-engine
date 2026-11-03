@@ -657,4 +657,68 @@ Status ProjectStore::Load(std::string_view sceneId, Document& document) const {
     return Status::Ok();
 }
 
+Status DocumentHistory::RecordBefore(const Document& document) {
+    std::string snapshot;
+    if (auto status = Serialize(document, snapshot); !status) return status;
+    for (const auto& entry : redo_) retainedBytes_ -= entry.size();
+    redo_.clear();
+    retainedBytes_ += snapshot.size();
+    undo_.push_back(std::move(snapshot));
+    Trim();
+    return Status::Ok();
+}
+
+Status DocumentHistory::Undo(const Document& current, Document& restored) {
+    if (undo_.empty()) return Fail("there is no scene change to undo");
+    std::string currentSnapshot;
+    if (auto status = Serialize(current, currentSnapshot); !status) return status;
+    Document candidate;
+    if (auto status = Deserialize(undo_.back(), candidate); !status) return status;
+
+    retainedBytes_ -= undo_.back().size();
+    undo_.pop_back();
+    retainedBytes_ += currentSnapshot.size();
+    redo_.push_back(std::move(currentSnapshot));
+    Trim();
+    restored = std::move(candidate);
+    return Status::Ok();
+}
+
+Status DocumentHistory::Redo(const Document& current, Document& restored) {
+    if (redo_.empty()) return Fail("there is no scene change to redo");
+    std::string currentSnapshot;
+    if (auto status = Serialize(current, currentSnapshot); !status) return status;
+    Document candidate;
+    if (auto status = Deserialize(redo_.back(), candidate); !status) return status;
+
+    retainedBytes_ -= redo_.back().size();
+    redo_.pop_back();
+    retainedBytes_ += currentSnapshot.size();
+    undo_.push_back(std::move(currentSnapshot));
+    Trim();
+    restored = std::move(candidate);
+    return Status::Ok();
+}
+
+void DocumentHistory::Clear() noexcept {
+    undo_.clear();
+    redo_.clear();
+    retainedBytes_ = 0;
+}
+
+void DocumentHistory::DropOldest(std::vector<std::string>& stack) noexcept {
+    if (stack.empty()) return;
+    retainedBytes_ -= stack.front().size();
+    stack.erase(stack.begin());
+}
+
+void DocumentHistory::Trim() noexcept {
+    while (retainedEntries() > kMaxEntries || retainedBytes_ > kMaxBytes) {
+        // Keep the newest undo snapshots and the next redo target. redo_.back() is always next.
+        if (!undo_.empty()) DropOldest(undo_);
+        else if (!redo_.empty()) DropOldest(redo_);
+        else break;
+    }
+}
+
 }  // namespace scuba::scene

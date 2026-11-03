@@ -59,12 +59,18 @@ is parented to that group. Material edits are currently session-only because mat
 scene schema version 1.
 
 Saving is explicit through the Scene panel or File menu (`Ctrl+S`). The Scene panel reports saved,
-unsaved, and save-error states; there is no automatic save. Without `--project`, the editor still
-uses the same document and outliner in memory and says that the session will not persist.
+unsaved, and save-error states; there is no automatic save. Undo and redo are available from the
+File menu, Scene panel, and `Ctrl+Z` / `Ctrl+Y`. They retain up to 64 snapshots or 32 MiB, whichever
+limit is reached first. A continuous Inspector edit or Ctrl+left-drag is one history action; group,
+place, delete, clear, and double-click spawn each form one action. Asynchronous grounding is folded
+into its spawn action when no later scene edit intervenes. Returning to the last saved document
+clears the unsaved state; saving establishes a new baseline without discarding undo history.
+Without `--project`, the editor still uses the same document and outliner in memory and says that
+the session will not persist.
 
 `ResolveWorldTransforms` first validates the document, then emits resolved matrices in the original
 node order regardless of parent ordering in the serialized array. It leaves its output unchanged
 if composition overflows or a world transform is singular or numerically unstable. The editor now
 loads and saves the selected document, draws its model nodes with resolved matrices, routes viewport
 picks back to stable node selection, and stores asset placement in the document. Scene browser,
-undo/redo, drag-and-drop placement, and Windows D3D12 visual validation remain follow-on work.
+drag-and-drop placement, and Windows D3D12 visual validation remain follow-on work.

@@ -107,8 +107,10 @@ struct Args {
 
 std::string Utf8(const wchar_t* w) {
     const int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
-    std::string s(n > 0 ? static_cast<size_t>(n - 1) : 0, '\0');
-    if (n > 1) WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), n, nullptr, nullptr);
+    std::string s(n > 0 ? static_cast<size_t>(n) : 0, '\0');
+    if (n > 0 && WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), n, nullptr, nullptr) == 0)
+        return {};
+    if (!s.empty() && s.back() == '\0') s.pop_back();
     return s;
 }
 
@@ -216,6 +218,7 @@ struct Instance {
     render::Float4x4 world;
     render::Material material;
     bool autoPlaceOnLoad = false;
+    uint64_t autoPlaceHistoryRevision = 0;
 };
 
 struct Placement {
@@ -272,11 +275,14 @@ struct Editor {
     }
 
     scene::Document document;
+    scene::DocumentHistory sceneHistory;
     std::optional<scene::ProjectStore> projectStore;
     fs::path projectRoot;
+    std::optional<std::string> savedDocument;
     std::vector<Instance> instances;
     std::unordered_map<std::string, render::Float4x4> worldByNode;
     uint32_t nextInstance = 1;
+    uint64_t historyRevision = 0;
     std::string selectedNode;
     std::map<asset::ModelHandle, render::GpuModel> uploaded;   // one GPU copy per loaded model
     std::vector<asset::ModelHandle> requested;
@@ -284,6 +290,8 @@ struct Editor {
     std::string selectedAssetPath;
     bool sceneDirty = false;
     std::string sceneStatus;
+    bool inspectorUndoCaptured = false;
+    std::string inspectorUndoNode;
     bool frameOnLoad = true;
 
     ~Editor() {
@@ -418,9 +426,42 @@ struct Editor {
         if (!selectedNode.empty() && !FindNode(selectedNode)) selectedNode.clear();
     }
 
-    Status InstallDocument(scene::Document candidate, bool dirty) {
+    Status UpdateDirtyState() {
+        std::string current;
+        if (auto status = scene::Serialize(document, current); !status) {
+            sceneDirty = true;
+            return status;
+        }
+        sceneDirty = !savedDocument || current != *savedDocument;
+        return Status::Ok();
+    }
+
+    Status SetSavedBaseline(bool exists) {
+        if (!exists) {
+            savedDocument.reset();
+            sceneDirty = true;
+            return Status::Ok();
+        }
+        std::string saved;
+        if (auto status = scene::Serialize(document, saved); !status) return status;
+        savedDocument = std::move(saved);
+        sceneDirty = false;
+        return Status::Ok();
+    }
+
+    void SetHistoryStatus(std::string_view action) {
+        if (auto status = UpdateDirtyState(); !status) {
+            sceneStatus = std::string(action) + " failed: " + status.error;
+            return;
+        }
+        sceneStatus = std::string(action) + (sceneDirty ? " · unsaved changes" : " · matches saved scene");
+    }
+
+    Status InstallDocument(scene::Document candidate, bool dirty, bool recordUndo = false) {
         std::unordered_map<std::string, render::Float4x4> worlds;
         if (auto status = ResolveDocument(candidate, worlds); !status) return status;
+        if (recordUndo)
+            if (auto status = sceneHistory.RecordBefore(document); !status) return status;
         document = std::move(candidate);
         worldByNode = std::move(worlds);
         sceneDirty = dirty;
@@ -432,11 +473,63 @@ struct Editor {
     }
 
     Status CommitDocument(scene::Document candidate) {
-        if (auto status = InstallDocument(std::move(candidate), true); !status) {
+        if (candidate == document) return Status::Ok();
+        inspectorUndoCaptured = false;
+        inspectorUndoNode.clear();
+        if (auto status = InstallDocument(std::move(candidate), true, true); !status) {
             sceneStatus = "Edit refused: " + status.error;
             return status;
         }
+        ++historyRevision;
+        SetHistoryStatus("Edit");
         return Status::Ok();
+    }
+
+    Status CommitInteractiveDocument(scene::Document candidate, bool& undoCaptured) {
+        if (candidate == document) return Status::Ok();
+        const bool startsTransaction = !undoCaptured;
+        if (auto status = InstallDocument(std::move(candidate), true, startsTransaction); !status) {
+            sceneStatus = "Edit refused: " + status.error;
+            return status;
+        }
+        undoCaptured = true;
+        if (startsTransaction) ++historyRevision;
+        SetHistoryStatus("Edit");
+        return Status::Ok();
+    }
+
+    void UndoScene() {
+        if (!sceneHistory.CanUndo()) return;
+        scene::Document restored;
+        if (auto status = sceneHistory.Undo(document, restored); !status) {
+            sceneStatus = "Undo failed: " + status.error;
+            return;
+        }
+        inspectorUndoCaptured = false;
+        inspectorUndoNode.clear();
+        if (auto status = InstallDocument(std::move(restored), true); !status) {
+            sceneStatus = "Undo could not install its saved scene: " + status.error;
+            return;
+        }
+        ++historyRevision;
+        SetHistoryStatus("Undo");
+    }
+
+    void RedoScene() {
+        if (!sceneHistory.CanRedo()) return;
+        scene::Document restored;
+        if (auto status = sceneHistory.Redo(document, restored); !status) {
+            sceneStatus = "Redo failed: " + status.error;
+            return;
+        }
+        inspectorUndoCaptured = false;
+        inspectorUndoNode.clear();
+        if (auto status = InstallDocument(std::move(restored), true); !status) {
+            sceneStatus = "Redo could not install its saved scene: " + status.error;
+            return;
+        }
+        ++historyRevision;
+        SetHistoryStatus("Redo");
     }
 
     void AddGroup() {
@@ -463,7 +556,11 @@ struct Editor {
             log::Error("scene", sceneStatus);
             return;
         }
-        sceneDirty = false;
+        if (auto status = SetSavedBaseline(true); !status) {
+            sceneStatus = "Saved, but cannot update the editor baseline: " + status.error;
+            log::Error("scene", sceneStatus);
+            return;
+        }
         sceneStatus = "Saved " + document.id;
         log::Info("scene", sceneStatus);
     }
@@ -488,6 +585,7 @@ struct Editor {
         selectedNode = id;
         if (Instance* inst = FindNodeInstance(id)) {
             inst->autoPlaceOnLoad = true;
+            inst->autoPlaceHistoryRevision = historyRevision;
             if (inst->model) {
                 AutoPlace(id);
                 if (frameOnLoad) {
@@ -569,8 +667,18 @@ struct Editor {
         scene::Document candidate = document;
         for (auto& item : candidate.nodes)
             if (item.id == nodeId) item.localTransform.translation.z = -inst->model->boundsMin[2] * item.localTransform.scale.z;
-        if (CommitDocument(std::move(candidate)))
-            if (Instance* updated = FindNodeInstance(nodeId)) updated->autoPlaceOnLoad = false;
+        if (candidate == document) {
+            inst->autoPlaceOnLoad = false;
+            return;
+        }
+        const bool recordAsIndependentEdit = inst->autoPlaceHistoryRevision != historyRevision;
+        if (auto status = InstallDocument(std::move(candidate), true, recordAsIndependentEdit); !status) {
+            sceneStatus = "Auto placement refused: " + status.error;
+            return;
+        }
+        if (recordAsIndependentEdit) ++historyRevision;
+        SetHistoryStatus("Auto placement");
+        if (Instance* updated = FindNodeInstance(nodeId)) updated->autoPlaceOnLoad = false;
     }
 
     Status OpenProject(const fs::path& root, std::string_view sceneId,
@@ -592,12 +700,15 @@ struct Editor {
         if (!ec && (fs::exists(fileStatus) || fs::is_symlink(fileStatus))) {
             if (auto loaded = projectStore->Load(sceneId, initial); !loaded) return loaded;
             if (auto installed = InstallDocument(std::move(initial), false); !installed) return installed;
+            sceneHistory.Clear();
+            if (auto baseline = SetSavedBaseline(true); !baseline) return baseline;
             sceneStatus = "Loaded " + std::string(sceneId);
         } else if (ec && ec != std::errc::no_such_file_or_directory) {
             return Status::Fail("cannot inspect project scene file: " + ec.message());
         } else {
             if (auto installed = InstallDocument(std::move(initial), false); !installed) return installed;
-            sceneDirty = true;
+            sceneHistory.Clear();
+            if (auto baseline = SetSavedBaseline(false); !baseline) return baseline;
             sceneStatus = "New scene · unsaved";
         }
         return Status::Ok();
@@ -608,6 +719,8 @@ struct Editor {
         document.id = "untitled";
         document.name = "Untitled";
         if (auto status = InstallDocument(document, false); !status) return status;
+        sceneHistory.Clear();
+        if (auto baseline = SetSavedBaseline(true); !baseline) return baseline;
         sceneStatus = "In-memory scene · pass --project DIR to save";
         return Status::Ok();
     }
@@ -787,36 +900,55 @@ public:
     explicit MoveTool(Editor& e) : e_(e) {}
     const char* Name() const override { return "move"; }
     ui::Reply OnInput(const ui::InputEvent& ev) override {
-        const scene::Node* selected = e_.FindNode(e_.selectedNode);
-        const render::Float4x4* world = selected ? e_.World(selected->id) : nullptr;
-        if (!selected || !world) return ui::Reply::Unhandled();
-        const auto ray = e_.camera.ScreenRay(ev.x, ev.y, e_.ui.viewport());
-        const auto origin = TransformPoint({0, 0, 0}, *world);
-        const auto hit = render::RayPlaneZ(ray, origin.z);
-        if (ev.kind == ui::InputKind::PointerDown && ev.button == ui::PointerButton::Left && ev.ctrl && hit) {
+        if (ev.kind == ui::InputKind::PointerUp && ev.button == ui::PointerButton::Left) {
+            const bool wasDragging = dragging_;
+            dragging_ = false;
+            undoCaptured_ = false;
+            draggedNode_.clear();
+            return wasDragging ? ui::Reply::Release() : ui::Reply::Unhandled();
+        }
+        if (ev.kind == ui::InputKind::PointerDown && ev.button == ui::PointerButton::Left && ev.ctrl) {
+            const scene::Node* selected = e_.FindNode(e_.selectedNode);
+            const render::Float4x4* world = selected ? e_.World(selected->id) : nullptr;
+            if (!selected || !world) return ui::Reply::Unhandled();
+            const auto origin = TransformPoint({0, 0, 0}, *world);
+            const auto hit = render::RayPlaneZ(e_.camera.ScreenRay(ev.x, ev.y, e_.ui.viewport()), origin.z);
+            if (!hit) return ui::Reply::Unhandled();
+            draggedNode_ = selected->id;
+            dragPlaneZ_ = origin.z;
             grab_ = {hit->x - origin.x, hit->y - origin.y, 0};
+            undoCaptured_ = false;
+            dragging_ = true;
             return ui::Reply::Capture();
         }
-        if (ev.kind == ui::InputKind::PointerMove && ev.leftHeld && hit) {
+        if (ev.kind == ui::InputKind::PointerMove && dragging_ && ev.leftHeld) {
+            const scene::Node* selected = e_.FindNode(draggedNode_);
+            const render::Float4x4* world = selected ? e_.World(selected->id) : nullptr;
+            if (!selected || !world) return ui::Reply::Handled();
+            const auto hit = render::RayPlaneZ(e_.camera.ScreenRay(ev.x, ev.y, e_.ui.viewport()), dragPlaneZ_);
+            if (!hit) return ui::Reply::Handled();
             render::Float4x4 parentInverse;
             if (selected->parentId) {
                 const auto* parent = e_.World(*selected->parentId);
                 if (!parent || !render::InvertAffine(*parent, parentInverse)) return ui::Reply::Handled();
             }
-            const auto local = TransformPoint({hit->x - grab_.x, hit->y - grab_.y, origin.z}, parentInverse);
+            const auto local = TransformPoint({hit->x - grab_.x, hit->y - grab_.y, dragPlaneZ_}, parentInverse);
             scene::Document candidate = e_.document;
             for (auto& node : candidate.nodes)
                 if (node.id == selected->id) node.localTransform.translation = {local.x, local.y, local.z};
-            e_.CommitDocument(std::move(candidate));
+            e_.CommitInteractiveDocument(std::move(candidate), undoCaptured_);
             return ui::Reply::Handled();
         }
-        if (ev.kind == ui::InputKind::PointerUp && ev.button == ui::PointerButton::Left) return ui::Reply::Release();
         return ui::Reply::Unhandled();
     }
 
 private:
     Editor& e_;
     render::Float3 grab_;
+    float dragPlaneZ_ = 0;
+    std::string draggedNode_;
+    bool dragging_ = false;
+    bool undoCaptured_ = false;
 };
 
 // Right drag orbits, middle drag pans, wheel dollies, left click picks, F frames, Del removes.
@@ -851,6 +983,8 @@ public:
             e_.camera.Dolly(ev.wheel);
             return ui::Reply::Handled();
         case ui::InputKind::KeyDown:
+            if (ev.key == ImGuiKey_Z && ev.ctrl) { e_.UndoScene(); return ui::Reply::Handled(); }
+            if (ev.key == ImGuiKey_Y && ev.ctrl) { e_.RedoScene(); return ui::Reply::Handled(); }
             if (ev.key == ImGuiKey_S && ev.ctrl) { e_.SaveScene(); return ui::Reply::Handled(); }
             if (ev.key == ImGuiKey_F) { if (auto* s = e_.FindNodeInstance(e_.selectedNode)) e_.FrameInstance(*s); return ui::Reply::Handled(); }
             if (ev.key == ImGuiKey_Delete && !e_.selectedNode.empty()) { e_.RemoveSelected(); return ui::Reply::Handled(); }
@@ -870,6 +1004,9 @@ private:
 void Editor::DrawMenu(bool& quit) {
     if (!ImGui::BeginMainMenuBar()) return;
     if (ImGui::BeginMenu("File")) {
+        if (ImGui::MenuItem("Undo", "Ctrl+Z", false, sceneHistory.CanUndo())) UndoScene();
+        if (ImGui::MenuItem("Redo", "Ctrl+Y", false, sceneHistory.CanRedo())) RedoScene();
+        ImGui::Separator();
         if (ImGui::MenuItem("Save scene", "Ctrl+S", false, projectStore.has_value())) SaveScene();
         if (ImGui::MenuItem("Clear scene")) ClearScene();
         ImGui::Separator();
@@ -972,6 +1109,14 @@ void Editor::DrawScene() {
     if (!ImGui::Begin("Scene", &showScene)) { ImGui::End(); return; }
     if (projectStore) ImGui::TextWrapped("Project: %s  ·  scene: %s", projectRoot.generic_string().c_str(), document.id.c_str());
     else ImGui::TextDisabled("In-memory scene · pass --project DIR to save");
+    ImGui::BeginDisabled(!sceneHistory.CanUndo());
+    if (ImGui::Button("Undo")) UndoScene();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!sceneHistory.CanRedo());
+    if (ImGui::Button("Redo")) RedoScene();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
     if (projectStore) {
         if (ImGui::Button("Save scene")) SaveScene();
         ImGui::SameLine();
@@ -1027,9 +1172,16 @@ void Editor::DrawScene() {
 }
 
 void Editor::DrawInspector() {
-    if (!ImGui::Begin("Inspector", &showInspector)) { ImGui::End(); return; }
+    if (!ImGui::Begin("Inspector", &showInspector)) {
+        inspectorUndoCaptured = false;
+        inspectorUndoNode.clear();
+        ImGui::End();
+        return;
+    }
     scene::Node* selected = FindNode(selectedNode);
     if (!selected) {
+        inspectorUndoCaptured = false;
+        inspectorUndoNode.clear();
         ImGui::TextDisabled("Nothing selected");
         ImGui::End();
         return;
@@ -1043,9 +1195,17 @@ void Editor::DrawInspector() {
     scene::Document candidate = document;
     auto nodeIt = std::find_if(candidate.nodes.begin(), candidate.nodes.end(),
                                [&](const scene::Node& node) { return node.id == selectedNode; });
-    if (nodeIt == candidate.nodes.end()) { ImGui::End(); return; }
+    if (nodeIt == candidate.nodes.end()) {
+        inspectorUndoCaptured = false;
+        inspectorUndoNode.clear();
+        ImGui::End();
+        return;
+    }
     bool changed = ImGui::DragFloat3("translation", &nodeIt->localTransform.translation.x, 0.05f);
-    if (ImGui::DragFloat4("rotation quaternion", &nodeIt->localTransform.rotation.x, 0.005f)) {
+    bool anyActive = ImGui::IsItemActive();
+    const bool rotationChanged = ImGui::DragFloat4("rotation quaternion", &nodeIt->localTransform.rotation.x, 0.005f);
+    anyActive |= ImGui::IsItemActive();
+    if (rotationChanged) {
         auto& rotation = nodeIt->localTransform.rotation;
         const double norm = std::sqrt(static_cast<double>(rotation.x) * rotation.x +
                                       static_cast<double>(rotation.y) * rotation.y +
@@ -1057,12 +1217,25 @@ void Editor::DrawInspector() {
             rotation.z = static_cast<float>(rotation.z / norm);
             rotation.w = static_cast<float>(rotation.w / norm);
             changed = true;
-        } else sceneStatus = "Rotation edit refused: quaternion must be nonzero";
+        } else {
+            rotation = selected->localTransform.rotation;
+            sceneStatus = "Rotation edit refused: quaternion must be nonzero";
+        }
     }
-    changed |= ImGui::DragFloat3("scale", &nodeIt->localTransform.scale.x, 0.01f, 0.001f, 1000.0f);
+    const bool scaleChanged = ImGui::DragFloat3("scale", &nodeIt->localTransform.scale.x, 0.01f, 0.001f, 1000.0f);
+    changed |= scaleChanged;
+    anyActive |= ImGui::IsItemActive();
     if (changed) {
-        CommitDocument(std::move(candidate));
+        if (inspectorUndoNode != selectedNode) {
+            inspectorUndoCaptured = false;
+            inspectorUndoNode = selectedNode;
+        }
+        CommitInteractiveDocument(std::move(candidate), inspectorUndoCaptured);
         inst = FindNodeInstance(selectedNode);
+    }
+    if (!anyActive) {
+        inspectorUndoCaptured = false;
+        inspectorUndoNode.clear();
     }
     if (inst) {
         ImGui::SeparatorText("Material (session only)");
@@ -1270,6 +1443,10 @@ void Editor::DrawUi() {
     if (showMounts) DrawMounts();
     if (showScene) DrawScene();
     if (showInspector) DrawInspector();
+    else {
+        inspectorUndoCaptured = false;
+        inspectorUndoNode.clear();
+    }
     if (showPlugins) DrawPlugins();
     if (showLoader) DrawLoader();
     if (showStats) DrawStats();

@@ -686,6 +686,38 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(editable.nodes.empty());
     CHECK(scene::RemoveSubtree(editable, "missing").ok() == false);
 
+    scene::DocumentHistory history;
+    const auto historyBase = SceneFixture();
+    auto historyOne = historyBase;
+    historyOne.nodes[2].localTransform.translation.x += 1.0f;
+    auto historyTwo = historyOne;
+    historyTwo.nodes[2].localTransform.translation.y += 2.0f;
+    CHECK(history.RecordBefore(historyBase).ok());
+    CHECK(history.RecordBefore(historyOne).ok());
+    scene::Document historyRestored;
+    CHECK(history.Undo(historyTwo, historyRestored).ok() && historyRestored == historyOne);
+    CHECK(history.CanUndo() && history.CanRedo());
+    CHECK(history.Undo(historyRestored, historyRestored).ok() && historyRestored == historyBase);
+    CHECK(!history.CanUndo() && history.CanRedo());
+    CHECK(history.Redo(historyRestored, historyRestored).ok() && historyRestored == historyOne);
+    CHECK(history.CanRedo());
+    auto historyBranch = historyOne;
+    historyBranch.nodes[2].localTransform.translation.z += 3.0f;
+    CHECK(history.RecordBefore(historyOne).ok());  // a new edit discards the old redo branch
+    CHECK(!history.CanRedo());
+    CHECK(history.Undo(historyBranch, historyRestored).ok() && historyRestored == historyOne);
+    history.Clear();
+    const auto sentinelDocument = historyRestored;
+    CHECK(!history.Undo(historyRestored, historyRestored).ok());
+    CHECK(historyRestored == sentinelDocument);
+    auto boundedHistoryDocument = historyBase;
+    for (size_t i = 0; i < scene::DocumentHistory::kMaxEntries + 8; ++i) {
+        CHECK(history.RecordBefore(boundedHistoryDocument).ok());
+        boundedHistoryDocument.nodes[2].localTransform.translation.x += 0.001f;
+    }
+    CHECK(history.retainedEntries() <= scene::DocumentHistory::kMaxEntries);
+    CHECK(history.retainedBytes() <= scene::DocumentHistory::kMaxBytes);
+
     scene::Document unknownFields;
     CHECK(!scene::Deserialize(R"({"format":"scuba.scene","format":"scuba.scene","schema_version":1,"scene_id":"x","name":"x","nodes":[]})", unknownFields).ok());
     CHECK(!scene::Deserialize(R"({"format":"scuba.scene","schema_version":1,"scene_id":"x","name":"x","nodes":[],"extra":1})", unknownFields).ok());

@@ -120,4 +120,30 @@ private:
     std::vector<std::filesystem::path> readOnlyRoots_;
 };
 
+// Bounded snapshot history for editor scene mutations. Snapshots use the validated on-disk
+// representation so a history entry cannot exceed the scene file limit.
+class DocumentHistory {
+public:
+    static constexpr size_t kMaxEntries = 64;
+    static constexpr size_t kMaxBytes = 32u * 1024u * 1024u;
+
+    Status RecordBefore(const Document& document);
+    Status Undo(const Document& current, Document& restored);
+    Status Redo(const Document& current, Document& restored);
+    void Clear() noexcept;
+
+    bool CanUndo() const noexcept { return !undo_.empty(); }
+    bool CanRedo() const noexcept { return !redo_.empty(); }
+    size_t retainedEntries() const noexcept { return undo_.size() + redo_.size(); }
+    size_t retainedBytes() const noexcept { return retainedBytes_; }
+
+private:
+    void Trim() noexcept;
+    void DropOldest(std::vector<std::string>& stack) noexcept;
+
+    std::vector<std::string> undo_;
+    std::vector<std::string> redo_;
+    size_t retainedBytes_ = 0;
+};
+
 }  // namespace scuba::scene
