@@ -67,12 +67,14 @@ the new model is parented to that group. Material edits are currently session-on
 are not in scene schema version 1.
 
 Saving is explicit through the Scene panel or File menu (`Ctrl+S`). The Scene panel reports saved,
-unsaved, and save-error states; there is no automatic save. Undo and redo are available from the
-File menu, Scene panel, and `Ctrl+Z` / `Ctrl+Y`. They retain up to 64 snapshots or 32 MiB, whichever
-limit is reached first. A continuous Inspector edit or Ctrl+left-drag is one history action; group,
-place, delete, rename, reparent, clear, and double-click spawn each form one action. Asynchronous
-grounding is folded into its spawn action when no later scene edit intervenes. Returning to the last
-saved document clears the unsaved state; saving establishes a new baseline without discarding undo history.
+unsaved, and save-error states; there is no automatic save. Switching scenes or quitting with dirty
+changes asks to save, discard, or cancel; a window-close request is deferred until that choice is
+made. Undo and redo are available from the File menu, Scene panel, and `Ctrl+Z` / `Ctrl+Y`. They
+retain up to 64 snapshots or 32 MiB, whichever limit is reached first. A continuous Inspector edit
+or Ctrl+left-drag is one history action; group, place, delete, rename, reparent, clear, and
+double-click spawn each form one action. Asynchronous grounding is folded into its spawn action when
+no later scene edit intervenes. Returning to the last saved document clears the unsaved state;
+saving establishes a new baseline without discarding undo history.
 Without `--project`, the editor still uses the same document and outliner in memory and says that
 the session will not persist.
 

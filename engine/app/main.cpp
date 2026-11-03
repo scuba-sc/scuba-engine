@@ -241,7 +241,7 @@ render::Float3 TransformPoint(render::Float3 point, const render::Float4x4& matr
 }
 
 struct Editor {
-    enum class PendingSceneAction : uint8_t { None, Open, Create };
+    enum class PendingSceneAction : uint8_t { None, Open, Create, Quit };
 
     vfs::VirtualFileSystem vfs;
     JobSystem jobs;
@@ -307,6 +307,7 @@ struct Editor {
     std::string sceneBrowserStatus;
     PendingSceneAction pendingSceneAction = PendingSceneAction::None;
     std::string pendingSceneId;
+    bool pendingSceneConfirmation = false;
     bool frameOnLoad = true;
 
     ~Editor() {
@@ -624,8 +625,18 @@ struct Editor {
         if (sceneId.empty() || sceneId == document.id) return;
         pendingSceneAction = PendingSceneAction::Open;
         pendingSceneId = std::move(sceneId);
-        if (sceneDirty) ImGui::OpenPopup("Confirm scene change");
+        if (sceneDirty) pendingSceneConfirmation = true;
         else CompletePendingSceneAction();
+    }
+
+    void RequestQuit(bool& quit) {
+        if (!sceneDirty) {
+            quit = true;
+            return;
+        }
+        pendingSceneAction = PendingSceneAction::Quit;
+        pendingSceneId.clear();
+        pendingSceneConfirmation = true;
     }
 
     void RequestCreateScene(std::string sceneId) {
@@ -645,16 +656,22 @@ struct Editor {
         }
         pendingSceneAction = PendingSceneAction::Create;
         pendingSceneId = std::move(candidate.id);
-        if (sceneDirty) ImGui::OpenPopup("Confirm scene change");
+        if (sceneDirty) pendingSceneConfirmation = true;
         else CompletePendingSceneAction();
     }
 
-    void CompletePendingSceneAction() {
-        if (!projectStore || pendingSceneAction == PendingSceneAction::None) return;
+    void CompletePendingSceneAction(bool* quit = nullptr) {
+        if (pendingSceneAction == PendingSceneAction::None) return;
         const PendingSceneAction action = pendingSceneAction;
         const std::string sceneId = pendingSceneId;
         pendingSceneAction = PendingSceneAction::None;
         pendingSceneId.clear();
+
+        if (action == PendingSceneAction::Quit) {
+            if (quit) *quit = true;
+            return;
+        }
+        if (!projectStore) return;
 
         scene::Document candidate;
         if (action == PendingSceneAction::Open) {
@@ -968,13 +985,13 @@ struct Editor {
         return targets;
     }
 
-    void DrawUi();
+    void DrawUi(bool& quit);
     void DrawMenu(bool& quit);
     void DrawContent();
     void DrawMounts();
     void DrawScene();
     void DrawSceneBrowser();
-    void DrawSceneChangeConfirmation();
+    void DrawSceneChangeConfirmation(bool& quit);
     void DrawInspector();
     void DrawPlugins();
     void DrawLoader();
@@ -1149,7 +1166,7 @@ void Editor::DrawMenu(bool& quit) {
         if (ImGui::MenuItem("Save scene", "Ctrl+S", false, projectStore.has_value())) SaveScene();
         if (ImGui::MenuItem("Clear scene")) ClearScene();
         ImGui::Separator();
-        if (ImGui::MenuItem("Quit", "Alt+F4")) quit = true;
+        if (ImGui::MenuItem("Quit", "Alt+F4")) RequestQuit(quit);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
@@ -1405,22 +1422,45 @@ void Editor::DrawSceneBrowser() {
     ImGui::End();
 }
 
-void Editor::DrawSceneChangeConfirmation() {
-    if (pendingSceneAction == PendingSceneAction::None) return;
-    if (!ImGui::BeginPopupModal("Confirm scene change", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-    ImGui::TextWrapped("Scene %s has unsaved changes. Save them before switching?",
+void Editor::DrawSceneChangeConfirmation(bool& quit) {
+    ImGui::SetNextWindowPos({-1000, -1000}, ImGuiCond_Always);
+    ImGui::SetNextWindowSize({1, 1}, ImGuiCond_Always);
+    const ImGuiWindowFlags hostFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                       ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+                                       ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoInputs |
+                                       ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDocking;
+    ImGui::Begin("##SceneActionPopupHost", nullptr, hostFlags);
+    if (pendingSceneAction == PendingSceneAction::None) {
+        ImGui::End();
+        return;
+    }
+    if (pendingSceneConfirmation) {
+        ImGui::OpenPopup("Confirm scene change");
+        pendingSceneConfirmation = false;
+    }
+    if (!ImGui::BeginPopupModal("Confirm scene change", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::End();
+        return;
+    }
+    const bool quitting = pendingSceneAction == PendingSceneAction::Quit;
+    ImGui::TextWrapped(quitting ? "Scene %s has unsaved changes. Save them before quitting?"
+                                : "Scene %s has unsaved changes. Save them before switching?",
                        document.id.c_str());
     ImGui::Separator();
-    if (ImGui::Button("Save and continue")) {
+    const char* saveLabel = quitting ? "Save and quit" : "Save and continue";
+    ImGui::BeginDisabled(!projectStore.has_value());
+    if (ImGui::Button(saveLabel)) {
         SaveScene();
         if (!sceneDirty) {
-            CompletePendingSceneAction();
+            CompletePendingSceneAction(&quit);
             ImGui::CloseCurrentPopup();
         }
     }
+    ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Discard changes and continue")) {
-        CompletePendingSceneAction();
+    const char* discardLabel = quitting ? "Discard changes and quit" : "Discard changes and continue";
+    if (ImGui::Button(discardLabel)) {
+        CompletePendingSceneAction(&quit);
         ImGui::CloseCurrentPopup();
     }
     if (ImGui::Button("Cancel")) {
@@ -1428,11 +1468,14 @@ void Editor::DrawSceneChangeConfirmation() {
         pendingSceneId.clear();
         ImGui::CloseCurrentPopup();
     }
-    if (!sceneDirty && pendingSceneAction != PendingSceneAction::None)
+    if (quitting && !projectStore)
+        ImGui::TextWrapped("This in-memory scene has no project file; Save is unavailable.");
+    else if (!sceneDirty && pendingSceneAction != PendingSceneAction::None)
         ImGui::TextWrapped("Save completed; the scene switch is waiting to finish.");
     else if (sceneStatus.starts_with("Save failed") || sceneStatus.starts_with("Saved, but"))
         ImGui::TextWrapped("%s", sceneStatus.c_str());
     ImGui::EndPopup();
+    ImGui::End();
 }
 
 void Editor::DrawInspector() {
@@ -1702,7 +1745,7 @@ void Editor::DrawSurface() {
     ImGui::End();
 }
 
-void Editor::DrawUi() {
+void Editor::DrawUi(bool& quit) {
     if (showContent) DrawContent();
     if (showMounts) DrawMounts();
     if (showScene) DrawScene();
@@ -1712,7 +1755,7 @@ void Editor::DrawUi() {
         inspectorUndoNode.clear();
     }
     DrawSceneBrowser();
-    DrawSceneChangeConfirmation();
+    DrawSceneChangeConfirmation(quit);
     if (showPlugins) DrawPlugins();
     if (showLoader) DrawLoader();
     if (showStats) DrawStats();
@@ -1903,6 +1946,7 @@ int Run(const Args& args) {
         ed.PumpLoader();
 
         ed.ui.BeginFrame();
+        if (window.TakeCloseRequest()) ed.RequestQuit(quit);
         ImGuiIO& io = ImGui::GetIO();
         ed.UpdatePlacementPreview(io.MousePos.x, io.MousePos.y);
         ui::SurfaceInput surfaceInput;
@@ -1974,7 +2018,7 @@ int Run(const Args& args) {
         }
         if (!held) ed.surfaceDragging = false;
         ed.DrawMenu(quit);
-        ed.DrawUi();
+        ed.DrawUi(quit);
         surfaceInput.focused = ed.surfaceFocused;
         render::UiFramePtr surfaceFrame;
         if (ed.surfaceEnabled && !ed.surfacePanel.empty()) {
@@ -2062,8 +2106,9 @@ int Run(const Args& args) {
         std::fprintf(stderr, "scuba-engine: %d frame(s), %zu instance(s), %d error(s) -> exit %d\n", frame, ed.instances.size(), gErrors.load(), code);
     }
 
-    if (ed.projectStore && ed.sceneDirty)
-        log::Warn("scene", "unsaved scene changes were not saved: " + ed.document.id);
+    if (ed.sceneDirty)
+        log::Warn("scene", std::string(ed.projectStore ? "unsaved scene changes were not saved: "
+                                                      : "in-memory scene changes were discarded: ") + ed.document.id);
     if (ed.netSandbox && !ed.netSandbox->Shutdown())
         log::Warn("netsandbox", "a peer did not exit cleanly; child termination was confirmed");
     ed.netSandbox.reset();
