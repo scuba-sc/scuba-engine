@@ -7,6 +7,7 @@ scale can introduce shear, so the resolved matrix is preserved instead of decomp
 The renderer and CPU picker accept those affine matrices; picking uses an affine inverse, bounds
 transform all eight corners, and the D3D12 instance path uses an inverse-transpose normal matrix.
 Windows D3D12 compilation and visual validation are still pending.
+The Windows build and interactive checklist is in [Windows editor verification](windows-editor-verification.md).
 
 ## Version 1
 

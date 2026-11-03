@@ -150,7 +150,10 @@ The front end is backend-neutral; D3D12 is the first backend, Vulkan the next.
 
 ImGui (docking branch) runs the editor: a full-window dockspace whose central node is
 see-through, so the 3D viewport shows there and panels dock around it. The 3D pass is clipped to
-the central node; the UI pass draws over the whole window.
+the central node; the UI pass draws over the whole window. When no saved layout file exists, the
+first-run workspace docks Scene/Mounts left, Inspector/Plugins right, and Content/Asset loader/Log/Stats
+below the viewport. A saved `scuba-engine-layout.ini` remains authoritative. See the
+[Windows editor verification checklist](windows-editor-verification.md) for build and interactive checks.
 
 Input goes through an `InputRouter`: layers are asked in order and answer with a reply (unhandled,
 handled, capture, release) instead of changing global state. A capturing layer receives every
