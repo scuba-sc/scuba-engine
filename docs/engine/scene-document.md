@@ -193,10 +193,20 @@ the improvement is that it no longer first materializes an unbounded merged `Ent
 Windows-only ImGui browser and D3D12 viewport have not been compiled or visually validated here;
 portable tests cover the browser model, not UI behavior.
 
-Saving is explicit through the Scene panel or File menu (`Ctrl+S`). The Scene panel reports saved,
-unsaved, and save-error states; there is no automatic save. Switching scenes or quitting with dirty
-changes asks to save, discard, or cancel; a window-close request is deferred until that choice is
-made. Undo and redo are available from the File menu, Scene panel, and `Ctrl+Z` / `Ctrl+Y`. They
+Saving is explicit through the Scene panel or File menu (`Ctrl+S`). The editor compares the current
+scene file with the baseline captured at open or the last successful save before replacing it. If an
+external edit is detected, the scene file disappears, or the file can no longer be validated, the
+save is refused and the in-memory document remains dirty; use **Save a copy** or resolve the file
+change before retrying. A first save uses create-without-replace, so a scene created by another
+writer after the blank document was opened is preserved. This read-then-write guard is not a
+cross-process compare-and-swap: a concurrent writer can still race between the comparison and the
+atomic replacement. The lower-level `ProjectStore::Save` remains an unconditional replace operation
+for callers that explicitly need it.
+
+The Scene panel reports saved, unsaved, and save-error states; there is no automatic save. Switching
+scenes or quitting with dirty changes asks to save, discard, or cancel; a window-close request is
+deferred until that choice is made. Undo and redo are available from the File menu, Scene panel, and
+`Ctrl+Z` / `Ctrl+Y`. They
 retain up to 64 snapshots or 32 MiB, whichever limit is reached first. A continuous Inspector edit,
 Ctrl+left-drag, or transform-gizmo drag is one history action; uniform-scale steps, group, duplicate,
 place, delete, rename, reparent, clear, and double-click spawn each form one action. Asynchronous

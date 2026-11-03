@@ -203,6 +203,13 @@ public:
                   std::span<const std::filesystem::path> mountedSources = {}) const;
     Status Save(const Document& document,
                 std::span<const std::filesystem::path> mountedSources = {}) const;
+    // Saves only if the current file still matches the baseline captured when the scene was
+    // loaded/saved. With no baseline, this is a first-save create and refuses an existing file.
+    // This check protects against ordinary external edits; it is not a cross-process compare-and-
+    // swap, so concurrent writers can still race between the read and atomic replacement.
+    Status SaveIfUnchanged(const Document& document,
+                          const std::optional<std::string>& expectedBaselineJson,
+                          std::span<const std::filesystem::path> mountedSources = {}) const;
     Status Load(std::string_view sceneId, Document& document,
                 std::span<const std::filesystem::path> mountedSources = {}) const;
 
@@ -223,6 +230,7 @@ public:
     Status SetBaseline(const Document& document, bool exists);
     Status Update(const Document& document);
     bool dirty() const noexcept { return dirty_; }
+    const std::optional<std::string>& baselineJson() const noexcept { return baseline_; }
 
 private:
     std::optional<std::string> baseline_;

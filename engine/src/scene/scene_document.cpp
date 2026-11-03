@@ -1495,6 +1495,32 @@ Status ProjectStore::Save(
     return AtomicWrite(root_, ScenePath(document.id), json, true);
 }
 
+Status ProjectStore::SaveIfUnchanged(
+    const Document& document,
+    const std::optional<std::string>& expectedBaselineJson,
+    std::span<const std::filesystem::path> mountedSources) const {
+    // A scene that has never been saved must be created without replacing a file that appeared
+    // after the editor opened the blank document.
+    if (!expectedBaselineJson) return Create(document, mountedSources);
+
+    Document expectedBaseline;
+    if (auto status = Deserialize(*expectedBaselineJson, expectedBaseline); !status)
+        return Fail("cannot verify the saved scene baseline: " + status.error);
+    if (expectedBaseline.id != document.id)
+        return Fail("saved scene baseline belongs to a different scene");
+
+    Document currentOnDisk;
+    if (auto status = Load(document.id, currentOnDisk, mountedSources); !status)
+        return Fail("cannot verify the scene before saving: " + status.error);
+
+    // If another writer already persisted this exact document, accept it without replacing bytes.
+    if (currentOnDisk == document) return Status::Ok();
+    if (currentOnDisk != expectedBaseline)
+        return Fail("scene changed on disk since it was opened; save refused to protect external edits");
+
+    return Save(document, mountedSources);
+}
+
 Status ProjectStore::Create(
     const Document& document,
     std::span<const std::filesystem::path> mountedSources) const {

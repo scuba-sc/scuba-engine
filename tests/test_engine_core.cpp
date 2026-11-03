@@ -1820,14 +1820,14 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(!saveFlowGate.Request(saveFlowAction, saveFlowDirty.dirty()));
     auto saveFlowInvalid = saveFlowEdit;
     saveFlowInvalid.nodes[2].id = saveFlowInvalid.nodes[1].id;
-    CHECK(!project->Save(saveFlowInvalid).ok());
+    CHECK(!project->SaveIfUnchanged(saveFlowInvalid, saveFlowDirty.baselineJson()).ok());
     CHECK(!saveFlowDirty.Update(saveFlowInvalid).ok() && saveFlowDirty.dirty());
     CHECK(!saveFlowGate.Resolve(scene::SceneActionChoice::Save, !saveFlowDirty.dirty()));
     CHECK(saveFlowGate.pending() == std::optional<scene::SceneAction>(saveFlowAction));
     scene::Document preservedAfterFailedSave;
     CHECK(project->Load("hangar-test", preservedAfterFailedSave).ok());
     CHECK(preservedAfterFailedSave == document);
-    CHECK(project->Save(saveFlowEdit).ok());
+    CHECK(project->SaveIfUnchanged(saveFlowEdit, saveFlowDirty.baselineJson()).ok());
     CHECK(saveFlowDirty.SetBaseline(saveFlowEdit, true).ok() && !saveFlowDirty.dirty());
     CHECK(saveFlowGate.Resolve(scene::SceneActionChoice::Save, !saveFlowDirty.dirty()) ==
           std::optional<scene::SceneAction>(saveFlowAction));
@@ -1894,6 +1894,91 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(project->Load("hangar-test", preserved).ok());
     CHECK(preserved == document);
 
+    // Guarded editor saves refuse to overwrite external changes and leave both the file and the
+    // in-memory dirty baseline intact. If the external writer already stored the same document,
+    // the guarded save succeeds without rewriting it.
+    scene::DocumentDirtyState guardedDirty;
+    CHECK(guardedDirty.SetBaseline(document, true).ok());
+    auto guardedEdit = document;
+    guardedEdit.name = "Guarded local edit";
+    CHECK(project->SaveIfUnchanged(guardedEdit, guardedDirty.baselineJson()).ok());
+    CHECK(guardedDirty.SetBaseline(guardedEdit, true).ok());
+    auto externalEdit = guardedEdit;
+    externalEdit.name = "External edit";
+    CHECK(project->Save(externalEdit).ok());
+    auto conflictingEdit = guardedEdit;
+    conflictingEdit.name = "Conflicting local edit";
+    CHECK(guardedDirty.Update(conflictingEdit).ok() && guardedDirty.dirty());
+    scene::SceneActionGate conflictGate;
+    const scene::SceneAction conflictAction{scene::SceneActionKind::Open, "another-scene"};
+    CHECK(!conflictGate.Request(conflictAction, guardedDirty.dirty()));
+    const auto readSceneBytes = [](const fs::path& path) {
+        std::ifstream input(path, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    };
+    const auto scenePath = projectRoot / "hangar-test.scene.json";
+    const auto externalBytes = readSceneBytes(scenePath);
+    const auto refusedExternalOverwrite = project->SaveIfUnchanged(
+        conflictingEdit, guardedDirty.baselineJson());
+    CHECK(!refusedExternalOverwrite.ok());
+    CHECK(refusedExternalOverwrite.error.find("changed on disk") != std::string::npos);
+    CHECK(!conflictGate.Resolve(scene::SceneActionChoice::Save, refusedExternalOverwrite.ok()));
+    CHECK(conflictGate.pending() == std::optional<scene::SceneAction>(conflictAction));
+    CHECK(readSceneBytes(scenePath) == externalBytes);
+    CHECK(guardedDirty.dirty());
+    CHECK(!conflictGate.Resolve(scene::SceneActionChoice::Cancel));
+    CHECK(!conflictGate.pending());
+    scene::Document externalAfterConflict;
+    CHECK(project->Load("hangar-test", externalAfterConflict).ok());
+    CHECK(externalAfterConflict == externalEdit);
+    CHECK(project->SaveIfUnchanged(externalEdit, guardedDirty.baselineJson()).ok());
+    CHECK(readSceneBytes(scenePath) == externalBytes);
+    CHECK(guardedDirty.SetBaseline(externalEdit, true).ok() && !guardedDirty.dirty());
+
+    // A new unsaved scene can be saved, but a file that appears after the scene was opened is
+    // preserved by the same no-replace path.
+    scene::Document newFirstSave;
+    newFirstSave.id = "first-save-success";
+    newFirstSave.name = "New first-save scene";
+    scene::DocumentDirtyState newFirstSaveDirty;
+    CHECK(newFirstSaveDirty.SetBaseline(newFirstSave, false).ok());
+    CHECK(project->SaveIfUnchanged(newFirstSave, newFirstSaveDirty.baselineJson()).ok());
+    scene::Document loadedFirstSave;
+    CHECK(project->Load("first-save-success", loadedFirstSave).ok());
+    CHECK(loadedFirstSave == newFirstSave);
+
+    scene::Document firstSave;
+    firstSave.id = "first-save-race";
+    firstSave.name = "First save";
+    scene::DocumentDirtyState firstSaveDirty;
+    CHECK(firstSaveDirty.SetBaseline(firstSave, false).ok() && firstSaveDirty.dirty());
+    auto externallyCreated = firstSave;
+    externallyCreated.name = "Externally created scene";
+    CHECK(project->Create(externallyCreated).ok());
+    const auto firstSavePath = projectRoot / "first-save-race.scene.json";
+    const auto externallyCreatedBytes = readSceneBytes(firstSavePath);
+    CHECK(!project->SaveIfUnchanged(firstSave, firstSaveDirty.baselineJson()).ok());
+    CHECK(readSceneBytes(firstSavePath) == externallyCreatedBytes);
+    scene::Document preservedFirstSave;
+    CHECK(project->Load("first-save-race", preservedFirstSave).ok());
+    CHECK(preservedFirstSave == externallyCreated);
+    CHECK(firstSaveDirty.dirty());
+
+    scene::Document removedScene;
+    removedScene.id = "guarded-delete";
+    removedScene.name = "Saved before external deletion";
+    CHECK(project->Create(removedScene).ok());
+    scene::DocumentDirtyState removedSceneDirty;
+    CHECK(removedSceneDirty.SetBaseline(removedScene, true).ok());
+    auto localRemovedSceneEdit = removedScene;
+    localRemovedSceneEdit.name = "Local edit after open";
+    CHECK(removedSceneDirty.Update(localRemovedSceneEdit).ok() && removedSceneDirty.dirty());
+    const auto removedScenePath = projectRoot / "guarded-delete.scene.json";
+    CHECK(fs::remove(removedScenePath));
+    CHECK(!project->SaveIfUnchanged(localRemovedSceneEdit, removedSceneDirty.baselineJson()).ok());
+    CHECK(!fs::exists(removedScenePath));
+    CHECK(removedSceneDirty.dirty());
+
     // A malformed existing main scene fails without changing the caller's document, matching the
     // project-switch preflight behavior for malformed selected projects.
     WriteFile(projectRoot / "main.scene.json", "not a scene document");
@@ -1901,6 +1986,19 @@ void TestSceneDocument(const fs::path& root) {
     const auto loadErrorSentinel = preserveOnLoadError;
     CHECK(!project->Load("main", preserveOnLoadError).ok());
     CHECK(preserveOnLoadError == loadErrorSentinel);
+    scene::Document expectedMain;
+    expectedMain.id = "main";
+    expectedMain.name = "Previously valid main scene";
+    scene::DocumentDirtyState malformedDiskDirty;
+    CHECK(malformedDiskDirty.SetBaseline(expectedMain, true).ok());
+    auto editedMain = expectedMain;
+    editedMain.name = "Local edit must survive malformed disk file";
+    CHECK(malformedDiskDirty.Update(editedMain).ok() && malformedDiskDirty.dirty());
+    const auto malformedMainPath = projectRoot / "main.scene.json";
+    const auto malformedBytes = readSceneBytes(malformedMainPath);
+    CHECK(!project->SaveIfUnchanged(editedMain, malformedDiskDirty.baselineJson()).ok());
+    CHECK(readSceneBytes(malformedMainPath) == malformedBytes);
+    CHECK(malformedDiskDirty.dirty());
 
     auto duplicate = SceneFixture();
     duplicate.nodes[2].id = duplicate.nodes[1].id;

@@ -800,7 +800,8 @@ struct Editor {
             return;
         }
         const auto sources = MountedSourcePaths();
-        if (auto status = projectStore->Save(document, sources); !status) {
+        if (auto status = projectStore->SaveIfUnchanged(
+                document, documentDirty.baselineJson(), sources); !status) {
             sceneStatus = "Save failed: " + status.error;
             log::Error("scene", sceneStatus);
             return;
