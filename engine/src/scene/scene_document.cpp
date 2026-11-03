@@ -452,22 +452,28 @@ Status Validate(const Document& document) {
     }
 
     std::unordered_map<std::string, uint8_t> color;
+    std::unordered_map<std::string, size_t> depthById;
     color.reserve(document.nodes.size());
+    depthById.reserve(document.nodes.size());
     for (const auto& start : document.nodes) {
         std::vector<const Node*> path;
         const Node* current = &start;
-        while (current) {
+        while (current && depthById.find(current->id) == depthById.end()) {
             const auto found = color.find(current->id);
-            if (found != color.end()) {
-                if (found->second == 1) return Fail("scene hierarchy contains a cycle");
-                break;
-            }
+            if (found != color.end() && found->second == 1)
+                return Fail("scene hierarchy contains a cycle");
             color.emplace(current->id, 1);
             path.push_back(current);
-            if (path.size() > kMaxHierarchyDepth) return Fail("scene hierarchy exceeds the depth limit");
             current = current->parentId ? byId.at(*current->parentId) : nullptr;
         }
-        for (const Node* node : path) color[node->id] = 2;
+        size_t depth = current ? depthById.at(current->id) : 0;
+        while (!path.empty()) {
+            const Node* node = path.back();
+            path.pop_back();
+            if (++depth > kMaxHierarchyDepth) return Fail("scene hierarchy exceeds the depth limit");
+            depthById.emplace(node->id, depth);
+            color[node->id] = 2;
+        }
     }
     return Status::Ok();
 }

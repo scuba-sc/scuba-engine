@@ -648,6 +648,25 @@ void TestSceneDocument(const fs::path& root) {
     invalidScale.nodes[2].localTransform.scale.y = 0;
     CHECK(!scene::Validate(invalidScale).ok());
 
+    scene::Document tooDeep;
+    tooDeep.id = "too-deep";
+    tooDeep.name = "Parent-first hierarchy over the limit";
+    for (size_t i = 0; i <= scene::kMaxHierarchyDepth; ++i) {
+        scene::Node group;
+        group.id = "depth-" + std::to_string(i);
+        group.name = "Group";
+        group.kind = scene::NodeKind::Group;
+        if (i) group.parentId = "depth-" + std::to_string(i - 1);
+        tooDeep.nodes.push_back(std::move(group));
+    }
+    CHECK(!scene::Validate(tooDeep).ok());
+    std::vector<scene::ResolvedTransform> unchangedDepth{{"sentinel", {}}};
+    CHECK(!scene::ResolveWorldTransforms(tooDeep, unchangedDepth).ok());
+    CHECK(unchangedDepth.size() == 1 && unchangedDepth.front().nodeId == "sentinel");
+    tooDeep.nodes.pop_back();
+    tooDeep.name = "Parent-first hierarchy at the limit";
+    CHECK(scene::Validate(tooDeep).ok());
+
     scene::Document collapsed;
     collapsed.id = "collapsed";
     collapsed.name = "Collapsed hierarchy";
