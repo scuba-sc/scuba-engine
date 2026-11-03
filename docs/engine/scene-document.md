@@ -89,9 +89,13 @@ leaves its saved node in place, marks the outliner row as failed, and reports th
 the outliner and Asset Loader tooltips and the log. The document is not rewritten to remove the
 reference. Invalid asset-path syntax (including traversal or a non-normalized VFS path) rejects the
 scene load; browser opens show the error and leave the current document untouched, while startup
-reports the error and leaves the saved file untouched. A failed model request is not automatically
-retried after mounts change in the current session; restart the editor after correcting the VFS
-mounts to request the asset again.
+reports the error and leaves the saved file untouched. Failed scene model loads are not retried
+automatically. After correcting a file or mounting/remounting its directory or archive, use **Retry
+failed assets** in the Scene panel. Retries use the loader's normalized-path cache, so objects that
+share one failed asset share one new request, while already loaded models are left alone. Failed
+nodes and their saved references remain in the document if the retry also fails; the row and loader
+diagnostics then show the new result. Replacing files inside a ZIP or `.scpak` requires unmounting
+and remounting the archive before retrying, because archive backends use their opened index.
 Selection is editor-session state: opening a scene clears the previous selection; nodes can be
 selected from the outliner, and loaded models can also be selected in the viewport. The project
 scene browser is available from the File menu and Scene panel. Windows D3D12 compilation and visual

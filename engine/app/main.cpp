@@ -369,10 +369,56 @@ struct Editor {
         return it == worldByNode.end() ? nullptr : &it->second;
     }
 
+    void TrackRequestedModel(asset::ModelHandle handle) {
+        if (handle != 0 && std::find(requested.begin(), requested.end(), handle) == requested.end())
+            requested.push_back(handle);
+    }
+
     asset::ModelHandle RequestModel(const std::string& path) {
         const asset::ModelHandle h = loader->Request(path, JobPriority::High);
-        requested.push_back(h);
+        TrackRequestedModel(h);
         return h;
+    }
+
+    std::vector<asset::ModelHandle> FailedSceneAssetHandles() const {
+        std::vector<asset::ModelHandle> failed;
+        if (!loader) return failed;
+        std::unordered_set<asset::ModelHandle> seen;
+        for (const auto& inst : instances) {
+            if (inst.model || inst.handle == 0 || !seen.insert(inst.handle).second) continue;
+            if (loader->Info(inst.handle).state == asset::LoadState::Failed)
+                failed.push_back(inst.handle);
+        }
+        return failed;
+    }
+
+    void RetryFailedSceneAssets() {
+        const auto failedHandles = FailedSceneAssetHandles();
+        if (failedHandles.empty()) {
+            sceneStatus = "No failed scene assets to retry";
+            return;
+        }
+
+        size_t retried = 0;
+        for (const asset::ModelHandle failedHandle : failedHandles) {
+            const asset::ModelHandle retryHandle = loader->Retry(failedHandle, JobPriority::High);
+            if (retryHandle == 0) continue;
+            TrackRequestedModel(retryHandle);
+            for (auto& inst : instances) {
+                if (inst.handle != failedHandle || inst.model) continue;
+                inst.handle = retryHandle;
+                inst.gpu = 0;
+                ++retried;
+            }
+            if (placement.active && placement.handle == failedHandle && !placement.model) {
+                placement.handle = retryHandle;
+                placement.gpu = 0;
+                placement.status = "Retrying preview load · Esc cancels";
+            }
+        }
+        sceneStatus = retried == 0
+            ? "Could not queue a retry; failed scene objects remain in place"
+            : "Retrying failed asset loads for " + std::to_string(retried) + " scene object(s)";
     }
 
     void AttachCachedModel(Instance& inst) {
@@ -1249,6 +1295,14 @@ void Editor::DrawScene() {
     }
     if (ImGui::Button("Browse scenes")) OpenSceneBrowser();
     if (ImGui::Button("Add group")) AddGroup();
+    const auto failedAssets = FailedSceneAssetHandles();
+    if (!failedAssets.empty()) {
+        ImGui::SameLine();
+        const std::string retryLabel = "Retry failed assets (" + std::to_string(failedAssets.size()) + ")";
+        if (ImGui::Button(retryLabel.c_str())) RetryFailedSceneAssets();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("After mounting or correcting assets, retry failed scene model loads. Ready models are reused.");
+    }
     if (const scene::Node* selected = FindNode(selectedNode)) {
         const std::string selectedId = selected->id;
         const std::string selectedName = selected->name;

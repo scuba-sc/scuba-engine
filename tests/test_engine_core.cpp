@@ -392,6 +392,55 @@ void TestLoader() {
         CHECK(loader.Request("models/broken.glb") != broken);   // failures are retried
         jobs.WaitIdle();
     }
+
+    // A scene node survives a missing-file failure. Once the asset is mounted, retrying the old
+    // failed handle starts one shared request; repeated retries and ordinary requests reuse it.
+    vfs::VirtualFileSystem lateVfs;
+    JobSystem lateJobs(2);
+    scene::Document retainedScene;
+    retainedScene.id = "retry-scene";
+    retainedScene.name = "Retry scene";
+    scene::Node missingModel;
+    missingModel.id = "node-retry";
+    missingModel.name = "Recoverable model";
+    missingModel.kind = scene::NodeKind::ModelInstance;
+    missingModel.assetPath = "models/recover.glb";
+    retainedScene.nodes.push_back(missingModel);
+    CHECK(scene::Validate(retainedScene).ok());
+    const auto retainedSnapshot = retainedScene;
+    asset::ModelLoader retryLoader(lateVfs, lateJobs);
+    const auto failedHandle = retryLoader.Request(missingModel.assetPath, JobPriority::High);
+    lateJobs.WaitIdle();
+    CHECK(retryLoader.Info(failedHandle).state == asset::LoadState::Failed);
+    CHECK(!retryLoader.Get(failedHandle));
+    const auto secondFailedHandle = retryLoader.Request(missingModel.assetPath, JobPriority::High);
+    CHECK(secondFailedHandle != failedHandle);
+    lateJobs.WaitIdle();
+    const auto failedCompletions = retryLoader.TakeCompleted();
+    CHECK(failedCompletions.size() == 2);
+    CHECK(std::find(failedCompletions.begin(), failedCompletions.end(), failedHandle) != failedCompletions.end());
+    CHECK(std::find(failedCompletions.begin(), failedCompletions.end(), secondFailedHandle) != failedCompletions.end());
+    CHECK(retainedScene == retainedSnapshot && retainedScene.nodes[0].assetPath == missingModel.assetPath);
+    CHECK(retryLoader.Retry(999999) == 0);  // unknown handles cannot create stray requests
+
+    Status lateMountStatus;
+    const auto recoverableGlb = assets::MakeGlb({Triangle()});
+    CHECK(lateVfs.Mount(vfs::MemoryFileSystem({{missingModel.assetPath, recoverableGlb}}),
+                         {"", 0, "late-assets"}, &lateMountStatus) != 0 && lateMountStatus.ok());
+    const auto recoveredHandle = retryLoader.Retry(failedHandle, JobPriority::High);
+    CHECK(recoveredHandle != 0 && recoveredHandle != failedHandle);
+    CHECK(retryLoader.Retry(failedHandle, JobPriority::High) == recoveredHandle);
+    CHECK(retryLoader.Retry(secondFailedHandle, JobPriority::High) == recoveredHandle);
+    CHECK(retryLoader.Request(missingModel.assetPath, JobPriority::High) == recoveredHandle);
+    lateJobs.WaitIdle();
+    CHECK(retryLoader.Info(failedHandle).state == asset::LoadState::Failed);
+    CHECK(retryLoader.Info(recoveredHandle).state == asset::LoadState::Ready);
+    const auto recoveredModel = retryLoader.Get(recoveredHandle);
+    CHECK(recoveredModel && recoveredModel->triangleCount() == 1);
+    CHECK(retryLoader.TakeCompleted() == std::vector<asset::ModelHandle>{recoveredHandle});
+    CHECK(retryLoader.Retry(recoveredHandle, JobPriority::High) == recoveredHandle);
+    CHECK(retryLoader.Get(recoveredHandle) == recoveredModel);
+    CHECK(retainedScene == retainedSnapshot);
 }
 
 void TestPicking() {
