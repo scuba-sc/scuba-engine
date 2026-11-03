@@ -565,6 +565,20 @@ Status ScaleUniform(LocalTransform& transform, float factor) {
     return Status::Ok();
 }
 
+Status SetLocalScaleAxis(LocalTransform& transform, size_t axis, float value) {
+    if (axis >= 3) return Fail("local scale axis index is out of range");
+    if (!std::isfinite(value) || value < kMinScale || value > kMaxScale)
+        return Fail("local scale must be finite, positive, and within the scene limits");
+    const float original[] = {transform.scale.x, transform.scale.y, transform.scale.z};
+    for (const float component : original)
+        if (!std::isfinite(component) || component < kMinScale || component > kMaxScale)
+            return Fail("axis scale requires valid positive local scale");
+    float result[] = {original[0], original[1], original[2]};
+    result[axis] = value;
+    transform.scale = {result[0], result[1], result[2]};
+    return Status::Ok();
+}
+
 Status Serialize(const Document& document, std::string& json) {
     if (auto status = Validate(document); !status) return status;
     Json root = Json::MakeObject();

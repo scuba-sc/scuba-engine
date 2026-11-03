@@ -36,4 +36,14 @@ bool AxisTranslationFromParameter(Float3 startWorldPosition, Float3 unitAxis,
                                   float startParameter, float currentParameter,
                                   Float3& worldPosition);
 
+// Transforms a direction (translation is ignored) and normalizes it. Used to draw local-space
+// scale axes through a rotated or nonuniformly scaled parent transform.
+bool NormalizeTransformedDirection(Float3 direction, const Float4x4& matrix,
+                                   Float3& normalizedDirection);
+
+// Maps one complete projected gizmo span to one local scale unit. The caller applies document
+// scale limits transactionally after this input-space calculation.
+bool AxisScaleFromParameter(float startScale, float startParameter, float currentParameter,
+                            float handleWorldLength, float& localScale);
+
 }  // namespace scuba::render

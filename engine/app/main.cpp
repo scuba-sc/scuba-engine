@@ -223,10 +223,12 @@ struct Instance {
     uint64_t autoPlaceHistoryRevision = 0;
 };
 
-struct TranslationGizmoGeometry {
+struct TransformGizmoGeometry {
     render::ScreenPoint center;
+    std::array<render::Float3, 3> directions;
     std::array<render::ScreenSegment, 3> axes;
     std::array<render::ScreenSegment, 3> hitHandles;
+    float worldLength = 0;
 };
 
 struct Placement {
@@ -304,9 +306,10 @@ struct Editor {
     std::string inspectorRotationNode;
     bool inspectorRotationInitialized = false;
     bool inspectorRotationActive = false;
-    bool translationGizmoDragging = false;
-    bool translationGizmoGestureActive = false;
-    int translationGizmoAxis = -1;
+    bool transformGizmoDragging = false;
+    bool transformGizmoGestureActive = false;
+    bool scaleGizmoMode = false;
+    int transformGizmoAxis = -1;
     char renameBuffer[129] = "";  // scene node names are capped at 128 UTF-8 bytes
     std::string renameTarget;
     std::string renameSourceName;
@@ -472,16 +475,36 @@ struct Editor {
         return Status::Ok();
     }
 
-    bool BuildTranslationGizmoGeometry(TranslationGizmoGeometry& geometry) const {
+    bool BuildGizmoGeometry(TransformGizmoGeometry& geometry) const {
         if (selectedNode.empty()) return false;
+        const auto* node = FindNode(selectedNode);
         const auto* world = World(selectedNode);
-        if (!world) return false;
+        if (!node || !world) return false;
         const auto viewport = ui.viewport();
         if (viewport.w <= 1 || viewport.h <= 1) return false;
         const auto origin = TransformPoint({0, 0, 0}, *world);
         const auto view = camera.View();
         const auto projection = camera.Projection(viewport.w / viewport.h);
         if (!render::ProjectPoint(origin, view, projection, viewport, geometry.center)) return false;
+
+        constexpr render::Float3 worldAxes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+        if (scaleGizmoMode) {
+            render::Float4x4 localRotation;
+            const auto& q = node->localTransform.rotation;
+            if (!render::AffineFromTrs({}, {q.x, q.y, q.z, q.w}, {1, 1, 1}, localRotation)) return false;
+            render::Float4x4 localAxesToWorld = localRotation;
+            if (node->parentId) {
+                const auto* parentWorld = World(*node->parentId);
+                if (!parentWorld) return false;
+                localAxesToWorld = render::Multiply(localRotation, *parentWorld);
+            }
+            for (size_t axis = 0; axis < 3; ++axis)
+                if (!render::NormalizeTransformedDirection(worldAxes[axis], localAxesToWorld,
+                                                          geometry.directions[axis]))
+                    return false;
+        } else {
+            for (size_t axis = 0; axis < 3; ++axis) geometry.directions[axis] = worldAxes[axis];
+        }
 
         const auto eye = camera.Eye();
         const float dx = origin.x - eye.x, dy = origin.y - eye.y, dz = origin.z - eye.z;
@@ -490,11 +513,13 @@ struct Editor {
         const float worldLength = std::clamp(
             2.0f * std::tan(camera.fovY * 0.5f) * cameraDistance * 90.0f / viewport.h,
             0.01f, 100000.0f);
-        constexpr render::Float3 directions[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+        if (!std::isfinite(worldLength) || worldLength <= 0) return false;
+        geometry.worldLength = worldLength;
         for (size_t axis = 0; axis < 3; ++axis) {
-            const render::Float3 endpoint{origin.x + directions[axis].x * worldLength,
-                                          origin.y + directions[axis].y * worldLength,
-                                          origin.z + directions[axis].z * worldLength};
+            const auto direction = geometry.directions[axis];
+            const render::Float3 endpoint{origin.x + direction.x * worldLength,
+                                          origin.y + direction.y * worldLength,
+                                          origin.z + direction.z * worldLength};
             render::ScreenPoint end;
             if (!render::ProjectPoint(endpoint, view, projection, viewport, end)) {
                 geometry.axes[axis] = {geometry.center, geometry.center};
@@ -1081,7 +1106,7 @@ public:
     const char* Name() const override { return "ui"; }
     ui::Reply OnInput(const ui::InputEvent& ev) override {
         if (ev.kind == ui::InputKind::KeyDown) {
-            if ((e_.placement.active || e_.translationGizmoGestureActive) &&
+            if ((e_.placement.active || e_.transformGizmoGestureActive) &&
                 ev.key == ImGuiKey_Escape)
                 return ui::Reply::Unhandled();
             return e_.ui.keyboardToUi() ? ui::Reply::Handled() : ui::Reply::Unhandled();
@@ -1122,19 +1147,19 @@ private:
     Editor& e_;
 };
 
-// Drag an axis handle to translate the selected node along that world axis. The move is converted
-// back through the parent's inverse matrix, so child nodes keep the same local/world semantics.
-class AxisTranslateTool final : public ui::InputLayer {
+// Drag a move or local-scale axis handle. Translation converts through the parent inverse; scale
+// edits one bounded local TRS component and draws axes through the parent's complete affine frame.
+class AxisTransformTool final : public ui::InputLayer {
 public:
-    explicit AxisTranslateTool(Editor& editor) : editor_(editor) {}
-    const char* Name() const override { return "translate-gizmo"; }
+    explicit AxisTransformTool(Editor& editor) : editor_(editor) {}
+    const char* Name() const override { return "transform-gizmo"; }
 
     ui::Reply OnInput(const ui::InputEvent& event) override {
         if (event.kind == ui::InputKind::PointerCancel) {
             const bool keptPartialEdit = dragging_ && undoCaptured_;
             ResetGesture();
             if (keptPartialEdit)
-                editor_.sceneStatus = "Axis drag interrupted; current position kept · undo available";
+                editor_.sceneStatus = "Transform drag interrupted; last valid edit kept · undo available";
             return ui::Reply::Handled();
         }
         if (event.kind == ui::InputKind::KeyDown && gestureCaptured_) {
@@ -1142,7 +1167,7 @@ public:
                 CancelGesture();
                 return ui::Reply::Release();
             }
-            editor_.sceneStatus = "Finish or cancel the active axis drag before using editor shortcuts";
+            editor_.sceneStatus = "Finish or cancel the active transform drag before using editor shortcuts";
             return ui::Reply::Handled();
         }
         if (event.kind == ui::InputKind::PointerUp && event.button == ui::PointerButton::Left) {
@@ -1152,25 +1177,29 @@ public:
         }
         if (event.kind == ui::InputKind::PointerDown && event.button == ui::PointerButton::Left) {
             if (event.ctrl) return ui::Reply::Unhandled();  // Keep Ctrl+drag's legacy ground-plane move.
-            TranslationGizmoGeometry geometry;
-            if (!editor_.BuildTranslationGizmoGeometry(geometry)) return ui::Reply::Unhandled();
+            TransformGizmoGeometry geometry;
+            if (!editor_.BuildGizmoGeometry(geometry)) return ui::Reply::Unhandled();
             const int axisIndex = render::HitTestScreenSegments(event.x, event.y, geometry.hitHandles);
             if (axisIndex < 0) return ui::Reply::Unhandled();
             const scene::Node* selected = editor_.FindNode(editor_.selectedNode);
             const auto* world = selected ? editor_.World(selected->id) : nullptr;
             if (!selected || !world) return ui::Reply::Unhandled();
             gestureCaptured_ = true;
-            editor_.translationGizmoGestureActive = true;
+            editor_.transformGizmoGestureActive = true;
+            scaleMode_ = editor_.scaleGizmoMode;
+            axisIndex_ = axisIndex;
 
-            constexpr render::Float3 kWorldAxes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-            axis_ = kWorldAxes[axisIndex];
+            axis_ = geometry.directions[axisIndex];
+            scaleHandleWorldLength_ = geometry.worldLength;
+            startScale_ = axisIndex == 0 ? selected->localTransform.scale.x :
+                          axisIndex == 1 ? selected->localTransform.scale.y : selected->localTransform.scale.z;
             startWorldPosition_ = TransformPoint({0, 0, 0}, *world);
             const auto startRay = editor_.camera.ScreenRay(event.x, event.y, editor_.ui.viewport());
             if (!render::ClosestRayAxisParameter(startRay, startWorldPosition_, axis_, startParameter_)) {
-                editor_.sceneStatus = "Axis translation unavailable from this view direction";
+                editor_.sceneStatus = "Transform axis unavailable from this view direction";
                 return ui::Reply::Capture();
             }
-            if (selected->parentId) {
+            if (!scaleMode_ && selected->parentId) {
                 const auto* parentWorld = editor_.World(*selected->parentId);
                 if (!parentWorld || !render::InvertAffine(*parentWorld, parentInverse_)) {
                     editor_.sceneStatus = "Axis translation unavailable: parent transform cannot be inverted";
@@ -1182,34 +1211,48 @@ public:
             draggedNode_ = selected->id;
             undoCaptured_ = false;
             dragging_ = true;
-            editor_.translationGizmoDragging = true;
-            editor_.translationGizmoAxis = axisIndex;
+            editor_.transformGizmoDragging = true;
+            editor_.transformGizmoAxis = axisIndex;
             return ui::Reply::Capture();
         }
         if (event.kind == ui::InputKind::PointerMove && dragging_ && event.leftHeld) {
             if (undoCaptured_ && editor_.historyRevision != dragHistoryRevision_) {
-                editor_.sceneStatus = "Axis drag stopped because another scene edit completed; current position kept";
+                editor_.sceneStatus = "Transform drag stopped because another scene edit completed; current position kept";
                 ResetGesture();
                 return ui::Reply::Release();
             }
             if (!editor_.FindNode(draggedNode_)) return ui::Reply::Handled();
             const auto ray = editor_.camera.ScreenRay(event.x, event.y, editor_.ui.viewport());
             float currentParameter = 0;
-            render::Float3 desiredWorld;
-            if (!render::ClosestRayAxisParameter(ray, startWorldPosition_, axis_, currentParameter) ||
-                !render::AxisTranslationFromParameter(startWorldPosition_, axis_, startParameter_,
-                                                      currentParameter, desiredWorld))
-                return ui::Reply::Handled();
-            const auto localTranslation = TransformPoint(desiredWorld, parentInverse_);
-            if (!std::isfinite(localTranslation.x) || !std::isfinite(localTranslation.y) ||
-                !std::isfinite(localTranslation.z))
+            if (!render::ClosestRayAxisParameter(ray, startWorldPosition_, axis_, currentParameter))
                 return ui::Reply::Handled();
             scene::Document candidate = editor_.document;
             const auto node = std::find_if(candidate.nodes.begin(), candidate.nodes.end(), [&](const auto& item) {
                 return item.id == draggedNode_;
             });
             if (node == candidate.nodes.end()) return ui::Reply::Handled();
-            node->localTransform.translation = {localTranslation.x, localTranslation.y, localTranslation.z};
+            if (scaleMode_) {
+                if (!std::isfinite(scaleHandleWorldLength_) || scaleHandleWorldLength_ <= 0) return ui::Reply::Handled();
+                float desiredScale = 0;
+                if (!render::AxisScaleFromParameter(startScale_, startParameter_, currentParameter,
+                                                    scaleHandleWorldLength_, desiredScale))
+                    return ui::Reply::Handled();
+                if (auto status = scene::SetLocalScaleAxis(node->localTransform,
+                                                           static_cast<size_t>(axisIndex_), desiredScale); !status) {
+                    editor_.sceneStatus = "Scale refused: " + status.error;
+                    return ui::Reply::Handled();
+                }
+            } else {
+                render::Float3 desiredWorld;
+                if (!render::AxisTranslationFromParameter(startWorldPosition_, axis_, startParameter_,
+                                                          currentParameter, desiredWorld))
+                    return ui::Reply::Handled();
+                const auto localTranslation = TransformPoint(desiredWorld, parentInverse_);
+                if (!std::isfinite(localTranslation.x) || !std::isfinite(localTranslation.y) ||
+                    !std::isfinite(localTranslation.z))
+                    return ui::Reply::Handled();
+                node->localTransform.translation = {localTranslation.x, localTranslation.y, localTranslation.z};
+            }
             if (!undoCaptured_) historyBeforeDocument_ = editor_.document;
             editor_.CommitInteractiveDocument(std::move(candidate), undoCaptured_);
             if (undoCaptured_) dragHistoryRevision_ = editor_.historyRevision;
@@ -1226,16 +1269,18 @@ private:
         draggedNode_.clear();
         historyBeforeDocument_ = {};
         dragHistoryRevision_ = 0;
-        editor_.translationGizmoDragging = false;
-        editor_.translationGizmoGestureActive = false;
-        editor_.translationGizmoAxis = -1;
+        scaleMode_ = false;
+        axisIndex_ = -1;
+        editor_.transformGizmoDragging = false;
+        editor_.transformGizmoGestureActive = false;
+        editor_.transformGizmoAxis = -1;
     }
 
     void CancelGesture() {
         if (dragging_ && undoCaptured_) {
             scene::Document restored;
             if (auto status = editor_.sceneHistory.CancelLatestChange(historyBeforeDocument_, restored); !status) {
-                editor_.sceneStatus = "Axis drag could not be canceled safely: " + status.error +
+                editor_.sceneStatus = "Transform drag could not be canceled safely: " + status.error +
                                       "; current position kept";
                 ResetGesture();
                 return;
@@ -1243,7 +1288,7 @@ private:
             editor_.inspectorUndoCaptured = false;
             editor_.inspectorUndoNode.clear();
             if (auto status = editor_.InstallDocument(std::move(restored)); !status) {
-                editor_.sceneStatus = "Axis drag cancel could not restore its starting scene: " + status.error;
+                editor_.sceneStatus = "Transform drag cancel could not restore its starting scene: " + status.error;
                 ResetGesture();
                 return;
             }
@@ -1253,7 +1298,7 @@ private:
             return;
         }
         ResetGesture();
-        editor_.sceneStatus = "Axis drag canceled";
+        editor_.sceneStatus = "Transform drag canceled";
     }
 
     Editor& editor_;
@@ -1264,6 +1309,10 @@ private:
     std::string draggedNode_;
     scene::Document historyBeforeDocument_;
     uint64_t dragHistoryRevision_ = 0;
+    float startScale_ = 1;
+    float scaleHandleWorldLength_ = 0;
+    int axisIndex_ = -1;
+    bool scaleMode_ = false;
     bool gestureCaptured_ = false;
     bool dragging_ = false;
     bool undoCaptured_ = false;
@@ -1493,6 +1542,13 @@ void Editor::DrawScene() {
     if (!ImGui::Begin("Scene", &showScene)) { ImGui::End(); return; }
     if (projectStore) ImGui::TextWrapped("Project: %s  ·  scene: %s", projectRoot.generic_string().c_str(), document.id.c_str());
     else ImGui::TextDisabled("In-memory scene · pass --project DIR to save");
+    ImGui::SeparatorText("Viewport gizmo");
+    if (ImGui::RadioButton("Move axes", !scaleGizmoMode)) scaleGizmoMode = false;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Scale axes", scaleGizmoMode)) scaleGizmoMode = true;
+    if (scaleGizmoMode)
+        ImGui::TextDisabled("Scale follows local axes through the parent transform; "
+                            "only positive scale is supported.");
     ImGui::BeginDisabled(!sceneHistory.CanUndo());
     if (ImGui::Button("Undo")) UndoScene();
     ImGui::EndDisabled();
@@ -2045,8 +2101,8 @@ void Editor::DrawUi(bool& quit) {
 }
 
 void Editor::DrawTransformGizmo() const {
-    TranslationGizmoGeometry geometry;
-    if (!BuildTranslationGizmoGeometry(geometry)) return;
+    TransformGizmoGeometry geometry;
+    if (!BuildGizmoGeometry(geometry)) return;
     const auto viewport = ui.viewport();
     ImDrawList* draw = ImGui::GetForegroundDrawList();
     draw->PushClipRect({viewport.x, viewport.y}, {viewport.x + viewport.w, viewport.y + viewport.h}, true);
@@ -2065,11 +2121,17 @@ void Editor::DrawTransformGizmo() const {
         const float headWidth = std::min(5.0f, length * 0.12f);
         const ImVec2 tip{segment.end.x, segment.end.y};
         const ImVec2 headBase{segment.end.x - ux * headLength, segment.end.y - uy * headLength};
-        const ImU32 color = translationGizmoDragging && translationGizmoAxis == static_cast<int>(axis)
+        const ImU32 color = transformGizmoDragging && transformGizmoAxis == static_cast<int>(axis)
             ? IM_COL32(255, 236, 128, 255) : colors[axis];
         draw->AddLine({segment.start.x, segment.start.y}, tip, color, 3.0f);
-        draw->AddLine(tip, {headBase.x + px * headWidth, headBase.y + py * headWidth}, color, 3.0f);
-        draw->AddLine(tip, {headBase.x - px * headWidth, headBase.y - py * headWidth}, color, 3.0f);
+        if (scaleGizmoMode) {
+            draw->AddRectFilled({tip.x - 5.0f, tip.y - 5.0f}, {tip.x + 5.0f, tip.y + 5.0f}, color);
+            draw->AddRect({tip.x - 5.0f, tip.y - 5.0f}, {tip.x + 5.0f, tip.y + 5.0f},
+                          IM_COL32(25, 28, 34, 255), 0.0f, 1.5f, 0);
+        } else {
+            draw->AddLine(tip, {headBase.x + px * headWidth, headBase.y + py * headWidth}, color, 3.0f);
+            draw->AddLine(tip, {headBase.x - px * headWidth, headBase.y - py * headWidth}, color, 3.0f);
+        }
         draw->AddText({segment.end.x + 5.0f, segment.end.y - 7.0f}, color, labels[axis]);
     }
     draw->AddCircleFilled({geometry.center.x, geometry.center.y}, 5.0f, IM_COL32(28, 31, 38, 255));
@@ -2230,13 +2292,13 @@ int Run(const Args& args) {
 
     UiBlocker blocker(ed);
     PlacementTool placementTool(ed);
-    AxisTranslateTool axisTranslateTool(ed);
+    AxisTransformTool axisTransformTool(ed);
     MoveTool move(ed);
     CameraTool cameraTool(ed);
     ui::InputRouter router;
     router.Add(&blocker);
     router.Add(&placementTool);
-    router.Add(&axisTranslateTool);
+    router.Add(&axisTransformTool);
     router.Add(&move);
     router.Add(&cameraTool);
 

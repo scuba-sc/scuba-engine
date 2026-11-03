@@ -610,6 +610,21 @@ void TestTransformGizmoMath() {
     float recoveredAxisParameter = 0;
     CHECK(render::ClosestRayAxisParameter(axisRay, {0, 0, 0}, {1, 0, 0}, recoveredAxisParameter));
     CHECK(std::fabs(recoveredAxisParameter - pointOnAxis.x) < 1e-3f);
+
+    float scaledAxisValue = -7;
+    CHECK(render::AxisScaleFromParameter(1.25f, 3.0f, 93.0f, 90.0f, scaledAxisValue));
+    CHECK(std::fabs(scaledAxisValue - 2.25f) < 1e-5f);
+    CHECK(render::AxisScaleFromParameter(1.25f, 3.0f, -87.0f, 90.0f, scaledAxisValue));
+    CHECK(std::fabs(scaledAxisValue - 0.25f) < 1e-5f);
+    scaledAxisValue = 17;
+    CHECK(!render::AxisScaleFromParameter(1.25f, 3.0f, 93.0f, 0.0f, scaledAxisValue));
+    CHECK(scaledAxisValue == 17);
+    render::Float4x4 collapsedFrame;
+    for (auto& row : collapsedFrame.m)
+        for (float& value : row) value = 0;
+    render::Float3 unchangedDirection{7, 8, 9};
+    CHECK(!render::NormalizeTransformedDirection({1, 0, 0}, collapsedFrame, unchangedDirection));
+    CHECK(unchangedDirection.x == 7 && unchangedDirection.y == 8 && unchangedDirection.z == 9);
 }
 
 scene::Document SceneFixture() {
@@ -691,6 +706,111 @@ void TestSceneDocument(const fs::path& root) {
     const auto maxScaleBefore = maxScaleTransform;
     CHECK(!scene::ScaleUniform(maxScaleTransform, 2).ok());
     CHECK(maxScaleTransform == maxScaleBefore);
+
+    auto axisScale = document.nodes[2].localTransform;
+    const auto axisScaleOriginal = axisScale;
+    CHECK(scene::SetLocalScaleAxis(axisScale, 1, 1.25f).ok());
+    CHECK(axisScale.scale.x == axisScaleOriginal.scale.x && axisScale.scale.y == 1.25f &&
+          axisScale.scale.z == axisScaleOriginal.scale.z);
+    const auto axisScaleBeforeRefusal = axisScale;
+    CHECK(!scene::SetLocalScaleAxis(axisScale, 0, -0.25f).ok());
+    CHECK(axisScale == axisScaleBeforeRefusal);
+    CHECK(!scene::SetLocalScaleAxis(axisScale, 0, 1000001.0f).ok());
+    CHECK(axisScale == axisScaleBeforeRefusal);
+    CHECK(!scene::SetLocalScaleAxis(axisScale, 0, std::numeric_limits<float>::quiet_NaN()).ok());
+    CHECK(axisScale == axisScaleBeforeRefusal);
+    CHECK(!scene::SetLocalScaleAxis(axisScale, 3, 2.0f).ok());
+    CHECK(axisScale == axisScaleBeforeRefusal);
+    auto invalidAxisScale = axisScaleBeforeRefusal;
+    invalidAxisScale.scale.z = -1.0f;
+    const auto invalidAxisScaleBefore = invalidAxisScale;
+    CHECK(!scene::SetLocalScaleAxis(invalidAxisScale, 0, 2.0f).ok());
+    CHECK(invalidAxisScale == invalidAxisScaleBefore);
+    CHECK(scene::SetLocalScaleAxis(axisScale, 0, 0.000001f).ok());
+    CHECK(scene::SetLocalScaleAxis(axisScale, 0, 1000000.0f).ok());
+
+    const auto scaleDragBaseline = document;
+    auto scaleDragDocument = scaleDragBaseline;
+    const float scaleDragStart = scaleDragDocument.nodes[2].localTransform.scale.z;
+    scene::DocumentHistory scaleDragHistory;
+    bool scaleDragUndoCaptured = false;
+    for (const float amount : {0.25f, 0.5f, 0.75f}) {
+        auto candidate = scaleDragDocument;
+        CHECK(scene::SetLocalScaleAxis(candidate.nodes[2].localTransform, 2,
+                                       scaleDragStart + amount).ok());
+        if (!scaleDragUndoCaptured) {
+            CHECK(scaleDragHistory.RecordBefore(scaleDragDocument).ok());
+            scaleDragUndoCaptured = true;
+        }
+        scaleDragDocument = std::move(candidate);
+        std::vector<scene::ResolvedTransform> scaleDragWorld;
+        CHECK(scene::ResolveWorldTransforms(scaleDragDocument, scaleDragWorld).ok());
+    }
+    CHECK(scaleDragHistory.retainedEntries() == 1);
+    scene::Document scaleDragRestored;
+    CHECK(scaleDragHistory.Undo(scaleDragDocument, scaleDragRestored).ok());
+    CHECK(scaleDragRestored == scaleDragBaseline);
+    scene::Document scaleDragRedone;
+    CHECK(scaleDragHistory.Redo(scaleDragRestored, scaleDragRedone).ok());
+    CHECK(scaleDragRedone == scaleDragDocument);
+
+    auto scaledHierarchy = document;
+    std::vector<scene::ResolvedTransform> scaleWorldBefore;
+    CHECK(scene::ResolveWorldTransforms(scaledHierarchy, scaleWorldBefore).ok());
+    const auto scaleParent = std::find_if(scaleWorldBefore.begin(), scaleWorldBefore.end(), [](const auto& item) {
+        return item.nodeId == "bay-a";
+    });
+    const auto scaleChild = std::find_if(scaleWorldBefore.begin(), scaleWorldBefore.end(), [](const auto& item) {
+        return item.nodeId == "ship-01";
+    });
+    CHECK(scaleParent != scaleWorldBefore.end() && scaleChild != scaleWorldBefore.end());
+    if (scaleParent != scaleWorldBefore.end() && scaleChild != scaleWorldBefore.end()) {
+        render::Float4x4 childRotation;
+        const auto& child = scaledHierarchy.nodes[2];
+        CHECK(render::AffineFromTrs({}, {child.localTransform.rotation.x, child.localTransform.rotation.y,
+                                         child.localTransform.rotation.z, child.localTransform.rotation.w},
+                                    {1, 1, 1}, childRotation));
+        const auto localScaleFrame = render::Multiply(childRotation, scaleParent->world);
+        render::Float3 scaleXAxis, scaleYAxis;
+        CHECK(render::NormalizeTransformedDirection({1, 0, 0}, localScaleFrame, scaleXAxis));
+        CHECK(render::NormalizeTransformedDirection({0, 1, 0}, localScaleFrame, scaleYAxis));
+        CHECK(std::fabs(std::sqrt(scaleXAxis.x * scaleXAxis.x + scaleXAxis.y * scaleXAxis.y +
+                                  scaleXAxis.z * scaleXAxis.z) - 1.0f) < 1e-5f);
+        const float axisDot = scaleXAxis.x * scaleYAxis.x + scaleXAxis.y * scaleYAxis.y +
+                              scaleXAxis.z * scaleYAxis.z;
+        CHECK(std::fabs(axisDot) > 0.1f);  // a rotated child under a nonuniform parent has sheared axes
+        const auto scaleFrameOrigin = ApplyPoint({0, 0, 0}, localScaleFrame);
+        const auto scaleFrameXAxis = ApplyPoint({1, 0, 0}, localScaleFrame);
+        const render::Float3 rawScaleAxis{scaleFrameXAxis.x - scaleFrameOrigin.x,
+                                          scaleFrameXAxis.y - scaleFrameOrigin.y,
+                                          scaleFrameXAxis.z - scaleFrameOrigin.z};
+        const auto beforePoint = ApplyPoint({2, 0, 0}, scaleChild->world);
+        auto scaleNode = std::find_if(scaledHierarchy.nodes.begin(), scaledHierarchy.nodes.end(), [](const auto& item) {
+            return item.id == "ship-01";
+        });
+        CHECK(scaleNode != scaledHierarchy.nodes.end());
+        if (scaleNode != scaledHierarchy.nodes.end()) {
+            const float originalLocalScale = scaleNode->localTransform.scale.x;
+            CHECK(scene::SetLocalScaleAxis(scaleNode->localTransform, 0, originalLocalScale + 0.5f).ok());
+            std::vector<scene::ResolvedTransform> scaleWorldAfter;
+            CHECK(scene::ResolveWorldTransforms(scaledHierarchy, scaleWorldAfter).ok());
+            const auto changedChild = std::find_if(scaleWorldAfter.begin(), scaleWorldAfter.end(), [](const auto& item) {
+                return item.nodeId == "ship-01";
+            });
+            CHECK(changedChild != scaleWorldAfter.end());
+            if (changedChild != scaleWorldAfter.end()) {
+                const auto afterPoint = ApplyPoint({2, 0, 0}, changedChild->world);
+                CHECK(std::fabs((afterPoint.x - beforePoint.x) - rawScaleAxis.x) < 1e-4f &&
+                      std::fabs((afterPoint.y - beforePoint.y) - rawScaleAxis.y) < 1e-4f &&
+                      std::fabs((afterPoint.z - beforePoint.z) - rawScaleAxis.z) < 1e-4f);
+                CHECK(scaleNode->localTransform.scale.y == child.localTransform.scale.y &&
+                      scaleNode->localTransform.scale.z == child.localTransform.scale.z);
+            }
+        }
+    }
+    auto mirroredHierarchy = document;
+    mirroredHierarchy.nodes[1].localTransform.scale.x = -2.0f;
+    CHECK(!scene::Validate(mirroredHierarchy).ok());
 
     std::vector<scene::ResolvedTransform> resolved;
     CHECK(scene::ResolveWorldTransforms(document, resolved).ok());
@@ -1129,10 +1249,10 @@ void TestSceneDocument(const fs::path& root) {
     scene::DocumentHistory cancelHistory;
     CHECK(cancelHistory.RecordBefore(historyBase).ok());
     auto cancelIntermediate = historyBase;
-    cancelIntermediate.nodes[2].localTransform.translation.y += 1.0f;
+    cancelIntermediate.nodes[2].localTransform.scale.y += 0.1f;
     CHECK(cancelHistory.RecordBefore(cancelIntermediate).ok());
     auto canceledDragDocument = cancelIntermediate;
-    canceledDragDocument.nodes[2].localTransform.translation.x += 4.0f;
+    canceledDragDocument.nodes[2].localTransform.scale.x += 0.5f;
     CHECK(canceledDragDocument != cancelIntermediate);
     auto wrongCancelBaseline = historyBase;
     wrongCancelBaseline.name = "a different transaction";

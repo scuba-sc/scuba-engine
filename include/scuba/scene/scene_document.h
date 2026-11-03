@@ -89,6 +89,8 @@ Status QuaternionToEulerXYZDegrees(Quaternion rotation, Vec3& degrees);
 // Multiplies all local scale axes by one positive factor, preserving their ratios. Refuses invalid
 // or out-of-range results without changing the transform.
 Status ScaleUniform(LocalTransform& transform, float factor);
+// Sets one positive, bounded local scale component. Other components are left unchanged.
+Status SetLocalScaleAxis(LocalTransform& transform, size_t axis, float value);
 // Places a unit-rotation/unit-scale model so its transformed bounds rest on world Z=0 at the
 // requested world XY. An optional resolved parent transform is respected; outputs remain unchanged
 // on failure. The caller validates that the parent is an allowed group node.

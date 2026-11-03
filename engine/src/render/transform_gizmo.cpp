@@ -135,4 +135,37 @@ bool AxisTranslationFromParameter(Float3 startWorldPosition, Float3 unitAxis,
     return true;
 }
 
+bool NormalizeTransformedDirection(Float3 direction, const Float4x4& matrix,
+                                   Float3& normalizedDirection) {
+    if (!Finite(direction)) return false;
+    for (const auto& row : matrix.m)
+        for (const float value : row)
+            if (!std::isfinite(value)) return false;
+    const Float3 transformed{
+        static_cast<float>(static_cast<double>(direction.x) * matrix.m[0][0] +
+                           static_cast<double>(direction.y) * matrix.m[1][0] +
+                           static_cast<double>(direction.z) * matrix.m[2][0]),
+        static_cast<float>(static_cast<double>(direction.x) * matrix.m[0][1] +
+                           static_cast<double>(direction.y) * matrix.m[1][1] +
+                           static_cast<double>(direction.z) * matrix.m[2][1]),
+        static_cast<float>(static_cast<double>(direction.x) * matrix.m[0][2] +
+                           static_cast<double>(direction.y) * matrix.m[1][2] +
+                           static_cast<double>(direction.z) * matrix.m[2][2]),
+    };
+    return Normalize(transformed, normalizedDirection);
+}
+
+bool AxisScaleFromParameter(float startScale, float startParameter, float currentParameter,
+                            float handleWorldLength, float& localScale) {
+    if (!std::isfinite(startScale) || !std::isfinite(startParameter) ||
+        !std::isfinite(currentParameter) || !std::isfinite(handleWorldLength) ||
+        handleWorldLength <= 0)
+        return false;
+    const double candidate = static_cast<double>(startScale) +
+                             (static_cast<double>(currentParameter) - startParameter) / handleWorldLength;
+    if (!std::isfinite(candidate) || std::fabs(candidate) > std::numeric_limits<float>::max()) return false;
+    localScale = static_cast<float>(candidate);
+    return std::isfinite(localScale);
+}
+
 }  // namespace scuba::render
