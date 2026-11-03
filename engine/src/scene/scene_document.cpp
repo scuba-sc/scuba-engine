@@ -912,6 +912,50 @@ Status ProjectStore::Load(std::string_view sceneId, Document& document) const {
     return Status::Ok();
 }
 
+Status DocumentDirtyState::SetBaseline(const Document& document, bool exists) {
+    if (!exists) {
+        baseline_.reset();
+        dirty_ = true;
+        return Status::Ok();
+    }
+    baseline_.reset();
+    dirty_ = true;
+    std::string saved;
+    if (auto status = Serialize(document, saved); !status) return status;
+    baseline_ = std::move(saved);
+    dirty_ = false;
+    return Status::Ok();
+}
+
+Status DocumentDirtyState::Update(const Document& document) {
+    std::string current;
+    if (auto status = Serialize(document, current); !status) {
+        dirty_ = true;
+        return status;
+    }
+    dirty_ = !baseline_ || current != *baseline_;
+    return Status::Ok();
+}
+
+std::optional<SceneAction> SceneActionGate::Request(SceneAction action, bool dirty) {
+    pending_.reset();
+    if (!dirty) return action;
+    pending_ = std::move(action);
+    return std::nullopt;
+}
+
+std::optional<SceneAction> SceneActionGate::Resolve(SceneActionChoice choice, bool saveSucceeded) {
+    if (!pending_) return std::nullopt;
+    if (choice == SceneActionChoice::Cancel) {
+        pending_.reset();
+        return std::nullopt;
+    }
+    if (choice == SceneActionChoice::Save && !saveSucceeded) return std::nullopt;
+    auto action = std::move(pending_);
+    pending_.reset();
+    return action;
+}
+
 Status DocumentHistory::RecordBefore(const Document& document) {
     std::string snapshot;
     if (auto status = Serialize(document, snapshot); !status) return status;

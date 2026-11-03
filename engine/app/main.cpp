@@ -241,8 +241,6 @@ render::Float3 TransformPoint(render::Float3 point, const render::Float4x4& matr
 }
 
 struct Editor {
-    enum class PendingSceneAction : uint8_t { None, Open, Create, Quit };
-
     vfs::VirtualFileSystem vfs;
     JobSystem jobs;
     std::unique_ptr<asset::ModelLoader> loader;
@@ -278,9 +276,10 @@ struct Editor {
 
     scene::Document document;
     scene::DocumentHistory sceneHistory;
+    scene::DocumentDirtyState documentDirty;
+    scene::SceneActionGate sceneActionGate;
     std::optional<scene::ProjectStore> projectStore;
     fs::path projectRoot;
-    std::optional<std::string> savedDocument;
     std::vector<Instance> instances;
     std::unordered_map<std::string, render::Float4x4> worldByNode;
     uint32_t nextInstance = 1;
@@ -290,7 +289,6 @@ struct Editor {
     std::vector<asset::ModelHandle> requested;
     Placement placement;
     std::string selectedAssetPath;
-    bool sceneDirty = false;
     std::string sceneStatus;
     bool inspectorUndoCaptured = false;
     std::string inspectorUndoNode;
@@ -305,8 +303,6 @@ struct Editor {
     std::vector<std::string> projectScenes;
     std::string selectedProjectScene;
     std::string sceneBrowserStatus;
-    PendingSceneAction pendingSceneAction = PendingSceneAction::None;
-    std::string pendingSceneId;
     bool pendingSceneConfirmation = false;
     bool frameOnLoad = true;
 
@@ -452,28 +448,11 @@ struct Editor {
     }
 
     Status UpdateDirtyState() {
-        std::string current;
-        if (auto status = scene::Serialize(document, current); !status) {
-            sceneDirty = true;
-            return status;
-        }
-        sceneDirty = !savedDocument || current != *savedDocument;
-        return Status::Ok();
+        return documentDirty.Update(document);
     }
 
     Status SetSavedBaseline(bool exists) {
-        if (!exists) {
-            savedDocument.reset();
-            sceneDirty = true;
-            return Status::Ok();
-        }
-        savedDocument.reset();
-        sceneDirty = true;
-        std::string saved;
-        if (auto status = scene::Serialize(document, saved); !status) return status;
-        savedDocument = std::move(saved);
-        sceneDirty = false;
-        return Status::Ok();
+        return documentDirty.SetBaseline(document, exists);
     }
 
     void SetHistoryStatus(std::string_view action) {
@@ -481,19 +460,18 @@ struct Editor {
             sceneStatus = std::string(action) + " failed: " + status.error;
             return;
         }
-        sceneStatus = std::string(action) + (sceneDirty ? " · unsaved changes" : " · matches saved scene");
+        sceneStatus = std::string(action) + (documentDirty.dirty() ? " · unsaved changes" : " · matches saved scene");
     }
 
-    Status InstallDocument(scene::Document candidate, bool dirty, bool recordUndo = false) {
+    Status InstallDocument(scene::Document candidate, bool recordUndo = false) {
         std::unordered_map<std::string, render::Float4x4> worlds;
         if (auto status = ResolveDocument(candidate, worlds); !status) return status;
         if (recordUndo)
             if (auto status = sceneHistory.RecordBefore(document); !status) return status;
         document = std::move(candidate);
         worldByNode = std::move(worlds);
-        sceneDirty = dirty;
         RefreshInstances();
-        sceneStatus = dirty ? "Unsaved changes" : "Scene loaded";
+        sceneStatus = "Scene loaded";
         if (placement.active && placement.parentId && !FindNode(*placement.parentId))
             CancelPlacement("Placement canceled because its parent node was removed");
         return Status::Ok();
@@ -503,7 +481,7 @@ struct Editor {
         if (candidate == document) return Status::Ok();
         inspectorUndoCaptured = false;
         inspectorUndoNode.clear();
-        if (auto status = InstallDocument(std::move(candidate), true, true); !status) {
+        if (auto status = InstallDocument(std::move(candidate), true); !status) {
             sceneStatus = "Edit refused: " + status.error;
             return status;
         }
@@ -515,7 +493,7 @@ struct Editor {
     Status CommitInteractiveDocument(scene::Document candidate, bool& undoCaptured) {
         if (candidate == document) return Status::Ok();
         const bool startsTransaction = !undoCaptured;
-        if (auto status = InstallDocument(std::move(candidate), true, startsTransaction); !status) {
+        if (auto status = InstallDocument(std::move(candidate), startsTransaction); !status) {
             sceneStatus = "Edit refused: " + status.error;
             return status;
         }
@@ -534,7 +512,7 @@ struct Editor {
         }
         inspectorUndoCaptured = false;
         inspectorUndoNode.clear();
-        if (auto status = InstallDocument(std::move(restored), true); !status) {
+        if (auto status = InstallDocument(std::move(restored)); !status) {
             sceneStatus = "Undo could not install its saved scene: " + status.error;
             return;
         }
@@ -551,7 +529,7 @@ struct Editor {
         }
         inspectorUndoCaptured = false;
         inspectorUndoNode.clear();
-        if (auto status = InstallDocument(std::move(restored), true); !status) {
+        if (auto status = InstallDocument(std::move(restored)); !status) {
             sceneStatus = "Redo could not install its saved scene: " + status.error;
             return;
         }
@@ -623,20 +601,16 @@ struct Editor {
     void RequestOpenScene(std::string sceneId) {
         if (!projectStore) return;
         if (sceneId.empty() || sceneId == document.id) return;
-        pendingSceneAction = PendingSceneAction::Open;
-        pendingSceneId = std::move(sceneId);
-        if (sceneDirty) pendingSceneConfirmation = true;
-        else CompletePendingSceneAction();
+        auto action = sceneActionGate.Request({scene::SceneActionKind::Open, std::move(sceneId)},
+                                              documentDirty.dirty());
+        if (action) CompletePendingSceneAction(*action);
+        else pendingSceneConfirmation = true;
     }
 
     void RequestQuit(bool& quit) {
-        if (!sceneDirty) {
-            quit = true;
-            return;
-        }
-        pendingSceneAction = PendingSceneAction::Quit;
-        pendingSceneId.clear();
-        pendingSceneConfirmation = true;
+        auto action = sceneActionGate.Request({scene::SceneActionKind::Quit, {}}, documentDirty.dirty());
+        if (action) CompletePendingSceneAction(*action, &quit);
+        else pendingSceneConfirmation = true;
     }
 
     void RequestCreateScene(std::string sceneId) {
@@ -654,27 +628,22 @@ struct Editor {
             sceneBrowserStatus = "A scene with that ID already exists.";
             return;
         }
-        pendingSceneAction = PendingSceneAction::Create;
-        pendingSceneId = std::move(candidate.id);
-        if (sceneDirty) pendingSceneConfirmation = true;
-        else CompletePendingSceneAction();
+        auto action = sceneActionGate.Request({scene::SceneActionKind::Create, std::move(candidate.id)},
+                                              documentDirty.dirty());
+        if (action) CompletePendingSceneAction(*action);
+        else pendingSceneConfirmation = true;
     }
 
-    void CompletePendingSceneAction(bool* quit = nullptr) {
-        if (pendingSceneAction == PendingSceneAction::None) return;
-        const PendingSceneAction action = pendingSceneAction;
-        const std::string sceneId = pendingSceneId;
-        pendingSceneAction = PendingSceneAction::None;
-        pendingSceneId.clear();
-
-        if (action == PendingSceneAction::Quit) {
+    void CompletePendingSceneAction(const scene::SceneAction& action, bool* quit = nullptr) {
+        const std::string& sceneId = action.sceneId;
+        if (action.kind == scene::SceneActionKind::Quit) {
             if (quit) *quit = true;
             return;
         }
         if (!projectStore) return;
 
         scene::Document candidate;
-        if (action == PendingSceneAction::Open) {
+        if (action.kind == scene::SceneActionKind::Open) {
             if (auto status = projectStore->Load(sceneId, candidate); !status) {
                 sceneBrowserStatus = "Cannot open scene " + sceneId + ": " + status.error;
                 return;
@@ -690,8 +659,8 @@ struct Editor {
             }
         }
 
-        if (auto status = InstallDocument(std::move(candidate), false); !status) {
-            sceneBrowserStatus = std::string(action == PendingSceneAction::Open ? "Cannot install scene " :
+        if (auto status = InstallDocument(std::move(candidate)); !status) {
+            sceneBrowserStatus = std::string(action.kind == scene::SceneActionKind::Open ? "Cannot install scene " :
                                                                           "Scene was created but cannot be opened ") +
                                  sceneId + ": " + status.error;
             return;
@@ -710,7 +679,7 @@ struct Editor {
         reparentTarget.clear();
         reparentTargetNode.clear();
         CancelPlacement("Scene changed");
-        sceneStatus = std::string(action == PendingSceneAction::Open ? "Loaded scene " : "Created scene ") + sceneId;
+        sceneStatus = std::string(action.kind == scene::SceneActionKind::Open ? "Loaded scene " : "Created scene ") + sceneId;
         selectedProjectScene = sceneId;
         std::snprintf(newSceneId, sizeof(newSceneId), "%s", "");
         RefreshProjectScenes();
@@ -825,7 +794,7 @@ struct Editor {
             return;
         }
         const bool recordAsIndependentEdit = inst->autoPlaceHistoryRevision != historyRevision;
-        if (auto status = InstallDocument(std::move(candidate), true, recordAsIndependentEdit); !status) {
+        if (auto status = InstallDocument(std::move(candidate), recordAsIndependentEdit); !status) {
             sceneStatus = "Auto placement refused: " + status.error;
             return;
         }
@@ -852,14 +821,14 @@ struct Editor {
         const auto fileStatus = fs::symlink_status(scenePath, ec);
         if (!ec && (fs::exists(fileStatus) || fs::is_symlink(fileStatus))) {
             if (auto loaded = projectStore->Load(sceneId, initial); !loaded) return loaded;
-            if (auto installed = InstallDocument(std::move(initial), false); !installed) return installed;
+            if (auto installed = InstallDocument(std::move(initial)); !installed) return installed;
             sceneHistory.Clear();
             if (auto baseline = SetSavedBaseline(true); !baseline) return baseline;
             sceneStatus = "Loaded " + std::string(sceneId);
         } else if (ec && ec != std::errc::no_such_file_or_directory) {
             return Status::Fail("cannot inspect project scene file: " + ec.message());
         } else {
-            if (auto installed = InstallDocument(std::move(initial), false); !installed) return installed;
+            if (auto installed = InstallDocument(std::move(initial)); !installed) return installed;
             sceneHistory.Clear();
             if (auto baseline = SetSavedBaseline(false); !baseline) return baseline;
             sceneStatus = "New scene · unsaved";
@@ -871,7 +840,7 @@ struct Editor {
         document = {};
         document.id = "untitled";
         document.name = "Untitled";
-        if (auto status = InstallDocument(document, false); !status) return status;
+        if (auto status = InstallDocument(document); !status) return status;
         sceneHistory.Clear();
         if (auto baseline = SetSavedBaseline(true); !baseline) return baseline;
         sceneStatus = "In-memory scene · pass --project DIR to save";
@@ -1276,7 +1245,7 @@ void Editor::DrawScene() {
     if (projectStore) {
         if (ImGui::Button("Save scene")) SaveScene();
         ImGui::SameLine();
-        ImGui::TextUnformatted(sceneDirty ? "Unsaved" : "Saved");
+        ImGui::TextUnformatted(documentDirty.dirty() ? "Unsaved" : "Saved");
     }
     if (ImGui::Button("Browse scenes")) OpenSceneBrowser();
     if (ImGui::Button("Add group")) AddGroup();
@@ -1430,7 +1399,8 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
                                        ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoInputs |
                                        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDocking;
     ImGui::Begin("##SceneActionPopupHost", nullptr, hostFlags);
-    if (pendingSceneAction == PendingSceneAction::None) {
+    const auto& pending = sceneActionGate.pending();
+    if (!pending) {
         ImGui::End();
         return;
     }
@@ -1442,7 +1412,7 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
         ImGui::End();
         return;
     }
-    const bool quitting = pendingSceneAction == PendingSceneAction::Quit;
+    const bool quitting = pending->kind == scene::SceneActionKind::Quit;
     ImGui::TextWrapped(quitting ? "Scene %s has unsaved changes. Save them before quitting?"
                                 : "Scene %s has unsaved changes. Save them before switching?",
                        document.id.c_str());
@@ -1451,8 +1421,9 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
     ImGui::BeginDisabled(!projectStore.has_value());
     if (ImGui::Button(saveLabel)) {
         SaveScene();
-        if (!sceneDirty) {
-            CompletePendingSceneAction(&quit);
+        auto action = sceneActionGate.Resolve(scene::SceneActionChoice::Save, !documentDirty.dirty());
+        if (action) {
+            CompletePendingSceneAction(*action, &quit);
             ImGui::CloseCurrentPopup();
         }
     }
@@ -1460,17 +1431,18 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
     ImGui::SameLine();
     const char* discardLabel = quitting ? "Discard changes and quit" : "Discard changes and continue";
     if (ImGui::Button(discardLabel)) {
-        CompletePendingSceneAction(&quit);
+        auto action = sceneActionGate.Resolve(scene::SceneActionChoice::Discard);
+        if (action) CompletePendingSceneAction(*action, &quit);
         ImGui::CloseCurrentPopup();
     }
     if (ImGui::Button("Cancel")) {
-        pendingSceneAction = PendingSceneAction::None;
-        pendingSceneId.clear();
+        sceneActionGate.Resolve(scene::SceneActionChoice::Cancel);
+        pendingSceneConfirmation = false;
         ImGui::CloseCurrentPopup();
     }
     if (quitting && !projectStore)
         ImGui::TextWrapped("This in-memory scene has no project file; Save is unavailable.");
-    else if (!sceneDirty && pendingSceneAction != PendingSceneAction::None)
+    else if (!documentDirty.dirty() && sceneActionGate.pending())
         ImGui::TextWrapped("Save completed; the scene switch is waiting to finish.");
     else if (sceneStatus.starts_with("Save failed") || sceneStatus.starts_with("Saved, but"))
         ImGui::TextWrapped("%s", sceneStatus.c_str());
@@ -2106,7 +2078,7 @@ int Run(const Args& args) {
         std::fprintf(stderr, "scuba-engine: %d frame(s), %zu instance(s), %d error(s) -> exit %d\n", frame, ed.instances.size(), gErrors.load(), code);
     }
 
-    if (ed.sceneDirty)
+    if (ed.documentDirty.dirty())
         log::Warn("scene", std::string(ed.projectStore ? "unsaved scene changes were not saved: "
                                                       : "in-memory scene changes were discarded: ") + ed.document.id);
     if (ed.netSandbox && !ed.netSandbox->Shutdown())

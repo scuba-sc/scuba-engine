@@ -128,6 +128,41 @@ private:
     std::vector<std::filesystem::path> readOnlyRoots_;
 };
 
+// Platform-neutral state for the editor's saved/unsaved indicator. A failed update remains dirty;
+// a failed baseline encoding clears the old baseline and remains dirty, matching editor behavior.
+class DocumentDirtyState {
+public:
+    Status SetBaseline(const Document& document, bool exists);
+    Status Update(const Document& document);
+    bool dirty() const noexcept { return dirty_; }
+
+private:
+    std::optional<std::string> baseline_;
+    bool dirty_ = false;
+};
+
+enum class SceneActionKind : uint8_t { Open, Create, Quit };
+enum class SceneActionChoice : uint8_t { Save, Discard, Cancel };
+
+struct SceneAction {
+    SceneActionKind kind = SceneActionKind::Open;
+    std::string sceneId;
+
+    friend bool operator==(const SceneAction&, const SceneAction&) = default;
+};
+
+// A small decision gate used by the editor before switching scenes or quitting. Failed saves
+// leave the action pending; discard commits it; cancel clears it.
+class SceneActionGate {
+public:
+    std::optional<SceneAction> Request(SceneAction action, bool dirty);
+    std::optional<SceneAction> Resolve(SceneActionChoice choice, bool saveSucceeded = false);
+    const std::optional<SceneAction>& pending() const noexcept { return pending_; }
+
+private:
+    std::optional<SceneAction> pending_;
+};
+
 // Bounded snapshot history for editor scene mutations. Snapshots use the validated on-disk
 // representation so a history entry cannot exceed the scene file limit.
 class DocumentHistory {

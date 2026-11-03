@@ -570,6 +570,52 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(scene::Deserialize(encoded, decoded).ok());
     CHECK(decoded == document);
 
+    // Dirty state follows the serialized saved baseline, including edits reverted to the exact
+    // saved document. A bad update stays dirty but does not destroy the prior valid baseline.
+    scene::DocumentDirtyState dirtyState;
+    CHECK(dirtyState.SetBaseline(document, true).ok());
+    CHECK(!dirtyState.dirty());
+    auto editedDocument = document;
+    editedDocument.nodes[2].name = "Edited test ship";
+    CHECK(dirtyState.Update(editedDocument).ok());
+    CHECK(dirtyState.dirty());
+    CHECK(dirtyState.Update(document).ok());
+    CHECK(!dirtyState.dirty());
+    auto invalidDocument = editedDocument;
+    invalidDocument.nodes[2].id = invalidDocument.nodes[1].id;
+    CHECK(!dirtyState.Update(invalidDocument).ok());
+    CHECK(dirtyState.dirty());
+    CHECK(dirtyState.Update(document).ok());
+    CHECK(!dirtyState.dirty());
+    // A failed baseline establishment intentionally drops the old baseline, matching the editor's
+    // behavior after a disk save followed by a serialization failure.
+    CHECK(!dirtyState.SetBaseline(invalidDocument, true).ok());
+    CHECK(dirtyState.dirty());
+    CHECK(dirtyState.Update(document).ok());
+    CHECK(dirtyState.dirty());
+    CHECK(dirtyState.SetBaseline(document, false).ok());
+    CHECK(dirtyState.dirty());
+
+    scene::SceneActionGate actionGate;
+    const scene::SceneAction openAction{scene::SceneActionKind::Open, "next-scene"};
+    CHECK(actionGate.Request(openAction, false) == std::optional<scene::SceneAction>(openAction));
+    CHECK(!actionGate.pending());
+    CHECK(!actionGate.Request(openAction, true));
+    CHECK(actionGate.pending() == std::optional<scene::SceneAction>(openAction));
+    CHECK(!actionGate.Resolve(scene::SceneActionChoice::Save, false));
+    CHECK(actionGate.pending() == std::optional<scene::SceneAction>(openAction));
+    CHECK(actionGate.Resolve(scene::SceneActionChoice::Save, true) ==
+          std::optional<scene::SceneAction>(openAction));
+    CHECK(!actionGate.pending());
+    const scene::SceneAction createAction{scene::SceneActionKind::Create, "new-scene"};
+    CHECK(!actionGate.Request(createAction, true));
+    CHECK(actionGate.Resolve(scene::SceneActionChoice::Discard) ==
+          std::optional<scene::SceneAction>(createAction));
+    const scene::SceneAction quitAction{scene::SceneActionKind::Quit, {}};
+    CHECK(!actionGate.Request(quitAction, true));
+    CHECK(!actionGate.Resolve(scene::SceneActionChoice::Cancel));
+    CHECK(!actionGate.pending());
+
     const fs::path projectRoot = root / "scene-project";
     const fs::path assetRoot = root / "scene-assets";
     fs::create_directories(projectRoot);
@@ -582,6 +628,31 @@ void TestSceneDocument(const fs::path& root) {
     if (!project) return;
     CHECK(!scene::ProjectStore::Open(assetRoot, readOnlyRoots).has_value());
     CHECK(!scene::ProjectStore::Open(assetRoot / "nested", readOnlyRoots).has_value());
+
+    // Failed persistence cannot satisfy Save-and-continue. The pending action survives until a
+    // valid save updates the baseline; only then is the transition released.
+    CHECK(project->Save(document).ok());
+    scene::DocumentDirtyState saveFlowDirty;
+    CHECK(saveFlowDirty.SetBaseline(document, true).ok());
+    auto saveFlowEdit = document;
+    saveFlowEdit.name = "Save flow edit";
+    CHECK(saveFlowDirty.Update(saveFlowEdit).ok() && saveFlowDirty.dirty());
+    scene::SceneActionGate saveFlowGate;
+    const scene::SceneAction saveFlowAction{scene::SceneActionKind::Open, "empty-scene"};
+    CHECK(!saveFlowGate.Request(saveFlowAction, saveFlowDirty.dirty()));
+    auto saveFlowInvalid = saveFlowEdit;
+    saveFlowInvalid.nodes[2].id = saveFlowInvalid.nodes[1].id;
+    CHECK(!project->Save(saveFlowInvalid).ok());
+    CHECK(!saveFlowDirty.Update(saveFlowInvalid).ok() && saveFlowDirty.dirty());
+    CHECK(!saveFlowGate.Resolve(scene::SceneActionChoice::Save, !saveFlowDirty.dirty()));
+    CHECK(saveFlowGate.pending() == std::optional<scene::SceneAction>(saveFlowAction));
+    scene::Document preservedAfterFailedSave;
+    CHECK(project->Load("hangar-test", preservedAfterFailedSave).ok());
+    CHECK(preservedAfterFailedSave == document);
+    CHECK(project->Save(saveFlowEdit).ok());
+    CHECK(saveFlowDirty.SetBaseline(saveFlowEdit, true).ok() && !saveFlowDirty.dirty());
+    CHECK(saveFlowGate.Resolve(scene::SceneActionChoice::Save, !saveFlowDirty.dirty()) ==
+          std::optional<scene::SceneAction>(saveFlowAction));
 
     CHECK(project->Save(document).ok());
     CHECK(fs::exists(projectRoot / "hangar-test.scene.json"));
