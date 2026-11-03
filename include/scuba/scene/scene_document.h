@@ -20,6 +20,7 @@ inline constexpr uint32_t kSceneSchemaVersion = 1;
 inline constexpr size_t kMaxSceneNodes = 8192;
 inline constexpr size_t kMaxSceneFileBytes = 8u * 1024u * 1024u;
 inline constexpr size_t kMaxHierarchyDepth = 256;
+inline constexpr float kMaxRotationDegrees = 36000.0f;
 
 struct Vec3 {
     float x = 0;
@@ -81,6 +82,13 @@ Status Deserialize(std::string_view json, Document& document);
 // Resolves row-vector local transforms in document order, composing child-local * parent-world.
 // Returns failure without changing the output if composition overflows or becomes singular.
 Status ResolveWorldTransforms(const Document& document, std::vector<ResolvedTransform>& transforms);
+// Intrinsic local XYZ Euler angles in degrees, applied X then Y then Z. Conversion is
+// transactional and rejects non-finite input; quaternion-to-Euler returns the canonical range.
+Status EulerXYZDegreesToQuaternion(Vec3 degrees, Quaternion& rotation);
+Status QuaternionToEulerXYZDegrees(Quaternion rotation, Vec3& degrees);
+// Multiplies all local scale axes by one positive factor, preserving their ratios. Refuses invalid
+// or out-of-range results without changing the transform.
+Status ScaleUniform(LocalTransform& transform, float factor);
 // Places a unit-rotation/unit-scale model so its transformed bounds rest on world Z=0 at the
 // requested world XY. An optional resolved parent transform is respected; outputs remain unchanged
 // on failure. The caller validates that the parent is an allowed group node.

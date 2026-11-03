@@ -292,6 +292,10 @@ struct Editor {
     std::string sceneStatus;
     bool inspectorUndoCaptured = false;
     std::string inspectorUndoNode;
+    scene::Vec3 inspectorRotationDegrees;
+    std::string inspectorRotationNode;
+    bool inspectorRotationInitialized = false;
+    bool inspectorRotationActive = false;
     char renameBuffer[129] = "";  // scene node names are capped at 128 UTF-8 bytes
     std::string renameTarget;
     std::string renameSourceName;
@@ -1508,6 +1512,8 @@ void Editor::DrawInspector() {
     if (!ImGui::Begin("Inspector", &showInspector)) {
         inspectorUndoCaptured = false;
         inspectorUndoNode.clear();
+        inspectorRotationInitialized = false;
+        inspectorRotationActive = false;
         ImGui::End();
         return;
     }
@@ -1515,9 +1521,25 @@ void Editor::DrawInspector() {
     if (!selected) {
         inspectorUndoCaptured = false;
         inspectorUndoNode.clear();
+        inspectorRotationNode.clear();
+        inspectorRotationInitialized = false;
+        inspectorRotationActive = false;
         ImGui::TextDisabled("Nothing selected");
         ImGui::End();
         return;
+    }
+    if (inspectorRotationNode != selected->id) {
+        inspectorRotationNode = selected->id;
+        inspectorRotationInitialized = false;
+        inspectorRotationActive = false;
+    }
+    if (!inspectorRotationInitialized || !inspectorRotationActive) {
+        if (auto status = scene::QuaternionToEulerXYZDegrees(selected->localTransform.rotation,
+                                                             inspectorRotationDegrees); !status) {
+            sceneStatus = "Cannot display rotation: " + status.error;
+            inspectorRotationDegrees = {};
+        }
+        inspectorRotationInitialized = true;
     }
     ImGui::Text("%s", selected->name.c_str());
     Instance* inst = selected->kind == scene::NodeKind::ModelInstance ? FindNodeInstance(selected->id) : nullptr;
@@ -1536,28 +1558,37 @@ void Editor::DrawInspector() {
     }
     bool changed = ImGui::DragFloat3("translation", &nodeIt->localTransform.translation.x, 0.05f);
     bool anyActive = ImGui::IsItemActive();
-    const bool rotationChanged = ImGui::DragFloat4("rotation quaternion", &nodeIt->localTransform.rotation.x, 0.005f);
-    anyActive |= ImGui::IsItemActive();
+    const bool rotationChanged = ImGui::DragFloat3("local rotation XYZ (degrees)",
+        &inspectorRotationDegrees.x, 0.5f, -scene::kMaxRotationDegrees,
+        scene::kMaxRotationDegrees, "%.1f");
+    const bool rotationActive = ImGui::IsItemActive();
+    anyActive |= rotationActive;
     if (rotationChanged) {
-        auto& rotation = nodeIt->localTransform.rotation;
-        const double norm = std::sqrt(static_cast<double>(rotation.x) * rotation.x +
-                                      static_cast<double>(rotation.y) * rotation.y +
-                                      static_cast<double>(rotation.z) * rotation.z +
-                                      static_cast<double>(rotation.w) * rotation.w);
-        if (std::isfinite(norm) && norm > 1e-8) {
-            rotation.x = static_cast<float>(rotation.x / norm);
-            rotation.y = static_cast<float>(rotation.y / norm);
-            rotation.z = static_cast<float>(rotation.z / norm);
-            rotation.w = static_cast<float>(rotation.w / norm);
+        scene::Quaternion rotation;
+        if (auto status = scene::EulerXYZDegreesToQuaternion(inspectorRotationDegrees, rotation); status) {
+            nodeIt->localTransform.rotation = rotation;
             changed = true;
         } else {
-            rotation = selected->localTransform.rotation;
-            sceneStatus = "Rotation edit refused: quaternion must be nonzero";
+            if (auto restore = scene::QuaternionToEulerXYZDegrees(selected->localTransform.rotation,
+                                                                  inspectorRotationDegrees); !restore)
+                inspectorRotationDegrees = {};
+            sceneStatus = "Rotation edit refused: " + status.error;
         }
     }
+    inspectorRotationActive = rotationActive;
     const bool scaleChanged = ImGui::DragFloat3("scale", &nodeIt->localTransform.scale.x, 0.01f, 0.001f, 1000.0f);
     changed |= scaleChanged;
     anyActive |= ImGui::IsItemActive();
+    std::optional<float> uniformScaleFactor;
+    if (ImGui::Button("Scale uniformly ÷1.1")) uniformScaleFactor = 1.0f / 1.1f;
+    ImGui::SameLine();
+    if (ImGui::Button("Scale uniformly ×1.1")) uniformScaleFactor = 1.1f;
+    if (uniformScaleFactor) {
+        if (auto status = scene::ScaleUniform(nodeIt->localTransform, *uniformScaleFactor); !status)
+            sceneStatus = "Scale refused: " + status.error;
+        else
+            changed = true;
+    }
     if (changed) {
         if (inspectorUndoNode != selectedNode) {
             inspectorUndoCaptured = false;

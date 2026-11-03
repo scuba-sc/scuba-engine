@@ -23,6 +23,7 @@
 #include <ctime>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 
 using namespace scuba;
@@ -574,6 +575,51 @@ scene::Document SceneFixture() {
 void TestSceneDocument(const fs::path& root) {
     auto document = SceneFixture();
     CHECK(scene::Validate(document).ok());
+    for (const scene::Vec3 euler : {scene::Vec3{31.0f, -47.0f, 122.0f},
+                                   scene::Vec3{12.0f, 90.0f, 40.0f},
+                                   scene::Vec3{-75.0f, -90.0f, 179.0f}}) {
+        scene::Quaternion rotation;
+        scene::Vec3 roundTripEuler;
+        scene::Quaternion roundTripRotation;
+        CHECK(scene::EulerXYZDegreesToQuaternion(euler, rotation).ok());
+        CHECK(scene::QuaternionToEulerXYZDegrees(rotation, roundTripEuler).ok());
+        CHECK(scene::EulerXYZDegreesToQuaternion(roundTripEuler, roundTripRotation).ok());
+        render::Float4x4 matrix, roundTripMatrix;
+        CHECK(render::AffineFromTrs({}, {rotation.x, rotation.y, rotation.z, rotation.w}, {1, 1, 1}, matrix));
+        CHECK(render::AffineFromTrs({}, {roundTripRotation.x, roundTripRotation.y,
+                                         roundTripRotation.z, roundTripRotation.w}, {1, 1, 1}, roundTripMatrix));
+        for (size_t row = 0; row < 3; ++row)
+            for (size_t column = 0; column < 3; ++column)
+                CHECK(std::fabs(matrix.m[row][column] - roundTripMatrix.m[row][column]) < 2e-5f);
+    }
+    scene::Quaternion unchangedRotation{0.1f, 0.2f, 0.3f, 0.9f};
+    const auto rotationSentinel = unchangedRotation;
+    CHECK(!scene::EulerXYZDegreesToQuaternion({std::numeric_limits<float>::quiet_NaN(), 0, 0},
+                                               unchangedRotation).ok());
+    CHECK(unchangedRotation == rotationSentinel);
+    scene::Vec3 unchangedEuler{1, 2, 3};
+    CHECK(!scene::QuaternionToEulerXYZDegrees({0, 0, 0, 0}, unchangedEuler).ok());
+    CHECK(unchangedEuler == (scene::Vec3{1, 2, 3}));
+
+    auto scaledTransform = document.nodes[2].localTransform;
+    const auto originalScale = scaledTransform.scale;
+    CHECK(scene::ScaleUniform(scaledTransform, 1.1f).ok());
+    CHECK(std::fabs(scaledTransform.scale.x - originalScale.x * 1.1f) < 1e-5f &&
+          std::fabs(scaledTransform.scale.y - originalScale.y * 1.1f) < 1e-5f &&
+          std::fabs(scaledTransform.scale.z - originalScale.z * 1.1f) < 1e-5f);
+    CHECK(scene::ScaleUniform(scaledTransform, 1.0f / 1.1f).ok());
+    CHECK(std::fabs(scaledTransform.scale.x - originalScale.x) < 1e-5f &&
+          std::fabs(scaledTransform.scale.y - originalScale.y) < 1e-5f &&
+          std::fabs(scaledTransform.scale.z - originalScale.z) < 1e-5f);
+    const auto beforeRejectedScale = scaledTransform;
+    CHECK(!scene::ScaleUniform(scaledTransform, 0).ok());
+    CHECK(scaledTransform == beforeRejectedScale);
+    auto maxScaleTransform = scaledTransform;
+    maxScaleTransform.scale.x = 1000000.0f;
+    const auto maxScaleBefore = maxScaleTransform;
+    CHECK(!scene::ScaleUniform(maxScaleTransform, 2).ok());
+    CHECK(maxScaleTransform == maxScaleBefore);
+
     std::vector<scene::ResolvedTransform> resolved;
     CHECK(scene::ResolveWorldTransforms(document, resolved).ok());
     CHECK(resolved.size() == document.nodes.size());
@@ -954,6 +1000,24 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(history.RecordBefore(historyOne).ok());  // a new edit discards the old redo branch
     CHECK(!history.CanRedo());
     CHECK(history.Undo(historyBranch, historyRestored).ok() && historyRestored == historyOne);
+
+    scene::DocumentHistory rotationScaleHistory;
+    const auto rotationScaleBase = SceneFixture();
+    auto rotationScaleEdited = rotationScaleBase;
+    scene::Quaternion editedRotation;
+    CHECK(scene::EulerXYZDegreesToQuaternion({25.0f, -18.0f, 73.0f}, editedRotation).ok());
+    rotationScaleEdited.nodes[2].localTransform.rotation = editedRotation;
+    CHECK(scene::ScaleUniform(rotationScaleEdited.nodes[2].localTransform, 1.2f).ok());
+    std::vector<scene::ResolvedTransform> rotationScaleWorld;
+    CHECK(scene::ResolveWorldTransforms(rotationScaleEdited, rotationScaleWorld).ok());
+    CHECK(rotationScaleHistory.RecordBefore(rotationScaleBase).ok());
+    scene::Document rotationScaleRestored;
+    CHECK(rotationScaleHistory.Undo(rotationScaleEdited, rotationScaleRestored).ok());
+    CHECK(rotationScaleRestored == rotationScaleBase);
+    scene::Document rotationScaleRedone;
+    CHECK(rotationScaleHistory.Redo(rotationScaleRestored, rotationScaleRedone).ok());
+    CHECK(rotationScaleRedone == rotationScaleEdited);
+
     history.Clear();
     const auto sentinelDocument = historyRestored;
     CHECK(!history.Undo(historyRestored, historyRestored).ok());

@@ -478,6 +478,93 @@ Status Validate(const Document& document) {
     return Status::Ok();
 }
 
+Status EulerXYZDegreesToQuaternion(Vec3 degrees, Quaternion& rotation) {
+    constexpr double kDegreesToRadians = 3.1415926535897932384626433832795 / 180.0;
+    const float input[] = {degrees.x, degrees.y, degrees.z};
+    for (const float value : input)
+        if (!std::isfinite(value) || std::fabs(value) > kMaxRotationDegrees)
+            return Fail("local Euler rotation must be finite and within the editor limit");
+
+    const double x = static_cast<double>(degrees.x) * kDegreesToRadians * 0.5;
+    const double y = static_cast<double>(degrees.y) * kDegreesToRadians * 0.5;
+    const double z = static_cast<double>(degrees.z) * kDegreesToRadians * 0.5;
+    const double cx = std::cos(x), sx = std::sin(x);
+    const double cy = std::cos(y), sy = std::sin(y);
+    const double cz = std::cos(z), sz = std::sin(z);
+    Quaternion candidate{
+        static_cast<float>(sx * cy * cz - cx * sy * sz),
+        static_cast<float>(cx * sy * cz + sx * cy * sz),
+        static_cast<float>(cx * cy * sz - sx * sy * cz),
+        static_cast<float>(cx * cy * cz + sx * sy * sz),
+    };
+    const double norm = std::sqrt(static_cast<double>(candidate.x) * candidate.x +
+                                  static_cast<double>(candidate.y) * candidate.y +
+                                  static_cast<double>(candidate.z) * candidate.z +
+                                  static_cast<double>(candidate.w) * candidate.w);
+    if (!std::isfinite(norm) || norm <= 1e-12)
+        return Fail("local Euler rotation could not be converted to a quaternion");
+    candidate.x = static_cast<float>(candidate.x / norm);
+    candidate.y = static_cast<float>(candidate.y / norm);
+    candidate.z = static_cast<float>(candidate.z / norm);
+    candidate.w = static_cast<float>(candidate.w / norm);
+    rotation = candidate;
+    return Status::Ok();
+}
+
+Status QuaternionToEulerXYZDegrees(Quaternion rotation, Vec3& degrees) {
+    constexpr double kPi = 3.1415926535897932384626433832795;
+    constexpr double kRadiansToDegrees = 180.0 / kPi;
+    const float input[] = {rotation.x, rotation.y, rotation.z, rotation.w};
+    for (const float value : input)
+        if (!std::isfinite(value)) return Fail("quaternion rotation must be finite");
+    const double norm = std::sqrt(static_cast<double>(rotation.x) * rotation.x +
+                                  static_cast<double>(rotation.y) * rotation.y +
+                                  static_cast<double>(rotation.z) * rotation.z +
+                                  static_cast<double>(rotation.w) * rotation.w);
+    if (!std::isfinite(norm) || norm <= 1e-12)
+        return Fail("quaternion rotation must be nonzero");
+    const double x = rotation.x / norm, y = rotation.y / norm;
+    const double z = rotation.z / norm, w = rotation.w / norm;
+    const double sinPitch = std::clamp(2.0 * (w * y - z * x), -1.0, 1.0);
+    double roll = 0, pitch = 0, yaw = 0;
+    if (std::fabs(sinPitch) >= 1.0 - 1e-7) {
+        // At gimbal lock only roll-yaw (pitch +90) or roll+yaw (pitch -90) is observable.
+        // Choose roll=0 and carry the combined angle in yaw to make the round trip stable.
+        pitch = std::copysign(kPi * 0.5, sinPitch);
+        yaw = std::remainder(2.0 * std::atan2(z, w), 2.0 * kPi);
+    } else {
+        roll = std::atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y));
+        pitch = std::asin(sinPitch);
+        yaw = std::atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z));
+    }
+    const Vec3 candidate{
+        static_cast<float>(roll * kRadiansToDegrees),
+        static_cast<float>(pitch * kRadiansToDegrees),
+        static_cast<float>(yaw * kRadiansToDegrees),
+    };
+    if (!std::isfinite(candidate.x) || !std::isfinite(candidate.y) || !std::isfinite(candidate.z))
+        return Fail("quaternion rotation could not be converted to Euler angles");
+    degrees = candidate;
+    return Status::Ok();
+}
+
+Status ScaleUniform(LocalTransform& transform, float factor) {
+    if (!std::isfinite(factor) || factor <= 0)
+        return Fail("uniform scale factor must be finite and positive");
+    const float original[] = {transform.scale.x, transform.scale.y, transform.scale.z};
+    float result[3]{};
+    for (size_t axis = 0; axis < 3; ++axis) {
+        if (!std::isfinite(original[axis]) || original[axis] < kMinScale || original[axis] > kMaxScale)
+            return Fail("uniform scale requires valid positive local scale");
+        const double scaled = static_cast<double>(original[axis]) * factor;
+        if (!std::isfinite(scaled) || scaled < kMinScale || scaled > kMaxScale)
+            return Fail("uniform scale would exceed the scene scale limits");
+        result[axis] = static_cast<float>(scaled);
+    }
+    transform.scale = {result[0], result[1], result[2]};
+    return Status::Ok();
+}
+
 Status Serialize(const Document& document, std::string& json) {
     if (auto status = Validate(document); !status) return status;
     Json root = Json::MakeObject();
