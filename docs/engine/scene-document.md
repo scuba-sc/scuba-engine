@@ -64,8 +64,8 @@ the same bounded undo history as other scene changes. The viewport shows screen-
 for the selected node's world X, Y, and Z translation axes. Dragging an arrow moves the node only
 along that world axis; the result is transformed through the parent inverse before writing local
 translation, and the drag is one undo action. Ctrl+left-drag retains its ground-plane move behavior.
-The Scene panel switches the viewport gizmo between Move, Scale, and Rotate. Scale mode changes one positive
-local scale component per drag; handles follow the node's local rotation and full parent transform.
+The Scene panel switches the viewport gizmo between Move, Scale, and Rotate. Scale mode changes one
+positive local scale component per drag; handles follow the node's local rotation and full parent transform.
 Under a nonuniform parent those handles may not be perpendicular. Values outside the scene's
 positive scale limits are refused, and mirrored scale is not representable by the scene schema.
 Rotate mode drags a local-axis ring; the pointer ray is intersected with the affine-transformed ring
@@ -73,11 +73,15 @@ plane, so nonuniform parents can make the rings elliptical. The gesture accumula
 steps and records one undo action. If the ring plane is edge-on or ill-conditioned from the current
 view, the drag is refused. Rotation changes local TRS; it does not promise rotation around a world
 axis or a circular ring under a nonuniform parent.
-Escape rolls back the active gizmo gesture if no separate scene edit has superseded it. If another
-edit intervenes, rollback is refused and the current transform is kept. If pointer capture is
-interrupted, the last valid transform is kept as one undoable edit. Handles that project end-on
-are not pickable; the tool refuses near-parallel ray/axis movement instead of applying an unstable
-translation. The native viewport UI remains Windows-only and still needs Windows compile and visual
+The mode controls are disabled during a gesture. If the selected node, gizmo mode, asset-placement
+state, or scene history changes externally, the next pointer move stops the gesture; any accepted
+partial edit remains one undoable action. Escape rolls back the active gizmo gesture if no separate
+scene edit has superseded it. If another edit intervenes, rollback is refused and the current
+transform is kept. If pointer capture is interrupted, the last valid transform is kept as one
+undoable edit. Handles that project
+end-on are not pickable; the tool refuses near-parallel ray/axis movement instead of applying an
+unstable translation. An active asset-placement preview hides the transform gizmo and owns viewport
+clicks. The native viewport UI remains Windows-only and still needs Windows compile and visual
 validation.
 Groups can be added and nested. Selected nodes can be renamed, deleted (groups remove their
 subtrees), or reparented from the selected-node controls. Reparenting keeps the selected node's
@@ -91,11 +95,11 @@ Saving is explicit through the Scene panel or File menu (`Ctrl+S`). The Scene pa
 unsaved, and save-error states; there is no automatic save. Switching scenes or quitting with dirty
 changes asks to save, discard, or cancel; a window-close request is deferred until that choice is
 made. Undo and redo are available from the File menu, Scene panel, and `Ctrl+Z` / `Ctrl+Y`. They
-retain up to 64 snapshots or 32 MiB, whichever limit is reached first. A continuous Inspector edit
-or Ctrl+left-drag is one history action; uniform-scale steps, group, place, delete, rename, reparent,
-clear, and double-click spawn each form one action. Asynchronous grounding is folded into its spawn
-action when no later scene edit intervenes. Returning to the last saved document clears the unsaved
-state; saving establishes a new baseline without discarding undo history.
+retain up to 64 snapshots or 32 MiB, whichever limit is reached first. A continuous Inspector edit,
+Ctrl+left-drag, or transform-gizmo drag is one history action; uniform-scale steps, group, place,
+delete, rename, reparent, clear, and double-click spawn each form one action. Asynchronous grounding
+is folded into its spawn action when no later scene edit intervenes. Returning to the last saved
+document clears the unsaved state; saving establishes a new baseline without discarding undo history.
 Without `--project`, the editor still uses the same document and outliner in memory and says that
 the session will not persist.
 

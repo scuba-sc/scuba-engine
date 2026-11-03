@@ -1176,14 +1176,18 @@ private:
     Editor& e_;
 };
 
-// Drag a move or local-scale axis handle. Translation converts through the parent inverse; scale
-// edits one bounded local TRS component and draws axes through the parent's complete affine frame.
+// Handles world-axis translation, local-axis scale, and local-axis rotation. Each gesture edits
+// only the selected node's TRS and is committed as one interactive history transaction.
 class AxisTransformTool final : public ui::InputLayer {
 public:
     explicit AxisTransformTool(Editor& editor) : editor_(editor) {}
     const char* Name() const override { return "transform-gizmo"; }
 
     ui::Reply OnInput(const ui::InputEvent& event) override {
+        // Placement owns viewport clicks while a preview is active. The gizmo is hidden in this
+        // state so the visible affordance always matches the winning input layer.
+        if (editor_.placement.active && event.kind == ui::InputKind::PointerDown)
+            return ui::Reply::Unhandled();
         if (event.kind == ui::InputKind::PointerCancel) {
             const bool keptPartialEdit = dragging_ && undoCaptured_;
             ResetGesture();
@@ -1264,18 +1268,30 @@ public:
             }
             draggedNode_ = selected->id;
             undoCaptured_ = false;
+            gestureStartHistoryRevision_ = editor_.historyRevision;
             dragging_ = true;
             editor_.transformGizmoDragging = true;
             editor_.transformGizmoAxis = axisIndex;
             return ui::Reply::Capture();
         }
         if (event.kind == ui::InputKind::PointerMove && dragging_ && event.leftHeld) {
-            if (undoCaptured_ && editor_.historyRevision != dragHistoryRevision_) {
-                editor_.sceneStatus = "Transform drag stopped because another scene edit completed; current transform kept";
-                ResetGesture();
+            if (editor_.placement.active) {
+                StopGesture("Transform drag stopped because asset placement became active");
                 return ui::Reply::Release();
             }
-            if (!editor_.FindNode(draggedNode_)) return ui::Reply::Handled();
+            if (editor_.gizmoMode != mode_) {
+                StopGesture("Transform drag stopped because gizmo mode changed");
+                return ui::Reply::Release();
+            }
+            if (editor_.selectedNode != draggedNode_ || !editor_.FindNode(draggedNode_)) {
+                StopGesture("Transform drag stopped because its selection changed");
+                return ui::Reply::Release();
+            }
+            const uint64_t expectedRevision = undoCaptured_ ? dragHistoryRevision_ : gestureStartHistoryRevision_;
+            if (editor_.historyRevision != expectedRevision) {
+                StopGesture("Transform drag stopped because another scene edit completed");
+                return ui::Reply::Release();
+            }
             const auto ray = editor_.camera.ScreenRay(event.x, event.y, editor_.ui.viewport());
             scene::Document candidate = editor_.document;
             const auto node = std::find_if(candidate.nodes.begin(), candidate.nodes.end(), [&](const auto& item) {
@@ -1349,12 +1365,20 @@ public:
     }
 
 private:
+    void StopGesture(std::string_view reason) {
+        const bool keptPartialEdit = undoCaptured_;
+        ResetGesture();
+        editor_.sceneStatus = std::string(reason) +
+            (keptPartialEdit ? "; last valid transform kept · undo available" : "; no transform edit applied");
+    }
+
     void ResetGesture() {
         gestureCaptured_ = false;
         dragging_ = false;
         undoCaptured_ = false;
         draggedNode_.clear();
         historyBeforeDocument_ = {};
+        gestureStartHistoryRevision_ = 0;
         dragHistoryRevision_ = 0;
         mode_ = TransformGizmoMode::Move;
         axisIndex_ = -1;
@@ -1400,6 +1424,7 @@ private:
     render::Float4x4 parentInverse_{};
     std::string draggedNode_;
     scene::Document historyBeforeDocument_;
+    uint64_t gestureStartHistoryRevision_ = 0;
     uint64_t dragHistoryRevision_ = 0;
     float startScale_ = 1;
     float scaleHandleWorldLength_ = 0;
@@ -1641,6 +1666,7 @@ void Editor::DrawScene() {
     if (projectStore) ImGui::TextWrapped("Project: %s  ·  scene: %s", projectRoot.generic_string().c_str(), document.id.c_str());
     else ImGui::TextDisabled("In-memory scene · pass --project DIR to save");
     ImGui::SeparatorText("Viewport gizmo");
+    ImGui::BeginDisabled(transformGizmoGestureActive);
     if (ImGui::RadioButton("Move axes", gizmoMode == TransformGizmoMode::Move))
         gizmoMode = TransformGizmoMode::Move;
     ImGui::SameLine();
@@ -1649,6 +1675,7 @@ void Editor::DrawScene() {
     ImGui::SameLine();
     if (ImGui::RadioButton("Rotate rings", gizmoMode == TransformGizmoMode::Rotate))
         gizmoMode = TransformGizmoMode::Rotate;
+    ImGui::EndDisabled();
     if (gizmoMode == TransformGizmoMode::Scale)
         ImGui::TextDisabled("Scale follows local axes through the parent transform; "
                             "only positive scale is supported.");
@@ -2206,6 +2233,7 @@ void Editor::DrawUi(bool& quit) {
 }
 
 void Editor::DrawTransformGizmo() const {
+    if (placement.active) return;  // PlacementTool has pointer precedence over every gizmo mode.
     TransformGizmoGeometry geometry;
     if (!BuildGizmoGeometry(geometry)) return;
     const auto viewport = ui.viewport();
@@ -2422,9 +2450,9 @@ int Run(const Args& args) {
     MoveTool move(ed);
     CameraTool cameraTool(ed);
     ui::InputRouter router;
-    router.Add(&blocker);
-    router.Add(&placementTool);
-    router.Add(&axisTransformTool);
+    router.Add(&blocker);          // UI owns clicks over panels and outside the viewport.
+    router.Add(&placementTool);     // An active asset preview owns viewport clicks before gizmos.
+    router.Add(&axisTransformTool); // Gizmo handles win before ordinary model picking.
     router.Add(&move);
     router.Add(&cameraTool);
 

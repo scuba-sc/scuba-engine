@@ -143,7 +143,8 @@ The front end is backend-neutral; D3D12 is the first backend, Vulkan the next.
   colored.
 - **Picking:** CPU ray tests against the decoded meshes (bounds, then exact triangles), with an
   affine inverse used to transform the ray into local space. The move tool drags the selection
-  across its ground plane. A GPU id buffer and full translate/rotate/scale gizmos are phase 2.
+  across its ground plane. The scene editor also has world-axis translation and local-axis scale
+  and rotation gizmos. A GPU id buffer remains phase 2.
 
 ## 2D shell and input (`include/scuba/ui/`)
 
@@ -154,15 +155,17 @@ the central node; the UI pass draws over the whole window.
 Input goes through an `InputRouter`: layers are asked in order and answer with a reply (unhandled,
 handled, capture, release) instead of changing global state. A capturing layer receives every
 pointer event until it releases or its button goes up. The editor's chain: UI blocker (ImGui
-wants the pointer, or it is outside the viewport) → move tool (Ctrl + left drag) → camera and
-picking (right drag orbit, middle drag pan, wheel dolly, left click select, F frame, Del remove).
+wants the pointer, or it is outside the viewport) → placement preview → transform gizmo → move tool
+(Ctrl + left drag) → camera and picking (right drag orbit, middle drag pan, wheel dolly, left click
+select, F frame, Del remove). An active placement preview owns viewport clicks; visible gizmo
+handles take precedence over ordinary model picking.
 
 ## Phases
 
 | Phase | Scope | Exit |
 |---|---|---|
 | 1 (this branch) | core, VFS, sco host, D3D12 loop, ImGui shell, async OBJ/glTF/CGF intake, PBR-lite, CPU picking, move tool | `engine_core` + `engine_smoke` (WARP) green on Windows |
-| 2 | gizmos (translate/rotate/scale, snapping), GPU id-buffer picking, project picker, glTF node hierarchy | editor round-trips a scene |
+| 2 | transform snapping, GPU id-buffer picking, project-root picker, glTF source-node hierarchy | Windows editor scene-round-trip and visual input acceptance |
 | 3 | textures and mip streaming (priority IO queue, budget-driven residency), material textures, DDS | Asset Lab parity |
 | 4 | studio parity: Widgets, Designer, Viewport (diegetic panels), NetSandbox panels in native UI | browser studio retired; hostd remains for headless CI |
 | 5 | Vulkan backend; Linux build of the editor | cross-platform CI (roadmap E-5) |
@@ -170,10 +173,10 @@ picking (right drag orbit, middle drag pan, wheel dolly, left click select, F fr
 The scene-document groundwork in the current branch provides versioned project files, hierarchy
 validation and affine world-transform resolution. The editor's Scene panel is a document-backed
 outliner with stable selection, group nesting, rename, world-preserving reparent, explicit save state,
-and asset placement preview. It also has bounded undo/redo, with continuous inspector and move edits
-coalesced into single steps.
-The renderer/picker matrix path represents resolved transforms, including parent-induced shear.
-Project browsing and Windows D3D12 visual validation remain outstanding.
+and asset placement preview. It also has bounded undo/redo, with continuous inspector, move, scale,
+and rotation edits coalesced into single steps. The renderer/picker matrix path represents resolved
+transforms, including parent-induced shear. Project-root browsing and Windows D3D12 visual
+validation remain outstanding.
 
 ## Provenance
 
