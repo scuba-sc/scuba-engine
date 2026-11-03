@@ -981,6 +981,22 @@ scene::Document SceneFixture() {
 void TestSceneDocument(const fs::path& root) {
     auto document = SceneFixture();
     CHECK(scene::Validate(document).ok());
+    scene::Document copiedDocument;
+    CHECK(scene::MakeSceneCopy(document, "hangar-copy", copiedDocument).ok());
+    auto expectedCopy = document;
+    expectedCopy.id = "hangar-copy";
+    CHECK(copiedDocument == expectedCopy);
+    CHECK(document == SceneFixture());
+    scene::Document unchangedCopyOutput = SceneFixture();
+    const auto copyOutputSentinel = unchangedCopyOutput;
+    CHECK(!scene::MakeSceneCopy(document, document.id, unchangedCopyOutput).ok());
+    CHECK(unchangedCopyOutput == copyOutputSentinel);
+    CHECK(!scene::MakeSceneCopy(document, "../outside", unchangedCopyOutput).ok());
+    CHECK(unchangedCopyOutput == copyOutputSentinel);
+    auto invalidCopySource = document;
+    invalidCopySource.nodes[2].parentId = "missing-parent";
+    CHECK(!scene::MakeSceneCopy(invalidCopySource, "invalid-copy", unchangedCopyOutput).ok());
+    CHECK(unchangedCopyOutput == copyOutputSentinel);
     for (const scene::Vec3 euler : {scene::Vec3{31.0f, -47.0f, 122.0f},
                                    scene::Vec3{12.0f, 90.0f, 40.0f},
                                    scene::Vec3{-75.0f, -90.0f, 179.0f}}) {
@@ -1714,6 +1730,25 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(project->Create(emptyScene).ok());
     CHECK(project->ListScenes(projectScenes).ok());
     CHECK(projectScenes == (std::vector<std::string>{"empty-scene", "hangar-test"}));
+    scene::Document copyToPersist;
+    CHECK(scene::MakeSceneCopy(document, "hangar-copy", copyToPersist).ok());
+    CHECK(project->Create(copyToPersist).ok());
+    CHECK(project->ListScenes(projectScenes).ok());
+    CHECK(projectScenes == (std::vector<std::string>{"empty-scene", "hangar-copy", "hangar-test"}));
+    scene::Document persistedCopy;
+    CHECK(project->Load("hangar-copy", persistedCopy).ok());
+    CHECK(persistedCopy == copyToPersist);
+    std::ifstream copiedSceneBeforeOverwrite(projectRoot / "hangar-copy.scene.json", std::ios::binary);
+    const std::string copiedSceneBytesBeforeOverwrite(
+        (std::istreambuf_iterator<char>(copiedSceneBeforeOverwrite)), std::istreambuf_iterator<char>());
+    copiedSceneBeforeOverwrite.close();
+    auto attemptedCopyOverwrite = copyToPersist;
+    attemptedCopyOverwrite.name = "Must not replace existing copy";
+    CHECK(!project->Create(attemptedCopyOverwrite).ok());
+    std::ifstream copiedSceneAfterOverwrite(projectRoot / "hangar-copy.scene.json", std::ios::binary);
+    const std::string copiedSceneBytesAfterOverwrite(
+        (std::istreambuf_iterator<char>(copiedSceneAfterOverwrite)), std::istreambuf_iterator<char>());
+    CHECK(copiedSceneBytesAfterOverwrite == copiedSceneBytesBeforeOverwrite);
     auto attemptedOverwrite = emptyScene;
     attemptedOverwrite.name = "Must not replace existing scene";
     CHECK(!project->Create(attemptedOverwrite).ok());

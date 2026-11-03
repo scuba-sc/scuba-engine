@@ -78,6 +78,9 @@ struct ResolvedTransform {
 // Scene asset paths use the engine VFS namespace. Project files are separate and are never
 // written through the read-only VFS.
 Status Validate(const Document& document);
+// Copies the in-memory scene to a distinct filename-safe ID. All scene content, including stable
+// node IDs, hierarchy, transforms, and asset references, is preserved; output is unchanged on error.
+Status MakeSceneCopy(const Document& source, std::string_view newSceneId, Document& copy);
 Status Serialize(const Document& document, std::string& json);
 Status Deserialize(std::string_view json, Document& document);
 inline constexpr size_t kMaxOutlinerSearchQueryBytes = 256;

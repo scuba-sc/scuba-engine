@@ -614,6 +614,21 @@ Status Validate(const Document& document) {
     return Status::Ok();
 }
 
+Status MakeSceneCopy(const Document& source, std::string_view newSceneId, Document& copy) {
+    if (auto status = Validate(source); !status)
+        return Fail("cannot copy an invalid scene: " + status.error);
+    if (!ValidIdentifier(newSceneId))
+        return Fail("copy scene ID must be a safe identifier of at most 64 ASCII characters");
+    if (newSceneId == source.id)
+        return Fail("copy scene ID must differ from the current scene ID");
+
+    Document candidate = source;
+    candidate.id = std::string(newSceneId);
+    if (auto status = Validate(candidate); !status) return status;
+    copy = std::move(candidate);
+    return Status::Ok();
+}
+
 Status SearchOutliner(const Document& document, std::string_view query, OutlinerSearchResult& result) {
     if (query.size() > kMaxOutlinerSearchQueryBytes)
         return Fail("outliner search query exceeds the 256-byte limit");

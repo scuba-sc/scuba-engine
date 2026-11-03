@@ -335,6 +335,7 @@ struct Editor {
     bool renameBufferDirty = false;
     bool showSceneBrowser = false;
     char newSceneId[65] = "";
+    char copiedSceneId[65] = "";
     std::vector<std::string> projectScenes;
     std::string selectedProjectScene;
     std::string sceneBrowserStatus;
@@ -937,6 +938,40 @@ struct Editor {
                                               documentDirty.dirty());
         if (action) CompletePendingSceneAction(*action);
         else pendingSceneConfirmation = true;
+    }
+
+    void RequestSaveSceneCopy(std::string sceneId) {
+        if (!projectStore) {
+            sceneBrowserStatus = "Open a project before saving a scene copy.";
+            return;
+        }
+        scene::Document copy;
+        if (auto status = scene::MakeSceneCopy(document, sceneId, copy); !status) {
+            sceneBrowserStatus = "Cannot copy current scene: " + status.error;
+            return;
+        }
+        RefreshProjectScenes();
+        if (!sceneBrowserStatus.empty()) return;
+        if (std::find(projectScenes.begin(), projectScenes.end(), sceneId) != projectScenes.end()) {
+            sceneBrowserStatus = "A scene with that ID already exists.";
+            return;
+        }
+
+        const auto sources = MountedSourcePaths();
+        if (auto status = projectStore->Create(copy, sources); !status) {
+            const std::string failure = "Cannot save scene copy " + sceneId + ": " + status.error;
+            RefreshProjectScenes();
+            sceneBrowserStatus = failure;
+            return;
+        }
+
+        copiedSceneId[0] = '\0';
+        const std::string success = "Saved a copy of the current in-memory scene as " + sceneId +
+            "; the active scene " + document.id + (documentDirty.dirty()
+                ? " remains open with its unsaved changes." : " remains open.");
+        RefreshProjectScenes();
+        if (sceneBrowserStatus.empty()) sceneBrowserStatus = success;
+        else sceneBrowserStatus = success + " " + sceneBrowserStatus;
     }
 
     void CompletePendingSceneAction(const scene::SceneAction& action, bool* quit = nullptr) {
@@ -2408,6 +2443,16 @@ void Editor::DrawSceneBrowser() {
     ImGui::InputTextWithHint("##new-scene-id", "scene ID (for example, hangar)", newSceneId, sizeof(newSceneId));
     ImGui::BeginDisabled(newSceneId[0] == '\0');
     if (ImGui::Button("Create scene")) RequestCreateScene(newSceneId);
+    ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Save a copy of the current scene");
+    ImGui::TextWrapped(
+        "Copies the current in-memory document, including unsaved edits, to a new scene file. The active scene and its saved/unsaved state stay unchanged.");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##copy-scene-id", "new scene ID (for example, hangar-variant)",
+                             copiedSceneId, sizeof(copiedSceneId));
+    ImGui::BeginDisabled(copiedSceneId[0] == '\0');
+    if (ImGui::Button("Save scene copy")) RequestSaveSceneCopy(copiedSceneId);
     ImGui::EndDisabled();
     if (!sceneBrowserStatus.empty()) ImGui::TextWrapped("%s", sceneBrowserStatus.c_str());
     ImGui::End();

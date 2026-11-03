@@ -86,6 +86,16 @@ existing target from being overwritten, but path checks are not a filesystem loc
 reparse-point or mount change between the final check and publish is not eliminated. Windows
 junction and reparse-point behavior remains pending native validation.
 
+The scene browser can **Save a copy of the current scene** under a new scene ID. It copies the
+current in-memory document, so edits made since the last save are included in the new file. Only the
+document's scene ID changes; node IDs, hierarchy, transforms, asset references, and display name are
+preserved. The copy uses the project store's atomic create-without-replace path and rechecks mounted
+source separation. If the ID is invalid, already exists, the source root changed, or persistence
+fails, the existing scene file and active document remain unchanged. A successful copy does not
+switch scenes, mark the active scene saved, change node selection/undo history, or clear its dirty
+state; the new scene appears in the browser and can be opened explicitly. Windows UI behavior remains
+pending.
+
 The Scene panel is a document-backed outliner. Its bounded search accepts up to 256 UTF-8 bytes and
 matches names, stable IDs, and model asset paths. It shows each match with its ancestor groups,
 expands the context needed to reach matches, and leaves selection and scene data untouched. ASCII
