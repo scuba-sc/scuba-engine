@@ -228,7 +228,8 @@ selected from the outliner, and loaded models can also be selected in the viewpo
 scene browser is available from the File menu and Scene panel. Windows D3D12 compilation and visual
 validation remain pending; the focused Linux core tests do not establish Windows rendering behavior.
 
-Press **F** or choose **Frame selection** in the Inspector to focus the viewport. A model selection
+Press **F** or choose **Frame selection** in the Inspector to focus the viewport. Framing accounts
+for both vertical and horizontal field of view using the current viewport aspect ratio. A model selection
 uses its transformed world bounds; a group uses the union of bounds from its loaded descendant
 models, including nested groups. Missing, failed, and still-loading assets are counted and reported;
 if some group models are loaded, the camera frames those and names the skipped count. If none are

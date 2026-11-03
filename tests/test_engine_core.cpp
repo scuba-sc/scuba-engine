@@ -761,6 +761,37 @@ void TestPicking() {
     const float distantPoint = 1e12f;
     CHECK(!frameCamera.TryFrame({distantPoint, 0, 0}, {distantPoint, 0, 0}));
     CHECK(frameCamera.target.x == framedTarget.x && frameCamera.distance == framedDistance);
+
+    constexpr std::array<float, 3> focusMin{-1, -1, -1};
+    constexpr std::array<float, 3> focusMax{1, 1, 1};
+    const double focusRadius = 0.5 * std::hypot(2.0, 2.0, 2.0);
+    render::OrbitCamera squareAspectCamera;
+    render::OrbitCamera narrowAspectCamera;
+    render::OrbitCamera wideAspectCamera;
+    CHECK(squareAspectCamera.TryFrame(focusMin, focusMax, 1.0f));
+    CHECK(narrowAspectCamera.TryFrame(focusMin, focusMax, 0.01f));
+    CHECK(wideAspectCamera.TryFrame(focusMin, focusMax, 100000.0f));
+    const double verticalHalfFov = static_cast<double>(narrowAspectCamera.fovY) * 0.5;
+    const double narrowHorizontalHalfFov = std::atan(std::tan(verticalHalfFov) * 0.01);
+    CHECK(narrowAspectCamera.distance > squareAspectCamera.distance);
+    CHECK(static_cast<double>(narrowAspectCamera.distance) * std::sin(verticalHalfFov) >= focusRadius * 1.099);
+    CHECK(static_cast<double>(narrowAspectCamera.distance) * std::sin(narrowHorizontalHalfFov) >= focusRadius * 1.099);
+    CHECK(std::fabs(wideAspectCamera.distance - squareAspectCamera.distance) < 1e-4f);
+
+    render::OrbitCamera extremeAspectCamera;
+    const auto extremeTarget = extremeAspectCamera.target;
+    const float extremeDistance = extremeAspectCamera.distance;
+    CHECK(!extremeAspectCamera.TryFrame(focusMin, focusMax, 1e-6f));
+    CHECK(extremeAspectCamera.target.x == extremeTarget.x && extremeAspectCamera.target.y == extremeTarget.y &&
+          extremeAspectCamera.target.z == extremeTarget.z && extremeAspectCamera.distance == extremeDistance);
+    CHECK(extremeAspectCamera.TryFrame({0, 0, 0}, {0, 0, 0}, 1e-6f));
+    CHECK(extremeAspectCamera.distance == 0.5f);
+    const auto pointTarget = extremeAspectCamera.target;
+    const float pointDistance = extremeAspectCamera.distance;
+    CHECK(!extremeAspectCamera.TryFrame(focusMin, focusMax,
+                                        std::numeric_limits<float>::quiet_NaN()));
+    CHECK(extremeAspectCamera.target.x == pointTarget.x && extremeAspectCamera.target.y == pointTarget.y &&
+          extremeAspectCamera.target.z == pointTarget.z && extremeAspectCamera.distance == pointDistance);
 }
 
 void TestTransformGizmoMath() {

@@ -59,8 +59,10 @@ public:
     // Existing convenience API; invalid bounds leave the camera unchanged.
     void Frame(const std::array<float, 3>& boundsMin, const std::array<float, 3>& boundsMax);
     // Focuses the camera on finite, ordered bounds. Point/flat bounds are valid and use the
-    // minimum viewing distance; invalid or out-of-range bounds leave the camera unchanged.
-    bool TryFrame(const std::array<float, 3>& boundsMin, const std::array<float, 3>& boundsMax);
+    // minimum viewing distance; invalid or out-of-range bounds leave the camera unchanged. Aspect
+    // is viewport width / height and defaults to square for source-compatible callers.
+    bool TryFrame(const std::array<float, 3>& boundsMin, const std::array<float, 3>& boundsMax,
+                  float aspect = 1.0f);
 
     Float3 Eye() const;
     Float4x4 View() const;

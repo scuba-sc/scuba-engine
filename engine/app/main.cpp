@@ -1386,8 +1386,11 @@ struct Editor {
     bool FrameInstance(const Instance& inst) {
         if (!inst.model) return false;
         std::array<float, 3> mn{}, mx{};
-        if (render::TransformBounds(inst.model->boundsMin, inst.model->boundsMax, inst.world, mn, mx))
-            return camera.TryFrame(mn, mx);
+        if (render::TransformBounds(inst.model->boundsMin, inst.model->boundsMax, inst.world, mn, mx)) {
+            const auto viewport = ui.viewport();
+            const float aspect = viewport.h > 0.0f ? viewport.w / viewport.h : 0.0f;
+            return camera.TryFrame(mn, mx, aspect);
+        }
         return false;
     }
 
@@ -1421,7 +1424,9 @@ struct Editor {
             }
             return;
         }
-        if (!camera.TryFrame(subtree.boundsMin, subtree.boundsMax)) {
+        const auto viewport = ui.viewport();
+        const float aspect = viewport.h > 0.0f ? viewport.w / viewport.h : 0.0f;
+        if (!camera.TryFrame(subtree.boundsMin, subtree.boundsMax, aspect)) {
             sceneStatus = "Cannot frame selection: bounds are invalid or exceed the camera's view or precision range.";
             return;
         }

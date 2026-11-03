@@ -203,9 +203,9 @@ void OrbitCamera::Frame(const std::array<float, 3>& mn, const std::array<float, 
     (void)TryFrame(mn, mx);
 }
 
-bool OrbitCamera::TryFrame(const std::array<float, 3>& mn, const std::array<float, 3>& mx) {
+bool OrbitCamera::TryFrame(const std::array<float, 3>& mn, const std::array<float, 3>& mx, float aspect) {
     if (!std::isfinite(fovY) || fovY <= 0.0f || fovY >= 3.14159265f ||
-        !std::isfinite(farZ) || farZ <= 1.0f)
+        !std::isfinite(farZ) || farZ <= 1.0f || !std::isfinite(aspect) || aspect <= 0.0f)
         return false;
     for (size_t axis = 0; axis < 3; ++axis)
         if (!std::isfinite(mn[axis]) || !std::isfinite(mx[axis]) || mn[axis] > mx[axis]) return false;
@@ -214,8 +214,15 @@ bool OrbitCamera::TryFrame(const std::array<float, 3>& mn, const std::array<floa
     const double dy = static_cast<double>(mx[1]) - mn[1];
     const double dz = static_cast<double>(mx[2]) - mn[2];
     const double radius = 0.5 * std::hypot(dx, dy, dz);
-    const double sinHalfFov = std::sin(static_cast<double>(fovY) * 0.5);
-    const double framedDistance = std::max(radius / sinHalfFov * 1.1, 0.5);
+    const double verticalHalfFov = static_cast<double>(fovY) * 0.5;
+    const double horizontalHalfFov = std::atan(std::tan(verticalHalfFov) * static_cast<double>(aspect));
+    const double sinVerticalHalfFov = std::sin(verticalHalfFov);
+    const double sinHorizontalHalfFov = std::sin(horizontalHalfFov);
+    if (!std::isfinite(sinVerticalHalfFov) || sinVerticalHalfFov <= 0.0 ||
+        !std::isfinite(sinHorizontalHalfFov) || sinHorizontalHalfFov <= 0.0)
+        return false;
+    const double framedDistance = std::max({radius / sinVerticalHalfFov * 1.1,
+                                            radius / sinHorizontalHalfFov * 1.1, 0.5});
     const double maxDistance = static_cast<double>(farZ) * 0.5;
     if (!std::isfinite(framedDistance) || framedDistance > maxDistance) return false;
 
