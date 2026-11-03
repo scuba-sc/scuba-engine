@@ -4,7 +4,7 @@ This checklist covers the native scene editor on Windows. It complements [Scene 
 
 **Code target recorded for this checklist:** branch `codex/scene-document-v1`. Record `git rev-parse HEAD` immediately before testing and use that exact SHA in the results; do not treat an earlier snapshot as evidence for a later build.
 
-**Portable check recorded for source SHA `84e09798aa992073a7e7515f769723e377c01cfc`:** Linux configured against the pinned SDK 2.4.0 source, built `test_engine_core`, and passed CTest `engine_core` (1/1). This covers portable project-root rejection and unsaved-action gate states; it does not compile the Win32/D3D12 app. The Windows editor build, interactive UI checks and game acceptance remain deferred until the scaffold is complete. A headless test does not establish Windows rendering or input behavior.
+**Portable check recorded for source SHA `417d19dab4cd6b32b6405f58e4248b7fcd70bcee`:** Linux configured against the pinned SDK 2.4.0 source, built `test_engine_core` and `test_scene_outliner_search`, and passed CTest `engine_core` plus `scene_outliner_search` (2/2). This covers portable scene, project, snapping and outliner-search logic; it does not compile the Win32/D3D12 app. The Windows editor build, interactive UI checks and game acceptance remain deferred until the scaffold is complete. A headless test does not establish Windows rendering or input behavior.
 
 ## Prerequisites and build
 
@@ -17,8 +17,8 @@ From the repository root, in PowerShell:
 ```powershell
 cmake -S . -B build-win -G "Visual Studio 17 2022" -A x64 `
   -DSCUBA_BUILD_ENGINE=ON -DSCUBA_BUILD_TESTS=ON -DSCUBA_WERROR=ON
-cmake --build build-win --config Release --target scuba-engine test_workspace_layout test_engine_core test_asset_browser
-ctest --test-dir build-win -C Release -R "^(workspace_layout|engine_core|asset_browser_model)$" --output-on-failure
+cmake --build build-win --config Release --target scuba-engine test_workspace_layout test_engine_core test_scene_outliner_search test_asset_browser
+ctest --test-dir build-win -C Release -R "^(workspace_layout|engine_core|scene_outliner_search|asset_browser_model)$" --output-on-failure
 ```
 
 For offline configure, pass `-DSCUBA_SDK_ARCHIVE_DIR=<directory containing sco-sdk-host-source-sc-2.4.0.zip>` and `-DSCUBA_DEPS_ARCHIVE_DIR=<directory containing the pinned dependency archives>`. Keep the archive names and hashes required by `cmake/ScubaSdk.cmake` and `cmake/ScubaDeps.cmake`; do not substitute an RC or unpublished kit. A successful CTest run covers portable logic, not D3D12 visuals.
@@ -32,25 +32,26 @@ $case = Join-Path $env:TEMP ("scuba-editor-check-" + [guid]::NewGuid().ToString(
 $project = Join-Path $case "project"
 $workspace = Join-Path $case "workspace"
 New-Item -ItemType Directory -Path $case | Out-Null
-New-Item -ItemType Directory -Path $project, $workspace | Out-Null
+New-Item -ItemType Directory -Path $workspace | Out-Null
 $editor = Get-ChildItem .\build-win -Recurse -File -Filter scuba-engine.exe |
   Select-Object -First 1 -ExpandProperty FullName
 if (-not $editor) { throw "scuba-engine.exe was not found under build-win" }
 Push-Location $workspace
-try { & $editor --project $project --scene main } finally { Pop-Location }
+try { & $editor } finally { Pop-Location }
 ```
 
 Check each item and record **Pass**, **Fail**, or **Blocked**, plus the evidence noted at the end.
 
 | Check | Expected result |
 | --- | --- |
-| Project path entry and existing-scene errors | From an in-memory scene, use File > Open project... and enter a valid existing temporary project folder. The `main` scene opens, or a new unsaved `main` scene is shown if the file is absent. A missing path, regular-file path, malformed scene, or project root overlapping a mounted directory/archive reports an error and leaves the current document and save state intact. Also request a switch to a project with malformed `main.scene.json`; the active document must remain unchanged. |
+| Project creation, path entry and existing-scene errors | From the in-memory scene, use File > Create project... and enter the new `$project` path. The editor creates an empty saved `main.scene.json` without replacing existing files/folders or writing under mounted asset sources. A missing parent, existing target, regular-file target, or overlapping mounted root reports an error and preserves existing bytes. Then use File > Open project... on a valid project; `main` opens, or a new unsaved `main` scene is shown if absent. A malformed scene leaves the active document and save state intact. |
 | First-run workspace | Scene is docked left, Inspector right, Content bottom, and the 3D viewport occupies the center. Scene, Inspector and Content are the selected tabs. Mounts, Plugins, Asset loader, Log and Stats share those docks. |
 | Saved workspace | Move a panel, leave the editor open long enough for ImGui’s settings save, close it, and relaunch from the same working directory. The moved layout is restored rather than reset to defaults. |
 | Project scene round trip | Start with the empty temporary project. Add a group, place `models/cube.obj` under it from Content, save with Ctrl+S, close cleanly, and reopen the same project. The group, model reference and transforms remain. Inspect `<project>\main.scene.json` as supporting evidence. |
 | Unsaved guard | Make an edit and close the window. Cancel keeps the editor and edit open; Save persists it; on a separate edit, Discard exits without changing the saved scene. Repeat through File > Open project... and the scene browser: Cancel keeps the current project, Save persists the current scene before switching, and Discard switches without saving. |
 | Hierarchy and Inspector | Add/nest groups, rename a node, reparent while preserving its world transform, and delete a test subtree. Confirm rejected cycle or unrepresentable reparent leaves the document unchanged. Edit translation, rotation and positive nonuniform scale in the Inspector. |
-| Viewport tools and history | Select the model. Try Move, Scale and Rotate gizmos, then Undo and Redo each drag. Escape cancels a valid active drag. A near-edge-on rotation ring may be refused with a status message; positive scale limits and unsupported mirrored scale must be enforced. |
+| Outliner search, hierarchy and selection | Create nested groups and model nodes. Search by node name, stable ID and asset path, using mixed ASCII case. Matching descendants remain visible with their ancestor groups; a selected node outside the results remains selected and offers Clear search. Clear the query and confirm the normal tree's prior collapsed groups are restored. Search must not change scene data, dirty state or undo history. |
+| Viewport tools, snapping and history | Select the model. Confirm all snap toggles are off by default. Try Move, Scale and Rotate with snapping off and with bounded steps enabled, then Undo and Redo each drag once. Escape cancels a valid active drag. Scale values reaching zero or below are refused without losing the last valid value. A near-edge-on rotation ring may be refused with a status message; positive scale limits and unsupported mirrored scale must be enforced. Snap controls are editor-session settings and reset on restart. |
 | Browser and placement | Browse `models`, search for `cube`, switch Tiles/List, and confirm `README.md` remains visible but unsupported. Tiles show text type placeholders, not image thumbnails. Check double-click placement, Place with click preview, Escape cancellation and viewport selection. |
 | Failure and recovery | Use the isolated missing-asset fixture below. The failed node remains in the outliner with a diagnostic; after repairing and remounting the asset source, Retry failed assets loads it without replacing the scene node. |
 | Source-root aliases and case | In the temporary parent, create a junction alias to a test project (`New-Item -ItemType Junction -Path (Join-Path $case 'project-alias') -Target $project`). Mount that alias as a source, then attempt to open `$project`; the editor must report overlap and create no scene file. On a normal case-insensitive volume, repeat by mounting a case-varied spelling of `$project` and opening its original spelling. If the parent permits distinct case-sensitive siblings, verify those distinct roots are allowed and record the filesystem behavior. |
