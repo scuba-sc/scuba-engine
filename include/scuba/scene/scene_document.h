@@ -97,6 +97,11 @@ Status AddModelInstance(Document& document, std::string id, std::string name, st
                         std::optional<std::string> parentId = std::nullopt,
                         LocalTransform transform = {});
 Status RemoveSubtree(Document& document, std::string_view rootId);
+Status RenameNode(Document& document, std::string_view nodeId, std::string name);
+// Reparents a node only under another group (or to the root). With preserveWorldTransform=true,
+// the operation refuses a result that cannot be represented by a non-sheared local TRS.
+Status ReparentNode(Document& document, std::string_view nodeId,
+                    std::optional<std::string> parentId, bool preserveWorldTransform = true);
 
 // Opens an existing, explicitly selected project directory. Scene files are direct children named
 // <scene-id>.scene.json; IDs are restricted to safe filename characters. Save replaces a scene

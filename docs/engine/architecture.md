@@ -169,8 +169,9 @@ picking (right drag orbit, middle drag pan, wheel dolly, left click select, F fr
 
 The scene-document groundwork in the current branch provides versioned project files, hierarchy
 validation and affine world-transform resolution. The editor's Scene panel is a document-backed
-outliner with stable selection, group nesting, explicit save state, and asset placement preview.
-It also has bounded undo/redo, with continuous inspector and move edits coalesced into single steps.
+outliner with stable selection, group nesting, rename, world-preserving reparent, explicit save state,
+and asset placement preview. It also has bounded undo/redo, with continuous inspector and move edits
+coalesced into single steps.
 The renderer/picker matrix path represents resolved transforms, including parent-induced shear.
 Project browsing and Windows D3D12 visual validation remain outstanding.
 

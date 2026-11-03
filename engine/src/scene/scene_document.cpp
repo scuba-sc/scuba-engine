@@ -290,6 +290,102 @@ Status AtomicReplace(const std::filesystem::path& root, const std::filesystem::p
     return Fail("could not allocate a unique temporary scene file name");
 }
 
+Status LocalTransformFromAffine(const render::Float4x4& matrix, LocalTransform& transform) {
+    constexpr double kOrthogonalityTolerance = 5e-4;
+    constexpr double kMatrixTolerance = 8e-4;
+    for (const auto& row : matrix.m)
+        for (const float value : row)
+            if (!std::isfinite(value)) return Fail("reparent transform contains a non-finite value");
+    if (std::fabs(matrix.m[0][3]) > 1e-5f || std::fabs(matrix.m[1][3]) > 1e-5f ||
+        std::fabs(matrix.m[2][3]) > 1e-5f || std::fabs(matrix.m[3][3] - 1.0f) > 1e-5f)
+        return Fail("reparent transform is not affine");
+
+    double rotationRows[3][3]{};
+    double scales[3]{};
+    for (size_t row = 0; row < 3; ++row) {
+        const double x = matrix.m[row][0], y = matrix.m[row][1], z = matrix.m[row][2];
+        scales[row] = std::sqrt(x * x + y * y + z * z);
+        if (!std::isfinite(scales[row]) || scales[row] <= 1e-12)
+            return Fail("reparent transform has a singular scale");
+        rotationRows[row][0] = x / scales[row];
+        rotationRows[row][1] = y / scales[row];
+        rotationRows[row][2] = z / scales[row];
+    }
+    for (size_t a = 0; a < 3; ++a)
+        for (size_t b = a + 1; b < 3; ++b) {
+            const double dot = rotationRows[a][0] * rotationRows[b][0] +
+                               rotationRows[a][1] * rotationRows[b][1] +
+                               rotationRows[a][2] * rotationRows[b][2];
+            if (std::fabs(dot) > kOrthogonalityTolerance)
+                return Fail("reparent would require shear that local TRS cannot represent");
+        }
+    const double determinant =
+        rotationRows[0][0] * (rotationRows[1][1] * rotationRows[2][2] - rotationRows[1][2] * rotationRows[2][1]) -
+        rotationRows[0][1] * (rotationRows[1][0] * rotationRows[2][2] - rotationRows[1][2] * rotationRows[2][0]) +
+        rotationRows[0][2] * (rotationRows[1][0] * rotationRows[2][1] - rotationRows[1][1] * rotationRows[2][0]);
+    if (!std::isfinite(determinant) || std::fabs(determinant - 1.0) > 4.0 * kOrthogonalityTolerance)
+        return Fail("reparent transform is not a proper rotation and positive scale");
+
+    // AffineFromTrs stores the transpose of the usual column-vector rotation matrix.
+    const double m00 = rotationRows[0][0], m01 = rotationRows[1][0], m02 = rotationRows[2][0];
+    const double m10 = rotationRows[0][1], m11 = rotationRows[1][1], m12 = rotationRows[2][1];
+    const double m20 = rotationRows[0][2], m21 = rotationRows[1][2], m22 = rotationRows[2][2];
+    const double trace = m00 + m11 + m22;
+    double qx = 0, qy = 0, qz = 0, qw = 1;
+    if (trace > 0) {
+        const double s = std::sqrt(trace + 1.0) * 2.0;
+        if (s <= 1e-12) return Fail("cannot decompose reparent rotation");
+        qw = 0.25 * s;
+        qx = (m21 - m12) / s;
+        qy = (m02 - m20) / s;
+        qz = (m10 - m01) / s;
+    } else if (m00 > m11 && m00 > m22) {
+        const double s = std::sqrt(std::max(0.0, 1.0 + m00 - m11 - m22)) * 2.0;
+        if (s <= 1e-12) return Fail("cannot decompose reparent rotation");
+        qw = (m21 - m12) / s;
+        qx = 0.25 * s;
+        qy = (m01 + m10) / s;
+        qz = (m02 + m20) / s;
+    } else if (m11 > m22) {
+        const double s = std::sqrt(std::max(0.0, 1.0 + m11 - m00 - m22)) * 2.0;
+        if (s <= 1e-12) return Fail("cannot decompose reparent rotation");
+        qw = (m02 - m20) / s;
+        qx = (m01 + m10) / s;
+        qy = 0.25 * s;
+        qz = (m12 + m21) / s;
+    } else {
+        const double s = std::sqrt(std::max(0.0, 1.0 + m22 - m00 - m11)) * 2.0;
+        if (s <= 1e-12) return Fail("cannot decompose reparent rotation");
+        qw = (m10 - m01) / s;
+        qx = (m02 + m20) / s;
+        qy = (m12 + m21) / s;
+        qz = 0.25 * s;
+    }
+    const double qNorm = std::sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+    if (!std::isfinite(qNorm) || qNorm <= 1e-12) return Fail("cannot normalize reparent rotation");
+
+    LocalTransform candidate;
+    candidate.translation = {matrix.m[3][0], matrix.m[3][1], matrix.m[3][2]};
+    candidate.rotation = {static_cast<float>(qx / qNorm), static_cast<float>(qy / qNorm),
+                          static_cast<float>(qz / qNorm), static_cast<float>(qw / qNorm)};
+    candidate.scale = {static_cast<float>(scales[0]), static_cast<float>(scales[1]),
+                       static_cast<float>(scales[2])};
+    render::Float4x4 recomposed;
+    if (!render::AffineFromTrs({candidate.translation.x, candidate.translation.y, candidate.translation.z},
+                               {candidate.rotation.x, candidate.rotation.y, candidate.rotation.z, candidate.rotation.w},
+                               {candidate.scale.x, candidate.scale.y, candidate.scale.z}, recomposed))
+        return Fail("reparent transform cannot be represented as local TRS");
+    for (size_t row = 0; row < 4; ++row)
+        for (size_t column = 0; column < 4; ++column) {
+            const double expected = matrix.m[row][column];
+            const double tolerance = kMatrixTolerance * std::max(1.0, std::fabs(expected));
+            if (std::fabs(static_cast<double>(recomposed.m[row][column]) - expected) > tolerance)
+                return Fail("reparent transform cannot be represented as local TRS");
+        }
+    transform = candidate;
+    return Status::Ok();
+}
+
 }  // namespace
 
 Status Validate(const Document& document) {
@@ -565,6 +661,112 @@ Status RemoveSubtree(Document& document, std::string_view rootId) {
                                          [&](const Node& node) { return removed.contains(node.id); }),
                           candidate.nodes.end());
     if (auto status = Validate(candidate); !status) return status;
+    document = std::move(candidate);
+    return Status::Ok();
+}
+
+Status RenameNode(Document& document, std::string_view nodeId, std::string name) {
+    if (auto status = Validate(document); !status) return status;
+    Document candidate = document;
+    const auto found = std::find_if(candidate.nodes.begin(), candidate.nodes.end(),
+                                    [&](const Node& node) { return node.id == nodeId; });
+    if (found == candidate.nodes.end()) return Fail("scene node does not exist");
+    if (found->name == name) return Status::Ok();
+    found->name = std::move(name);
+    if (auto status = Validate(candidate); !status) return status;
+    document = std::move(candidate);
+    return Status::Ok();
+}
+
+Status ReparentNode(Document& document, std::string_view nodeId,
+                    std::optional<std::string> parentId, bool preserveWorldTransform) {
+    if (auto status = Validate(document); !status) return status;
+    const auto child = std::find_if(document.nodes.begin(), document.nodes.end(),
+                                    [&](const Node& node) { return node.id == nodeId; });
+    if (child == document.nodes.end()) return Fail("scene node does not exist");
+    if (parentId == child->parentId) return Status::Ok();
+
+    const Node* newParent = nullptr;
+    if (parentId) {
+        const auto found = std::find_if(document.nodes.begin(), document.nodes.end(),
+                                        [&](const Node& node) { return node.id == *parentId; });
+        if (found == document.nodes.end()) return Fail("new scene parent does not exist");
+        if (found->kind != NodeKind::Group) return Fail("only group nodes may contain children");
+        newParent = &*found;
+
+        const Node* cursor = newParent;
+        while (cursor) {
+            if (cursor->id == nodeId) return Fail("reparent would create a scene hierarchy cycle");
+            if (!cursor->parentId) break;
+            const auto ancestor = std::find_if(document.nodes.begin(), document.nodes.end(),
+                                               [&](const Node& node) { return node.id == *cursor->parentId; });
+            cursor = ancestor == document.nodes.end() ? nullptr : &*ancestor;
+        }
+    }
+
+    LocalTransform local = child->localTransform;
+    std::vector<ResolvedTransform> oldWorlds;
+    const render::Float4x4* oldWorld = nullptr;
+    if (preserveWorldTransform) {
+        if (auto status = ResolveWorldTransforms(document, oldWorlds); !status) return status;
+        const auto oldChild = std::find_if(oldWorlds.begin(), oldWorlds.end(),
+                                           [&](const ResolvedTransform& item) { return item.nodeId == nodeId; });
+        if (oldChild == oldWorlds.end()) return Fail("scene node world transform is unavailable");
+        oldWorld = &oldChild->world;
+        render::Float4x4 parentWorld;
+        if (newParent) {
+            const auto resolvedParent = std::find_if(oldWorlds.begin(), oldWorlds.end(),
+                [&](const ResolvedTransform& item) { return item.nodeId == newParent->id; });
+            if (resolvedParent == oldWorlds.end()) return Fail("new parent world transform is unavailable");
+            parentWorld = resolvedParent->world;
+        }
+        render::Float4x4 parentInverse;
+        if (!render::InvertAffine(parentWorld, parentInverse))
+            return Fail("new parent transform is singular or numerically unstable");
+        const render::Float4x4 relative = render::Multiply(*oldWorld, parentInverse);
+        if (auto status = LocalTransformFromAffine(relative, local); !status) return status;
+    }
+
+    Document candidate = document;
+    const auto moved = std::find_if(candidate.nodes.begin(), candidate.nodes.end(),
+                                    [&](const Node& node) { return node.id == nodeId; });
+    moved->parentId = std::move(parentId);
+    moved->localTransform = local;
+    if (auto status = Validate(candidate); !status) return status;
+    std::vector<ResolvedTransform> newWorlds;
+    if (auto status = ResolveWorldTransforms(candidate, newWorlds); !status) return status;
+    if (preserveWorldTransform) {
+        std::unordered_map<std::string, const Node*> nodesById;
+        nodesById.reserve(candidate.nodes.size());
+        for (const auto& node : candidate.nodes) nodesById.emplace(node.id, &node);
+        std::unordered_map<std::string, const render::Float4x4*> oldWorldById, newWorldById;
+        oldWorldById.reserve(oldWorlds.size());
+        newWorldById.reserve(newWorlds.size());
+        for (const auto& item : oldWorlds) oldWorldById.emplace(item.nodeId, &item.world);
+        for (const auto& item : newWorlds) newWorldById.emplace(item.nodeId, &item.world);
+        for (const auto& subtreeNode : candidate.nodes) {
+            const Node* cursor = &subtreeNode;
+            bool inMovedSubtree = false;
+            while (cursor) {
+                if (cursor->id == nodeId) { inMovedSubtree = true; break; }
+                if (!cursor->parentId) break;
+                const auto parent = nodesById.find(*cursor->parentId);
+                cursor = parent == nodesById.end() ? nullptr : parent->second;
+            }
+            if (!inMovedSubtree) continue;
+            const auto oldTransform = oldWorldById.find(subtreeNode.id);
+            const auto newTransform = newWorldById.find(subtreeNode.id);
+            if (oldTransform == oldWorldById.end() || newTransform == newWorldById.end())
+                return Fail("reparented subtree world transform is unavailable");
+            for (size_t row = 0; row < 4; ++row)
+                for (size_t column = 0; column < 4; ++column) {
+                    const double expected = oldTransform->second->m[row][column];
+                    const double tolerance = 1e-3 * std::max(1.0, std::fabs(expected));
+                    if (std::fabs(static_cast<double>(newTransform->second->m[row][column]) - expected) > tolerance)
+                        return Fail("reparent cannot preserve subtree world transforms within tolerance");
+                }
+        }
+    }
     document = std::move(candidate);
     return Status::Ok();
 }

@@ -292,6 +292,12 @@ struct Editor {
     std::string sceneStatus;
     bool inspectorUndoCaptured = false;
     std::string inspectorUndoNode;
+    char renameBuffer[129] = "";  // scene node names are capped at 128 UTF-8 bytes
+    std::string renameTarget;
+    std::string renameSourceName;
+    std::string reparentTarget;
+    std::string reparentTargetNode;
+    bool renameBufferDirty = false;
     bool frameOnLoad = true;
 
     ~Editor() {
@@ -336,6 +342,15 @@ struct Editor {
     const scene::Node* FindNode(std::string_view id) const {
         for (const auto& node : document.nodes) if (node.id == id) return &node;
         return nullptr;
+    }
+
+    bool IsDescendantOrSelf(std::string_view nodeId, std::string_view ancestorId) const {
+        const scene::Node* cursor = FindNode(nodeId);
+        while (cursor) {
+            if (cursor->id == ancestorId) return true;
+            cursor = cursor->parentId ? FindNode(*cursor->parentId) : nullptr;
+        }
+        return false;
     }
 
     Instance* FindNodeInstance(std::string_view id) {
@@ -1123,6 +1138,73 @@ void Editor::DrawScene() {
         ImGui::TextUnformatted(sceneDirty ? "Unsaved" : "Saved");
     }
     if (ImGui::Button("Add group")) AddGroup();
+    if (const scene::Node* selected = FindNode(selectedNode)) {
+        const std::string selectedId = selected->id;
+        const std::string selectedName = selected->name;
+        const scene::NodeKind selectedKind = selected->kind;
+        ImGui::SeparatorText("Selected node");
+        if (renameTarget != selectedId) {
+            renameTarget = selectedId;
+            std::snprintf(renameBuffer, sizeof(renameBuffer), "%s", selectedName.c_str());
+            renameSourceName = selectedName;
+            renameBufferDirty = false;
+        } else if (!renameBufferDirty && renameSourceName != selectedName) {
+            std::snprintf(renameBuffer, sizeof(renameBuffer), "%s", selectedName.c_str());
+            renameSourceName = selectedName;
+        }
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputTextWithHint("##node-name", "Node name", renameBuffer, sizeof(renameBuffer)))
+            renameBufferDirty = true;
+        ImGui::BeginDisabled(!renameBufferDirty);
+        if (ImGui::Button("Apply name")) {
+            scene::Document candidate = document;
+            if (auto status = scene::RenameNode(candidate, selectedId, renameBuffer); !status) {
+                sceneStatus = "Rename refused: " + status.error;
+            } else if (CommitDocument(std::move(candidate))) {
+                if (const scene::Node* renamed = FindNode(selectedId)) {
+                    renameSourceName = renamed->name;
+                    renameBufferDirty = false;
+                }
+            }
+        }
+        ImGui::EndDisabled();
+
+        const scene::Node* currentSelected = FindNode(selectedId);
+        if (reparentTargetNode != selectedId) {
+            reparentTargetNode = selectedId;
+            reparentTarget = currentSelected ? currentSelected->parentId.value_or("") : "";
+        }
+        const scene::Node* target = reparentTarget.empty() ? nullptr : FindNode(reparentTarget);
+        const std::string targetLabel = target && target->kind == scene::NodeKind::Group ? target->name : "Root";
+        if (ImGui::BeginCombo("Parent group", targetLabel.c_str())) {
+            if (ImGui::Selectable("Root", reparentTarget.empty())) reparentTarget.clear();
+            for (const auto& group : document.nodes) {
+                if (group.kind != scene::NodeKind::Group || IsDescendantOrSelf(group.id, selectedId)) continue;
+                ImGui::PushID(group.id.c_str());
+                if (ImGui::Selectable(group.name.c_str(), reparentTarget == group.id)) reparentTarget = group.id;
+                ImGui::PopID();
+            }
+            ImGui::EndCombo();
+        }
+        const std::string currentParent = currentSelected ? currentSelected->parentId.value_or("") : "";
+        ImGui::BeginDisabled(reparentTarget == currentParent);
+        if (ImGui::Button("Reparent (keep world)")) {
+            scene::Document candidate = document;
+            std::optional<std::string> newParent;
+            if (!reparentTarget.empty()) newParent = reparentTarget;
+            if (auto status = scene::ReparentNode(candidate, selectedId, std::move(newParent), true); !status) {
+                sceneStatus = "Reparent refused: " + status.error;
+            } else if (CommitDocument(std::move(candidate))) {
+                sceneStatus = "Node reparented · unsaved";
+            }
+        }
+        ImGui::EndDisabled();
+
+        ImGui::BeginDisabled(selectedNode.empty());
+        const char* deleteLabel = selectedKind == scene::NodeKind::Group ? "Delete group + children" : "Delete node";
+        if (ImGui::Button(deleteLabel)) RemoveSelected();
+        ImGui::EndDisabled();
+    }
     if (!sceneStatus.empty()) ImGui::TextWrapped("%s", sceneStatus.c_str());
     ImGui::Separator();
 

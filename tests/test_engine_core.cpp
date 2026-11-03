@@ -686,6 +686,99 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(editable.nodes.empty());
     CHECK(scene::RemoveSubtree(editable, "missing").ok() == false);
 
+    auto renameDocument = SceneFixture();
+    CHECK(scene::RenameNode(renameDocument, "bay-a", "Hangar Bay").ok());
+    CHECK(renameDocument.nodes[1].name == "Hangar Bay");
+    const auto renamedDocument = renameDocument;
+    CHECK(!scene::RenameNode(renameDocument, "bay-a", "").ok());
+    CHECK(renameDocument == renamedDocument);
+    CHECK(!scene::RenameNode(renameDocument, "absent", "Missing").ok());
+
+    auto reparentDocument = SceneFixture();
+    std::vector<scene::ResolvedTransform> beforeReparent;
+    CHECK(scene::ResolveWorldTransforms(reparentDocument, beforeReparent).ok());
+    CHECK(scene::ReparentNode(reparentDocument, "bay-a", std::nullopt).ok());
+    CHECK(!reparentDocument.nodes[1].parentId);
+    std::vector<scene::ResolvedTransform> afterReparent;
+    CHECK(scene::ResolveWorldTransforms(reparentDocument, afterReparent).ok());
+    for (const auto& previous : beforeReparent) {
+        const auto current = std::find_if(afterReparent.begin(), afterReparent.end(), [&](const auto& item) {
+            return item.nodeId == previous.nodeId;
+        });
+        CHECK(current != afterReparent.end());
+        if (current != afterReparent.end())
+            for (size_t row = 0; row < 4; ++row)
+                for (size_t column = 0; column < 4; ++column)
+                    CHECK(std::fabs(previous.world.m[row][column] - current->world.m[row][column]) < 1e-3f);
+    }
+    const auto preservedReparent = reparentDocument;
+    auto cycleDocument = SceneFixture();
+    const auto unchangedCycle = cycleDocument;
+    CHECK(!scene::ReparentNode(cycleDocument, "root", std::string("bay-a")).ok());  // descendant parent
+    CHECK(cycleDocument == unchangedCycle);
+    auto modelParentDocument = SceneFixture();
+    const auto unchangedModelParent = modelParentDocument;
+    CHECK(!scene::ReparentNode(modelParentDocument, "bay-a", std::string("ship-01")).ok());
+    CHECK(modelParentDocument == unchangedModelParent);
+    CHECK(!scene::ReparentNode(reparentDocument, "bay-a", std::string("missing")).ok());
+    CHECK(reparentDocument == preservedReparent);
+
+    auto shearedReparent = SceneFixture();
+    const auto unchangedSheared = shearedReparent;
+    CHECK(!scene::ReparentNode(shearedReparent, "ship-01", std::nullopt).ok());
+    CHECK(shearedReparent == unchangedSheared);
+
+    scene::Document rotatedReparent;
+    rotatedReparent.id = "rotated-reparent";
+    rotatedReparent.name = "Rotated reparent fixture";
+    scene::Node rotatedParent;
+    rotatedParent.id = "rotated-parent";
+    rotatedParent.name = "Rotated parent";
+    rotatedParent.kind = scene::NodeKind::Group;
+    rotatedParent.localTransform.translation = {4, -2, 1};
+    rotatedParent.localTransform.rotation = {0.18257418f, 0.36514837f, 0.54772256f, 0.73029674f};
+    rotatedParent.localTransform.scale = {2, 2, 2};
+    scene::Node rotatedChild;
+    rotatedChild.id = "rotated-child";
+    rotatedChild.name = "Rotated child";
+    rotatedChild.kind = scene::NodeKind::Group;
+    rotatedChild.parentId = "rotated-parent";
+    rotatedChild.localTransform.translation = {-1, 3, 0.5f};
+    rotatedChild.localTransform.rotation = {0.40824829f, 0.40824829f, 0.40824829f, 0.70710678f};
+    rotatedChild.localTransform.scale = {0.5f, 1.5f, 2};
+    scene::Node rotatedDestination;
+    rotatedDestination.id = "rotated-destination";
+    rotatedDestination.name = "Rotated destination";
+    rotatedDestination.kind = scene::NodeKind::Group;
+    rotatedDestination.localTransform.translation = {-6, 2, 3};
+    rotatedDestination.localTransform.rotation = {0, 0.25881904f, 0, 0.96592583f};
+    rotatedDestination.localTransform.scale = {0.75f, 0.75f, 0.75f};
+    rotatedReparent.nodes = {rotatedParent, rotatedChild, rotatedDestination};
+    std::vector<scene::ResolvedTransform> rotatedWorldBefore;
+    CHECK(scene::ResolveWorldTransforms(rotatedReparent, rotatedWorldBefore).ok());
+    CHECK(scene::ReparentNode(rotatedReparent, "rotated-child", std::string("rotated-destination")).ok());
+    std::vector<scene::ResolvedTransform> rotatedWorldAfter;
+    CHECK(scene::ResolveWorldTransforms(rotatedReparent, rotatedWorldAfter).ok());
+    for (const auto& previous : rotatedWorldBefore) {
+        const auto current = std::find_if(rotatedWorldAfter.begin(), rotatedWorldAfter.end(), [&](const auto& item) {
+            return item.nodeId == previous.nodeId;
+        });
+        CHECK(current != rotatedWorldAfter.end());
+        if (current != rotatedWorldAfter.end())
+            for (size_t row = 0; row < 4; ++row)
+                for (size_t column = 0; column < 4; ++column)
+                    CHECK(std::fabs(previous.world.m[row][column] - current->world.m[row][column]) < 1e-3f);
+    }
+
+    auto historyReparent = SceneFixture();
+    const auto historyReparentBase = historyReparent;
+    scene::DocumentHistory reparentHistory;
+    CHECK(reparentHistory.RecordBefore(historyReparent).ok());
+    CHECK(scene::ReparentNode(historyReparent, "bay-a", std::nullopt).ok());
+    scene::Document restoredReparent;
+    CHECK(reparentHistory.Undo(historyReparent, restoredReparent).ok());
+    CHECK(restoredReparent == historyReparentBase);
+
     scene::DocumentHistory history;
     const auto historyBase = SceneFixture();
     auto historyOne = historyBase;

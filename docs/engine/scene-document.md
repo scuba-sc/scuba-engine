@@ -52,19 +52,21 @@ archive mount paths separately before opening the session.
 
 The Scene panel is a document-backed outliner. Stable node IDs are used for selection and the
 Inspector edits local translation, quaternion rotation, and nonuniform scale. Groups can be added
-and nested; deleting a group removes its subtree. The Content panel keeps its existing double-click
-quick placement and adds a “Place with click” mode: it shows a cyan-tinted viewport preview, click
-places the model, and Escape cancels. If a group is selected when placement starts, the new model
-is parented to that group. Material edits are currently session-only because materials are not in
-scene schema version 1.
+and nested. Selected nodes can be renamed, deleted (groups remove their subtrees), or reparented
+from the selected-node controls. Reparenting keeps the selected node's world transform and rejects
+cycles or moves that would need local shear, which this TRS schema cannot represent. The Content
+panel keeps its existing double-click quick placement and adds a “Place with click” mode: it shows a
+cyan-tinted viewport preview, click places the model, and Escape cancels. If a group is selected when placement starts,
+the new model is parented to that group. Material edits are currently session-only because materials
+are not in scene schema version 1.
 
 Saving is explicit through the Scene panel or File menu (`Ctrl+S`). The Scene panel reports saved,
 unsaved, and save-error states; there is no automatic save. Undo and redo are available from the
 File menu, Scene panel, and `Ctrl+Z` / `Ctrl+Y`. They retain up to 64 snapshots or 32 MiB, whichever
 limit is reached first. A continuous Inspector edit or Ctrl+left-drag is one history action; group,
-place, delete, clear, and double-click spawn each form one action. Asynchronous grounding is folded
-into its spawn action when no later scene edit intervenes. Returning to the last saved document
-clears the unsaved state; saving establishes a new baseline without discarding undo history.
+place, delete, rename, reparent, clear, and double-click spawn each form one action. Asynchronous
+grounding is folded into its spawn action when no later scene edit intervenes. Returning to the last
+saved document clears the unsaved state; saving establishes a new baseline without discarding undo history.
 Without `--project`, the editor still uses the same document and outliner in memory and says that
 the session will not persist.
 
