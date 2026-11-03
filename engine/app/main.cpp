@@ -305,6 +305,7 @@ struct Editor {
     bool inspectorRotationInitialized = false;
     bool inspectorRotationActive = false;
     bool translationGizmoDragging = false;
+    bool translationGizmoGestureActive = false;
     int translationGizmoAxis = -1;
     char renameBuffer[129] = "";  // scene node names are capped at 128 UTF-8 bytes
     std::string renameTarget;
@@ -1080,7 +1081,9 @@ public:
     const char* Name() const override { return "ui"; }
     ui::Reply OnInput(const ui::InputEvent& ev) override {
         if (ev.kind == ui::InputKind::KeyDown) {
-            if (e_.placement.active && ev.key == ImGuiKey_Escape) return ui::Reply::Unhandled();
+            if ((e_.placement.active || e_.translationGizmoGestureActive) &&
+                ev.key == ImGuiKey_Escape)
+                return ui::Reply::Unhandled();
             return e_.ui.keyboardToUi() ? ui::Reply::Handled() : ui::Reply::Unhandled();
         }
         if (e_.ui.pointerOverUi() || !e_.ui.viewport().Contains(ev.x, ev.y)) return ui::Reply::Handled();
@@ -1127,14 +1130,24 @@ public:
     const char* Name() const override { return "translate-gizmo"; }
 
     ui::Reply OnInput(const ui::InputEvent& event) override {
+        if (event.kind == ui::InputKind::PointerCancel) {
+            const bool keptPartialEdit = dragging_ && undoCaptured_;
+            ResetGesture();
+            if (keptPartialEdit)
+                editor_.sceneStatus = "Axis drag interrupted; current position kept · undo available";
+            return ui::Reply::Handled();
+        }
+        if (event.kind == ui::InputKind::KeyDown && gestureCaptured_) {
+            if (event.key == ImGuiKey_Escape) {
+                CancelGesture();
+                return ui::Reply::Release();
+            }
+            editor_.sceneStatus = "Finish or cancel the active axis drag before using editor shortcuts";
+            return ui::Reply::Handled();
+        }
         if (event.kind == ui::InputKind::PointerUp && event.button == ui::PointerButton::Left) {
-            if (!dragging_ && !suppressClick_) return ui::Reply::Unhandled();
-            dragging_ = false;
-            suppressClick_ = false;
-            undoCaptured_ = false;
-            draggedNode_.clear();
-            editor_.translationGizmoDragging = false;
-            editor_.translationGizmoAxis = -1;
+            if (!gestureCaptured_) return ui::Reply::Unhandled();
+            ResetGesture();
             return ui::Reply::Release();
         }
         if (event.kind == ui::InputKind::PointerDown && event.button == ui::PointerButton::Left) {
@@ -1146,6 +1159,8 @@ public:
             const scene::Node* selected = editor_.FindNode(editor_.selectedNode);
             const auto* world = selected ? editor_.World(selected->id) : nullptr;
             if (!selected || !world) return ui::Reply::Unhandled();
+            gestureCaptured_ = true;
+            editor_.translationGizmoGestureActive = true;
 
             constexpr render::Float3 kWorldAxes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
             axis_ = kWorldAxes[axisIndex];
@@ -1153,14 +1168,12 @@ public:
             const auto startRay = editor_.camera.ScreenRay(event.x, event.y, editor_.ui.viewport());
             if (!render::ClosestRayAxisParameter(startRay, startWorldPosition_, axis_, startParameter_)) {
                 editor_.sceneStatus = "Axis translation unavailable from this view direction";
-                suppressClick_ = true;
                 return ui::Reply::Capture();
             }
             if (selected->parentId) {
                 const auto* parentWorld = editor_.World(*selected->parentId);
                 if (!parentWorld || !render::InvertAffine(*parentWorld, parentInverse_)) {
                     editor_.sceneStatus = "Axis translation unavailable: parent transform cannot be inverted";
-                    suppressClick_ = true;
                     return ui::Reply::Capture();
                 }
             } else {
@@ -1174,6 +1187,11 @@ public:
             return ui::Reply::Capture();
         }
         if (event.kind == ui::InputKind::PointerMove && dragging_ && event.leftHeld) {
+            if (undoCaptured_ && editor_.historyRevision != dragHistoryRevision_) {
+                editor_.sceneStatus = "Axis drag stopped because another scene edit completed; current position kept";
+                ResetGesture();
+                return ui::Reply::Release();
+            }
             if (!editor_.FindNode(draggedNode_)) return ui::Reply::Handled();
             const auto ray = editor_.camera.ScreenRay(event.x, event.y, editor_.ui.viewport());
             float currentParameter = 0;
@@ -1192,21 +1210,62 @@ public:
             });
             if (node == candidate.nodes.end()) return ui::Reply::Handled();
             node->localTransform.translation = {localTranslation.x, localTranslation.y, localTranslation.z};
+            if (!undoCaptured_) historyBeforeDocument_ = editor_.document;
             editor_.CommitInteractiveDocument(std::move(candidate), undoCaptured_);
+            if (undoCaptured_) dragHistoryRevision_ = editor_.historyRevision;
             return ui::Reply::Handled();
         }
         return ui::Reply::Unhandled();
     }
 
 private:
+    void ResetGesture() {
+        gestureCaptured_ = false;
+        dragging_ = false;
+        undoCaptured_ = false;
+        draggedNode_.clear();
+        historyBeforeDocument_ = {};
+        dragHistoryRevision_ = 0;
+        editor_.translationGizmoDragging = false;
+        editor_.translationGizmoGestureActive = false;
+        editor_.translationGizmoAxis = -1;
+    }
+
+    void CancelGesture() {
+        if (dragging_ && undoCaptured_) {
+            scene::Document restored;
+            if (auto status = editor_.sceneHistory.CancelLatestChange(historyBeforeDocument_, restored); !status) {
+                editor_.sceneStatus = "Axis drag could not be canceled safely: " + status.error +
+                                      "; current position kept";
+                ResetGesture();
+                return;
+            }
+            editor_.inspectorUndoCaptured = false;
+            editor_.inspectorUndoNode.clear();
+            if (auto status = editor_.InstallDocument(std::move(restored)); !status) {
+                editor_.sceneStatus = "Axis drag cancel could not restore its starting scene: " + status.error;
+                ResetGesture();
+                return;
+            }
+            ++editor_.historyRevision;
+            ResetGesture();
+            editor_.SetHistoryStatus("Drag canceled");
+            return;
+        }
+        ResetGesture();
+        editor_.sceneStatus = "Axis drag canceled";
+    }
+
     Editor& editor_;
     render::Float3 axis_{};
     render::Float3 startWorldPosition_{};
     float startParameter_ = 0;
     render::Float4x4 parentInverse_{};
     std::string draggedNode_;
+    scene::Document historyBeforeDocument_;
+    uint64_t dragHistoryRevision_ = 0;
+    bool gestureCaptured_ = false;
     bool dragging_ = false;
-    bool suppressClick_ = false;
     bool undoCaptured_ = false;
 };
 
@@ -1216,6 +1275,12 @@ public:
     explicit MoveTool(Editor& e) : e_(e) {}
     const char* Name() const override { return "move"; }
     ui::Reply OnInput(const ui::InputEvent& ev) override {
+        if (ev.kind == ui::InputKind::PointerCancel) {
+            dragging_ = false;
+            undoCaptured_ = false;
+            draggedNode_.clear();
+            return ui::Reply::Handled();
+        }
         if (ev.kind == ui::InputKind::PointerUp && ev.button == ui::PointerButton::Left) {
             const bool wasDragging = dragging_;
             dragging_ = false;
@@ -1295,6 +1360,8 @@ public:
                 e_.selectedNode = instance ? instance->nodeId : std::string{};
             }
             return ui::Reply::Release();
+        case ui::InputKind::PointerCancel:
+            return ui::Reply::Handled();
         case ui::InputKind::Wheel:
             e_.camera.Dolly(ev.wheel);
             return ui::Reply::Handled();

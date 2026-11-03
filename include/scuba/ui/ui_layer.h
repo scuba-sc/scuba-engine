@@ -39,12 +39,13 @@ public:
     bool pointerOverUi() const;     // ImGui wants the pointer (over a panel, not the viewport)
     bool keyboardToUi() const;      // a text field or panel has keyboard focus
     // This frame's pointer and key input as router events, in order.
-    std::vector<InputEvent> Events() const;
+    std::vector<InputEvent> Events();
 
 private:
     render::Renderer* renderer_ = nullptr;
     render::Rect viewport_;
     bool ready_ = false;
+    bool mousePositionWasValid_ = false;
 };
 
 }  // namespace scuba::ui

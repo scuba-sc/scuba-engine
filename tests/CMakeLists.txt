@@ -468,6 +468,11 @@ if(TARGET scuba_engine_core)
   scuba_warnings(test_engine_core)
   add_test(NAME engine_core COMMAND test_engine_core)
   set_tests_properties(engine_core PROPERTIES TIMEOUT 60)
+
+  add_executable(test_input_router test_input_router.cpp ../engine/src/ui/input_router.cpp)
+  target_include_directories(test_input_router PRIVATE "${PROJECT_SOURCE_DIR}/include")
+  scuba_warnings(test_input_router)
+  add_test(NAME input_router_capture_lifecycle COMMAND test_input_router)
 endif()
 
 # The engine's product-profile path: ScoHost::Start with productRoot, fail-closed on a missing

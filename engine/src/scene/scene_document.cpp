@@ -1086,6 +1086,20 @@ Status DocumentHistory::Redo(const Document& current, Document& restored) {
     return Status::Ok();
 }
 
+Status DocumentHistory::CancelLatestChange(const Document& expectedBefore, Document& restored) {
+    if (!redo_.empty()) return Fail("cannot cancel an interactive edit while redo history is active");
+    if (undo_.empty()) return Fail("there is no captured scene change to cancel");
+    Document candidate;
+    if (auto status = Deserialize(undo_.back(), candidate); !status) return status;
+    if (candidate != expectedBefore)
+        return Fail("the latest scene change no longer matches the interactive edit being canceled");
+
+    retainedBytes_ -= undo_.back().size();
+    undo_.pop_back();
+    restored = std::move(candidate);
+    return Status::Ok();
+}
+
 void DocumentHistory::Clear() noexcept {
     undo_.clear();
     redo_.clear();

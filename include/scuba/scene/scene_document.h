@@ -181,6 +181,9 @@ public:
     Status RecordBefore(const Document& document);
     Status Undo(const Document& current, Document& restored);
     Status Redo(const Document& current, Document& restored);
+    // Removes the most recent captured edit only when its before-snapshot matches the expected
+    // document. Used to roll back an explicitly canceled interactive transaction.
+    Status CancelLatestChange(const Document& expectedBefore, Document& restored);
     void Clear() noexcept;
 
     bool CanUndo() const noexcept { return !undo_.empty(); }

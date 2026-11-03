@@ -100,7 +100,7 @@ render::UiFramePtr UiLayer::EndFrame() {
 bool UiLayer::pointerOverUi() const { return ImGui::GetIO().WantCaptureMouse; }
 bool UiLayer::keyboardToUi() const { return ImGui::GetIO().WantCaptureKeyboard; }
 
-std::vector<InputEvent> UiLayer::Events() const {
+std::vector<InputEvent> UiLayer::Events() {
     const ImGuiIO& io = ImGui::GetIO();
     std::vector<InputEvent> out;
     InputEvent base;
@@ -114,34 +114,42 @@ std::vector<InputEvent> UiLayer::Events() const {
     base.leftHeld = io.MouseDown[0];
     base.rightHeld = io.MouseDown[1];
     base.middleHeld = io.MouseDown[2];
-    if (!ImGui::IsMousePosValid(&io.MousePos)) return out;
-
-    static constexpr PointerButton kButtons[3] = {PointerButton::Left, PointerButton::Right, PointerButton::Middle};
-    for (int b = 0; b < 3; ++b)
-        if (io.MouseClicked[b]) {
+    if (ImGui::IsMousePosValid(&io.MousePos)) {
+        mousePositionWasValid_ = true;
+        static constexpr PointerButton kButtons[3] = {PointerButton::Left, PointerButton::Right, PointerButton::Middle};
+        for (int b = 0; b < 3; ++b)
+            if (io.MouseClicked[b]) {
+                InputEvent e = base;
+                e.kind = InputKind::PointerDown;
+                e.button = kButtons[b];
+                out.push_back(e);
+            }
+        if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0) {
             InputEvent e = base;
-            e.kind = InputKind::PointerDown;
-            e.button = kButtons[b];
+            e.kind = InputKind::PointerMove;
             out.push_back(e);
         }
-    if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0) {
-        InputEvent e = base;
-        e.kind = InputKind::PointerMove;
-        out.push_back(e);
-    }
-    if (io.MouseWheel != 0) {
-        InputEvent e = base;
-        e.kind = InputKind::Wheel;
-        e.wheel = io.MouseWheel;
-        out.push_back(e);
-    }
-    for (int b = 0; b < 3; ++b)
-        if (io.MouseReleased[b]) {
+        if (io.MouseWheel != 0) {
             InputEvent e = base;
-            e.kind = InputKind::PointerUp;
-            e.button = kButtons[b];
+            e.kind = InputKind::Wheel;
+            e.wheel = io.MouseWheel;
             out.push_back(e);
         }
+        for (int b = 0; b < 3; ++b)
+            if (io.MouseReleased[b]) {
+                InputEvent e = base;
+                e.kind = InputKind::PointerUp;
+                e.button = kButtons[b];
+                out.push_back(e);
+            }
+    } else {
+        if (mousePositionWasValid_) {
+            InputEvent e = base;
+            e.kind = InputKind::PointerCancel;
+            out.push_back(e);
+        }
+        mousePositionWasValid_ = false;
+    }
     for (ImGuiKey key : {ImGuiKey_F, ImGuiKey_Delete, ImGuiKey_Escape, ImGuiKey_G, ImGuiKey_S,
                          ImGuiKey_Z, ImGuiKey_Y})
         if (ImGui::IsKeyPressed(key, false)) {

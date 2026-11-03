@@ -569,6 +569,22 @@ void TestTransformGizmoMath() {
     CHECK(render::HitTestScreenSegments(23, 50, handles, 5, 12) == 1);
     CHECK(render::HitTestScreenSegments(52, 51, handles, 5, 12) == -1);  // end-on handle
     CHECK(render::HitTestScreenSegments(300, 300, handles, 5, 12) == -1);
+    const std::array<render::ScreenSegment, 2> overlapping{{handles[0], handles[0]}};
+    CHECK(render::HitTestScreenSegments(50, 20, overlapping, 5, 12) == 1);  // visually topmost handle wins ties
+
+    render::OrbitCamera endOnCamera;
+    endOnCamera.target = {0, 0, 0};
+    endOnCamera.distance = 10;
+    endOnCamera.yaw = 0;
+    endOnCamera.pitch = 0;
+    const auto endOnView = endOnCamera.View();
+    const auto endOnProjection = endOnCamera.Projection(viewport.w / viewport.h);
+    render::ScreenPoint endOnCenter, endOnEndpoint;
+    CHECK(render::ProjectPoint({0, 0, 0}, endOnView, endOnProjection, viewport, endOnCenter));
+    CHECK(render::ProjectPoint({5, 0, 0}, endOnView, endOnProjection, viewport, endOnEndpoint));
+    const render::ScreenSegment cameraFacingAxis{endOnCenter, endOnEndpoint};
+    CHECK(render::HitTestScreenSegments(endOnEndpoint.x, endOnEndpoint.y,
+                                        std::span<const render::ScreenSegment>(&cameraFacingAxis, 1)) == -1);
 
     float startParameter = -99;
     const render::Ray startRay{{10, 2, 0}, {0, -1, 0}};
@@ -1109,6 +1125,40 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(history.RecordBefore(historyOne).ok());  // a new edit discards the old redo branch
     CHECK(!history.CanRedo());
     CHECK(history.Undo(historyBranch, historyRestored).ok() && historyRestored == historyOne);
+
+    scene::DocumentHistory cancelHistory;
+    CHECK(cancelHistory.RecordBefore(historyBase).ok());
+    auto cancelIntermediate = historyBase;
+    cancelIntermediate.nodes[2].localTransform.translation.y += 1.0f;
+    CHECK(cancelHistory.RecordBefore(cancelIntermediate).ok());
+    auto canceledDragDocument = cancelIntermediate;
+    canceledDragDocument.nodes[2].localTransform.translation.x += 4.0f;
+    CHECK(canceledDragDocument != cancelIntermediate);
+    auto wrongCancelBaseline = historyBase;
+    wrongCancelBaseline.name = "a different transaction";
+    auto cancelOutputSentinel = historyTwo;
+    CHECK(!cancelHistory.CancelLatestChange(wrongCancelBaseline, cancelOutputSentinel).ok());
+    CHECK(cancelHistory.retainedEntries() == 2 && cancelOutputSentinel == historyTwo);
+    scene::Document canceledDragRestored;
+    CHECK(cancelHistory.CancelLatestChange(cancelIntermediate, canceledDragRestored).ok());
+    CHECK(canceledDragRestored == cancelIntermediate);
+    CHECK(cancelHistory.CanUndo() && !cancelHistory.CanRedo());
+    CHECK(cancelHistory.retainedEntries() == 1);
+    scene::DocumentDirtyState cancelDirtyState;
+    CHECK(cancelDirtyState.SetBaseline(cancelIntermediate, true).ok());
+    CHECK(cancelDirtyState.Update(canceledDragDocument).ok() && cancelDirtyState.dirty());
+    CHECK(cancelDirtyState.Update(canceledDragRestored).ok() && !cancelDirtyState.dirty());
+    scene::Document priorCancelRestored;
+    CHECK(cancelHistory.Undo(canceledDragRestored, priorCancelRestored).ok());
+    CHECK(priorCancelRestored == historyBase && cancelHistory.retainedEntries() == 1);
+    scene::DocumentHistory redoCancelHistory;
+    CHECK(redoCancelHistory.RecordBefore(historyBase).ok());
+    CHECK(redoCancelHistory.RecordBefore(historyOne).ok());
+    scene::Document redoCancelCurrent;
+    CHECK(redoCancelHistory.Undo(historyTwo, redoCancelCurrent).ok());
+    auto redoCancelSentinel = historyTwo;
+    CHECK(!redoCancelHistory.CancelLatestChange(historyBase, redoCancelSentinel).ok());
+    CHECK(redoCancelSentinel == historyTwo && redoCancelHistory.CanUndo() && redoCancelHistory.CanRedo());
 
     scene::DocumentHistory rotationScaleHistory;
     const auto rotationScaleBase = SceneFixture();

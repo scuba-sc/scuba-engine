@@ -64,7 +64,11 @@ the same bounded undo history as other scene changes. The viewport shows screen-
 for the selected node's world X, Y, and Z translation axes. Dragging an arrow moves the node only
 along that world axis; the result is transformed through the parent inverse before writing local
 translation, and the drag is one undo action. Ctrl+left-drag retains its ground-plane move behavior.
-Viewport rotation and scale gizmos are not implemented yet.
+Escape rolls back the active gizmo gesture if no separate scene edit has superseded it. If another
+edit intervenes, rollback is refused and the current position is kept. If pointer capture is
+interrupted, the last applied position is kept as one undoable edit. Handles that project end-on
+are not pickable; the tool refuses near-parallel ray/axis movement instead of applying an unstable
+translation. Viewport rotation and scale gizmos are not implemented yet.
 Groups can be added and nested. Selected nodes can be renamed, deleted (groups remove their
 subtrees), or reparented from the selected-node controls. Reparenting keeps the selected node's
 world transform and rejects cycles or moves that would need local shear, which this TRS schema
