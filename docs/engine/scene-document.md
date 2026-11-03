@@ -78,7 +78,19 @@ the session will not persist.
 
 `ResolveWorldTransforms` first validates the document, then emits resolved matrices in the original
 node order regardless of parent ordering in the serialized array. It leaves its output unchanged
-if composition overflows or a world transform is singular or numerically unstable. The editor now
-loads and saves the selected document, draws its model nodes with resolved matrices, routes viewport
-picks back to stable node selection, and stores asset placement in the document. Scene browser,
-drag-and-drop placement, and Windows D3D12 visual validation remain follow-on work.
+if composition overflows or a world transform is singular or numerically unstable. On open, the
+editor installs the validated document, rebuilds model instances by stable node ID, and requests
+each asset path from the current VFS mounts. Ready models are uploaded and drawn with their resolved
+world matrices; the same instances feed viewport picking. The outliner and Inspector remain backed
+by the document even when a model cannot be loaded. A missing, unsupported, or malformed model file
+leaves its saved node in place, marks the outliner row as failed, and reports the loader error in
+the outliner and Asset Loader tooltips and the log. The document is not rewritten to remove the
+reference. Invalid asset-path syntax (including traversal or a non-normalized VFS path) rejects the
+scene load; browser opens show the error and leave the current document untouched, while startup
+reports the error and leaves the saved file untouched. A failed model request is not automatically
+retried after mounts change in the current session; restart the editor after correcting the VFS
+mounts to request the asset again.
+Selection is editor-session state: opening a scene clears the previous selection; nodes can be
+selected from the outliner, and loaded models can also be selected in the viewport. The project
+scene browser is available from the File menu and Scene panel. Windows D3D12 compilation and visual
+validation remain pending; the focused Linux core tests do not establish Windows rendering behavior.
