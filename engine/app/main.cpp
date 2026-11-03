@@ -29,6 +29,7 @@
 // and exit without creating a window: <DIR>/data (the roster included) or one .scpak of the same
 // tree. Both refuse an occupied destination and a roster folder without a plugin.ini.
 #include "scuba/asset/model_loader.h"
+#include "scuba/asset/browser.h"
 #include "scuba/core/job_system.h"
 #include "scuba/core/log.h"
 #include "scuba/platform/window.h"
@@ -356,6 +357,14 @@ struct Editor {
     char mountPoint[128] = "";
     int mountPriority = 10;
     char contentFilter[128] = "";
+    std::vector<vfs::Entry> contentCatalog;
+    asset::BrowserContents contentBrowserView;
+    std::string contentDirectory;
+    std::string contentBrowserViewDirectory;
+    std::string contentBrowserViewSearch;
+    std::string contentBrowserStatus;
+    bool contentCatalogLoaded = false;
+    bool contentBrowserViewValid = false;
     uint64_t logSeen = 0;
     std::vector<log::Line> logLines;
 
@@ -1598,32 +1607,139 @@ void Editor::DrawMenu(bool& quit) {
 
 void Editor::DrawContent() {
     if (!ImGui::Begin("Content", &showContent)) { ImGui::End(); return; }
+    // VFS directory mounts are indexed when mounted. Keep one merged listing until the mount
+    // stack changes; edits on disk appear after the directory mount is remounted.
+    if (!contentCatalogLoaded) {
+        contentCatalog = vfs.List();
+        contentCatalogLoaded = true;
+        contentBrowserViewValid = false;
+    }
+
+    if (!contentBrowserViewValid || contentBrowserViewDirectory != contentDirectory ||
+        contentBrowserViewSearch != contentFilter) {
+        if (auto status = asset::BuildBrowserContents(contentCatalog, contentDirectory, contentFilter,
+                                                       contentBrowserView); !status) {
+            contentBrowserStatus = status.error;
+            contentDirectory.clear();
+            contentFilter[0] = '\0';
+            contentBrowserView = {};
+        }
+        contentBrowserViewDirectory = contentDirectory;
+        contentBrowserViewSearch = contentFilter;
+        contentBrowserViewValid = true;
+    }
+    const auto& browser = contentBrowserView;
+
+    if (ImGui::SmallButton("All assets")) {
+        contentDirectory.clear();
+        contentFilter[0] = '\0';
+        selectedAssetPath.clear();
+        contentBrowserStatus.clear();
+    }
+    std::string prefix;
+    size_t start = 0;
+    while (start < contentDirectory.size()) {
+        const size_t slash = contentDirectory.find('/', start);
+        const size_t end = slash == std::string::npos ? contentDirectory.size() : slash;
+        const std::string segment = contentDirectory.substr(start, end - start);
+        prefix = prefix.empty() ? segment : prefix + "/" + segment;
+        ImGui::SameLine();
+        ImGui::TextDisabled("/");
+        ImGui::SameLine();
+        ImGui::PushID(prefix.c_str());
+        if (ImGui::SmallButton(segment.c_str())) {
+            contentDirectory = prefix;
+            contentFilter[0] = '\0';
+            selectedAssetPath.clear();
+            contentBrowserStatus.clear();
+        }
+        ImGui::PopID();
+        start = end + 1;
+    }
+
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##filter", "filter models", contentFilter, sizeof contentFilter);
-    const std::string filter = vfs::NormalizePath(contentFilter);
-    if (ImGui::BeginChild("files")) {
-        for (const auto& e : vfs.List()) {
-            if (asset::FormatOf(e.path) == asset::ModelFormat::Unknown) continue;
-            if (!filter.empty() && e.path.find(filter) == std::string::npos) continue;
-            ImGui::PushID(e.path.c_str());
-            if (ImGui::Selectable(e.path.c_str(), selectedAssetPath == e.path, ImGuiSelectableFlags_AllowDoubleClick)) {
-                selectedAssetPath = e.path;
-                if (ImGui::IsMouseDoubleClicked(0)) Spawn(e.path);  // Keep the existing quick-place gesture.
+    ImGui::InputTextWithHint("##filter", "search files in this folder and below", contentFilter,
+                             sizeof contentFilter);
+    ImGui::TextDisabled("Folders");
+    if (ImGui::BeginChild("folders", ImVec2(0, 92), true)) {
+        for (const auto& folder : browser.directories) {
+            ImGui::PushID(folder.path.c_str());
+            const std::string label = folder.name + "/";
+            if (ImGui::Selectable(label.c_str())) {
+                contentDirectory = folder.path;
+                contentFilter[0] = '\0';
+                selectedAssetPath.clear();
+                contentBrowserStatus.clear();
             }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%llu bytes\nfrom %s\ndouble-click to place", e.path.c_str(),
-                                                          static_cast<unsigned long long>(e.size), vfs.Resolve(e.path).c_str());
             ImGui::PopID();
         }
+        if (browser.directories.empty()) ImGui::TextDisabled("No child folders");
     }
     ImGui::EndChild();
-    if (!selectedAssetPath.empty()) {
-        if (ImGui::Button("Place with click")) StartPlacement(selectedAssetPath);
-        if (placement.active) {
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel")) CancelPlacement();
+
+    ImGui::TextDisabled("%s", contentFilter[0] ? "Matching files" : "Files");
+    if (ImGui::BeginChild("assets", ImVec2(0, -82), true)) {
+        for (const auto& item : browser.files) {
+            ImGui::PushID(item.path.c_str());
+            const bool supported = item.supportedModelFormat();
+            const std::string label = item.name + "  [" +
+                (supported ? asset::FormatName(item.format) : "unsupported") + "]";
+            if (ImGui::Selectable(label.c_str(), selectedAssetPath == item.path,
+                                  ImGuiSelectableFlags_AllowDoubleClick)) {
+                selectedAssetPath = item.path;
+                contentBrowserStatus.clear();
+                if (ImGui::IsMouseDoubleClicked(0)) {
+                    if (supported && vfs.Exists(item.path))
+                        Spawn(item.path);  // Preserve the existing double-click quick-place gesture.
+                }
+            }
+            if (ImGui::IsItemHovered()) {
+                if (!vfs.Exists(item.path)) {
+                    ImGui::SetTooltip("%s\nStill present in the indexed listing, but unavailable from the mounted VFS now.\nRemount the source to refresh the listing.",
+                                      item.path.c_str());
+                } else if (supported) {
+                    ImGui::SetTooltip("%s\n%llu bytes\nfrom %s\nRecognized %s format; the model loader checks its contents and dependencies on open.\nDouble-click to quick-place.",
+                                      item.path.c_str(), static_cast<unsigned long long>(item.size),
+                                      vfs.Resolve(item.path).c_str(), asset::FormatName(item.format));
+                } else {
+                    ImGui::SetTooltip("%s\n%llu bytes\nfrom %s\nVisible in the mounted VFS, but this file type is not supported for model placement.",
+                                      item.path.c_str(), static_cast<unsigned long long>(item.size),
+                                      vfs.Resolve(item.path).c_str());
+                }
+            }
+            ImGui::PopID();
         }
+        if (browser.files.empty())
+            ImGui::TextDisabled(contentFilter[0] ? "No files match this search in the current folder" :
+                                                  "No files in the current folder");
     }
+    ImGui::EndChild();
+
+    const auto* selectedItem = asset::FindBrowserFile(browser, selectedAssetPath);
+    const bool selectedExists = !selectedAssetPath.empty() && vfs.Exists(selectedAssetPath);
+    const bool canPlace = selectedItem && selectedItem->supportedModelFormat() && selectedExists;
+    if (!selectedAssetPath.empty()) {
+        ImGui::BeginDisabled(!canPlace);
+        if (ImGui::Button("Place with click")) StartPlacement(selectedAssetPath);
+        ImGui::EndDisabled();
+    }
+    if (placement.active) {
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) CancelPlacement();
+    }
+    std::string selectionStatus;
+    if (!selectedAssetPath.empty()) {
+        if (!selectedExists)
+            selectionStatus = "Selected asset is no longer available in the mounted VFS.";
+        else if (!selectedItem)
+            selectionStatus = "Selected asset is outside the current folder or search results.";
+        else if (!selectedItem->supportedModelFormat())
+            selectionStatus = "Selected file is visible but its format is not supported for model placement.";
+    }
+    if (!selectionStatus.empty()) ImGui::TextWrapped("%s", selectionStatus.c_str());
+    else if (!contentBrowserStatus.empty()) ImGui::TextWrapped("%s", contentBrowserStatus.c_str());
     if (placement.active) ImGui::TextWrapped("%s", placement.status.c_str());
+    ImGui::TextWrapped("Folders are inferred from mounted file paths. Mount a directory, .zip, or .scpak in Mounts to browse it through the VFS. Unsupported files stay visible; missing files are not listed. Directory mounts show their indexed snapshot, so remount after changing files on disk.");
     ImGui::End();
 }
 
@@ -1649,14 +1765,16 @@ void Editor::DrawMounts() {
             ImGui::PopID();
         }
         ImGui::EndTable();
-        if (drop) vfs.Unmount(*drop);
+        if (drop && vfs.Unmount(*drop)) contentCatalogLoaded = false;
     }
     ImGui::SeparatorText("Mount");
     ImGui::InputTextWithHint("path", "directory, .zip or .scpak", mountPath, sizeof mountPath);
     ImGui::InputTextWithHint("mount point", "/ (root)", mountPoint, sizeof mountPoint);
     ImGui::InputInt("priority", &mountPriority);
     if (ImGui::Button("Mount")) {
-        if (auto st = MountPath(vfs, PathFromUtf8(mountPath), mountPoint, mountPriority); !st) log::Error("vfs", st.error);
+        if (auto st = MountPath(vfs, PathFromUtf8(mountPath), mountPoint, mountPriority); !st)
+            log::Error("vfs", st.error);
+        else contentCatalogLoaded = false;
     }
     ImGui::End();
 }

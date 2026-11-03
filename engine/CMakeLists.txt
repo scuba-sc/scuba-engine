@@ -19,6 +19,7 @@ add_library(scuba_engine_core STATIC
   src/vfs/pack_fs.cpp
   src/vfs/virtual_file_system.cpp
   src/scene/scene_document.cpp
+  src/asset/browser.cpp
   src/asset/decode.cpp
   src/asset/model_loader.cpp
   src/product/export.cpp

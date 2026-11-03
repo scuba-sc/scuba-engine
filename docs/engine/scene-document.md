@@ -81,15 +81,29 @@ transform is kept. If pointer capture is interrupted, the last valid transform i
 undoable edit. Handles that project
 end-on are not pickable; the tool refuses near-parallel ray/axis movement instead of applying an
 unstable translation. An active asset-placement preview hides the transform gizmo and owns viewport
-clicks. The native viewport UI remains Windows-only and still needs Windows compile and visual
-validation.
+clicks. The native Content and viewport UI remain Windows-only and still need a Windows compile and
+visual validation.
 Groups can be added and nested. Selected nodes can be renamed, deleted (groups remove their
 subtrees), or reparented from the selected-node controls. Reparenting keeps the selected node's
 world transform and rejects cycles or moves that would need local shear, which this TRS schema
-cannot represent. The Content panel keeps its existing double-click quick placement and adds a
-“Place with click” mode: it shows a cyan-tinted viewport preview, click places the model, and Escape
-cancels. If a group is selected when placement starts, the new model is parented to that group.
-Material edits are currently session-only because materials are not in scene schema version 1.
+cannot represent. The Content panel browses the mounted VFS hierarchically. Because VFS listings
+return files rather than directory records, folder rows are inferred from normalized file paths; the
+panel does not invent empty folders or parse game-specific object-container formats. Search is
+case-insensitive, recursive within the current folder, and returns only matching files. The model
+decoder recognizes `.gltf`, `.glb`, `.obj`, `.cgf`, `.cga`, and `.fbx` as model-format candidates;
+other file formats remain visible but are not offered for placement. A recognized extension does not
+guarantee valid model contents or resolved dependencies: the model loader reports decode and
+dependency failures when a file is opened. Files absent from the mounted VFS are not listed; existing scene
+references to missing files remain in the outliner and show their load failure. The browser treats
+mounted assets as read-only. Mount directories, ZIP archives, and `.scpak` archives through the
+existing Mounts panel; the browser navigates the paths those VFS backends expose. Directory listings
+reflect the VFS mount's indexed snapshot, so changes made on disk appear after unmounting and
+remounting that directory. The panel keeps its double-click
+quick placement and “Place with click” mode: it shows a cyan-tinted viewport preview, click places
+the model, and Escape cancels. If a group is selected when placement starts, the new model is parented
+to that group. Material edits are currently session-only because materials are not in scene schema
+version 1. The Windows-only ImGui browser and D3D12 viewport have not been compiled or visually
+validated here; portable tests cover the browser model, not the UI behavior.
 
 Saving is explicit through the Scene panel or File menu (`Ctrl+S`). The Scene panel reports saved,
 unsaved, and save-error states; there is no automatic save. Switching scenes or quitting with dirty

@@ -463,6 +463,11 @@ add_test(NAME glb_fixtures COMMAND test_glb_fixtures "${CMAKE_CURRENT_BINARY_DIR
 set_tests_properties(glb_fixtures PROPERTIES DEPENDS test_assets TIMEOUT 60)
 
 if(TARGET scuba_engine_core)
+  add_executable(test_asset_browser test_asset_browser.cpp)
+  target_link_libraries(test_asset_browser PRIVATE scuba_engine_core)
+  scuba_warnings(test_asset_browser)
+  add_test(NAME asset_browser_model COMMAND test_asset_browser)
+
   add_executable(test_engine_core test_engine_core.cpp)
   target_link_libraries(test_engine_core PRIVATE scuba_engine_core scuba_assets scuba_miniz)
   scuba_warnings(test_engine_core)
