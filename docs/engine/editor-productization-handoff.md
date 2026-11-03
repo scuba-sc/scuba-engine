@@ -2,7 +2,7 @@
 
 This handoff describes the current native editor scaffold and the next dependencies. It is a code and documentation status note, not a Windows or game acceptance receipt.
 
-**Snapshot:** branch `codex/scene-document-v1`, docs commit `925d23d70bf4ab7099834534dfe21c58a12e2156`; the latest editor implementation commit is `fde7084ddaf67da5a76706696328cdb9c9c59c93`. Record and verify the actual SHA before testing if the branch advances.
+**Snapshot:** branch `codex/scene-document-v1`; the current project path-entry implementation is source commit `84e09798aa992073a7e7515f769723e377c01cfc`. Documentation may advance independently, so record the current `git rev-parse HEAD` and worktree status before testing.
 
 ## Present capability and gaps
 

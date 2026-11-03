@@ -4,7 +4,7 @@ This checklist covers the native scene editor on Windows. It complements [Scene 
 
 **Code target recorded for this checklist:** branch `codex/scene-document-v1`. Record `git rev-parse HEAD` immediately before testing and use that exact SHA in the results; do not treat an earlier snapshot as evidence for a later build.
 
-**Status:** portable core checks are run during implementation and are not Windows evidence. The Windows editor build, interactive UI checks and game acceptance remain deferred until the scaffold is complete. A headless test does not establish Windows rendering or input behavior.
+**Portable check recorded for source SHA `84e09798aa992073a7e7515f769723e377c01cfc`:** Linux configured against the pinned SDK 2.4.0 source, built `test_engine_core`, and passed CTest `engine_core` (1/1). This covers portable project-root rejection and unsaved-action gate states; it does not compile the Win32/D3D12 app. The Windows editor build, interactive UI checks and game acceptance remain deferred until the scaffold is complete. A headless test does not establish Windows rendering or input behavior.
 
 ## Prerequisites and build
 
