@@ -89,7 +89,8 @@ world transform and rejects cycles or moves that would need local shear, which t
 cannot represent. The Content panel browses the mounted VFS hierarchically. Because VFS listings
 return files rather than directory records, folder rows are inferred from normalized file paths; the
 panel does not invent empty folders or parse game-specific object-container formats. Search is
-case-insensitive, recursive within the current folder, and returns only matching files. The model
+ASCII-case-insensitive and recursive within the current folder; it filters immediate folder names
+and file paths, then shows only matching files. The model
 decoder recognizes `.gltf`, `.glb`, `.obj`, `.cgf`, `.cga`, and `.fbx` as model-format candidates;
 other file formats remain visible but are not offered for placement. A recognized extension does not
 guarantee valid model contents or resolved dependencies: the model loader reports decode and
@@ -101,9 +102,16 @@ reflect the VFS mount's indexed snapshot, so changes made on disk appear after u
 remounting that directory. The panel keeps its double-click
 quick placement and “Place with click” mode: it shows a cyan-tinted viewport preview, click places
 the model, and Escape cancels. If a group is selected when placement starts, the new model is parented
-to that group. Material edits are currently session-only because materials are not in scene schema
-version 1. The Windows-only ImGui browser and D3D12 viewport have not been compiled or visually
-validated here; portable tests cover the browser model, not the UI behavior.
+to that group. Mount changes clear the selected asset and cancel any active placement preview, so a
+stale VFS path cannot silently refer to a different mounted winner. The browser validates the VFS's
+canonical sorted unique path list and shows the resolved mount source in the file tooltip. Same-path
+overlays use the VFS winner. Material edits are currently session-only because materials are not
+in scene schema version 1. The browser refuses catalogs larger than 65,536 entries and shows at most 4,096 folders
+and 4,096 files per view, reporting omitted rows so users can narrow the search or enter a folder.
+The current VFS `List` API materializes its merged result before the browser can apply that cap, so
+very large mount stacks can still incur listing cost before the browser refuses the result; paged VFS
+enumeration is a separate follow-up. The Windows-only ImGui browser and D3D12 viewport have not been
+compiled or visually validated here; portable tests cover the browser model, not UI behavior.
 
 Saving is explicit through the Scene panel or File menu (`Ctrl+S`). The Scene panel reports saved,
 unsaved, and save-error states; there is no automatic save. Switching scenes or quitting with dirty

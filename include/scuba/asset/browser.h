@@ -4,6 +4,7 @@
 #include "scuba/asset/model.h"
 #include "scuba/vfs/file_system.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -13,6 +14,11 @@
 namespace scuba::asset {
 
 enum class BrowserItemKind : uint8_t { Directory, File };
+
+inline constexpr size_t kMaxBrowserCatalogEntries = 65'536;
+inline constexpr size_t kMaxBrowserFolders = 4'096;
+inline constexpr size_t kMaxBrowserFiles = 4'096;
+inline constexpr size_t kMaxBrowserSearchLength = 256;
 
 struct BrowserItem {
     BrowserItemKind kind = BrowserItemKind::File;
@@ -31,16 +37,20 @@ struct BrowserItem {
 struct BrowserContents {
     std::vector<BrowserItem> directories;
     std::vector<BrowserItem> files;
+    size_t omittedDirectories = 0;
+    size_t omittedFiles = 0;
 };
 
 // Builds one level of VFS directories and files, or recursive file search results within the
-// current directory. Directory entries are inferred from file paths because VFS listings expose
-// files only. Unsupported file formats remain visible but are marked non-placeable.
+// current directory. Input must be the canonical sorted/unique result from VFS List. The browser
+// refuses oversized or malformed catalogues and caps each returned row list. Directory entries
+// are inferred from file paths because VFS listings expose files only. Unsupported file formats
+// remain visible but are marked non-placeable.
 Status BuildBrowserContents(std::span<const vfs::Entry> entries, std::string_view currentDirectory,
                             std::string_view search, BrowserContents& contents);
 
-// Finds a visible file by its stable full VFS path. Directories and unsupported files can still be
-// selected; the caller checks supportedModelFormat() before invoking the model loader.
+// Finds a visible file by its stable full VFS path. Unsupported files can still be selected; the
+// caller checks supportedModelFormat() before invoking the model loader.
 const BrowserItem* FindBrowserFile(const BrowserContents& contents, std::string_view path) noexcept;
 
 }  // namespace scuba::asset

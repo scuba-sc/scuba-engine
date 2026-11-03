@@ -364,6 +364,7 @@ struct Editor {
     std::string contentBrowserViewSearch;
     std::string contentBrowserStatus;
     bool contentCatalogLoaded = false;
+    bool contentCatalogRejected = false;
     bool contentBrowserViewValid = false;
     uint64_t logSeen = 0;
     std::vector<log::Line> logLines;
@@ -903,6 +904,21 @@ struct Editor {
     void CancelPlacement(std::string reason = "Placement canceled") {
         placement = {};
         sceneStatus = std::move(reason);
+    }
+
+    void InvalidateAssetBrowser() {
+        contentCatalogLoaded = false;
+        contentCatalogRejected = false;
+        contentBrowserViewValid = false;
+        std::vector<vfs::Entry>().swap(contentCatalog);
+        contentBrowserView = {};
+        contentBrowserViewDirectory.clear();
+        contentBrowserViewSearch.clear();
+        contentDirectory.clear();
+        contentFilter[0] = '\0';
+        selectedAssetPath.clear();
+        if (placement.active) CancelPlacement("Mounted assets changed; placement preview canceled");
+        contentBrowserStatus = "Mounted assets changed; asset selection and placement preview were cleared.";
     }
 
     bool BuildPlacement(float worldX, float worldY, scene::LocalTransform& local,
@@ -1610,18 +1626,30 @@ void Editor::DrawContent() {
     // VFS directory mounts are indexed when mounted. Keep one merged listing until the mount
     // stack changes; edits on disk appear after the directory mount is remounted.
     if (!contentCatalogLoaded) {
-        contentCatalog = vfs.List();
+        auto entries = vfs.List();
         contentCatalogLoaded = true;
         contentBrowserViewValid = false;
+        if (entries.size() > asset::kMaxBrowserCatalogEntries) {
+            contentCatalogRejected = true;
+            contentBrowserStatus = "Asset browser stopped: the mounted VFS lists more than 65,536 files. Reduce the mounted source set and remount.";
+            std::vector<vfs::Entry>().swap(contentCatalog);
+        } else {
+            contentCatalogRejected = false;
+            contentCatalog = std::move(entries);
+        }
     }
 
-    if (!contentBrowserViewValid || contentBrowserViewDirectory != contentDirectory ||
-        contentBrowserViewSearch != contentFilter) {
+    if (!contentCatalogRejected && (!contentBrowserViewValid || contentBrowserViewDirectory != contentDirectory ||
+                                    contentBrowserViewSearch != contentFilter)) {
         if (auto status = asset::BuildBrowserContents(contentCatalog, contentDirectory, contentFilter,
                                                        contentBrowserView); !status) {
-            contentBrowserStatus = status.error;
+            contentBrowserStatus = "Asset browser stopped: " + status.error;
+            contentCatalogRejected = true;
+            std::vector<vfs::Entry>().swap(contentCatalog);
             contentDirectory.clear();
             contentFilter[0] = '\0';
+            selectedAssetPath.clear();
+            if (placement.active) CancelPlacement("Asset browser rejected the mounted catalogue");
             contentBrowserView = {};
         }
         contentBrowserViewDirectory = contentDirectory;
@@ -1634,7 +1662,7 @@ void Editor::DrawContent() {
         contentDirectory.clear();
         contentFilter[0] = '\0';
         selectedAssetPath.clear();
-        contentBrowserStatus.clear();
+        if (!contentCatalogRejected) contentBrowserStatus.clear();
     }
     std::string prefix;
     size_t start = 0;
@@ -1651,7 +1679,7 @@ void Editor::DrawContent() {
             contentDirectory = prefix;
             contentFilter[0] = '\0';
             selectedAssetPath.clear();
-            contentBrowserStatus.clear();
+            if (!contentCatalogRejected) contentBrowserStatus.clear();
         }
         ImGui::PopID();
         start = end + 1;
@@ -1660,7 +1688,7 @@ void Editor::DrawContent() {
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##filter", "search files in this folder and below", contentFilter,
                              sizeof contentFilter);
-    ImGui::TextDisabled("Folders");
+    ImGui::TextDisabled("%s", contentFilter[0] ? "Matching folders" : "Folders");
     if (ImGui::BeginChild("folders", ImVec2(0, 92), true)) {
         for (const auto& folder : browser.directories) {
             ImGui::PushID(folder.path.c_str());
@@ -1669,11 +1697,11 @@ void Editor::DrawContent() {
                 contentDirectory = folder.path;
                 contentFilter[0] = '\0';
                 selectedAssetPath.clear();
-                contentBrowserStatus.clear();
+                if (!contentCatalogRejected) contentBrowserStatus.clear();
             }
             ImGui::PopID();
         }
-        if (browser.directories.empty()) ImGui::TextDisabled("No child folders");
+        if (browser.directories.empty() && !contentCatalogRejected) ImGui::TextDisabled("No child folders");
     }
     ImGui::EndChild();
 
@@ -1709,7 +1737,7 @@ void Editor::DrawContent() {
             }
             ImGui::PopID();
         }
-        if (browser.files.empty())
+        if (browser.files.empty() && !contentCatalogRejected)
             ImGui::TextDisabled(contentFilter[0] ? "No files match this search in the current folder" :
                                                   "No files in the current folder");
     }
@@ -1736,6 +1764,10 @@ void Editor::DrawContent() {
         else if (!selectedItem->supportedModelFormat())
             selectionStatus = "Selected file is visible but its format is not supported for model placement.";
     }
+    if (browser.omittedDirectories || browser.omittedFiles)
+        ImGui::TextWrapped("Showing at most 4,096 folders and 4,096 files; %llu folders and %llu files were omitted. Enter a folder or refine the search.",
+                           static_cast<unsigned long long>(browser.omittedDirectories),
+                           static_cast<unsigned long long>(browser.omittedFiles));
     if (!selectionStatus.empty()) ImGui::TextWrapped("%s", selectionStatus.c_str());
     else if (!contentBrowserStatus.empty()) ImGui::TextWrapped("%s", contentBrowserStatus.c_str());
     if (placement.active) ImGui::TextWrapped("%s", placement.status.c_str());
@@ -1765,7 +1797,7 @@ void Editor::DrawMounts() {
             ImGui::PopID();
         }
         ImGui::EndTable();
-        if (drop && vfs.Unmount(*drop)) contentCatalogLoaded = false;
+        if (drop && vfs.Unmount(*drop)) InvalidateAssetBrowser();
     }
     ImGui::SeparatorText("Mount");
     ImGui::InputTextWithHint("path", "directory, .zip or .scpak", mountPath, sizeof mountPath);
@@ -1774,7 +1806,7 @@ void Editor::DrawMounts() {
     if (ImGui::Button("Mount")) {
         if (auto st = MountPath(vfs, PathFromUtf8(mountPath), mountPoint, mountPriority); !st)
             log::Error("vfs", st.error);
-        else contentCatalogLoaded = false;
+        else InvalidateAssetBrowser();
     }
     ImGui::End();
 }
