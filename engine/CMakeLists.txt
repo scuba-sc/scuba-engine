@@ -18,11 +18,14 @@ add_library(scuba_engine_core STATIC
   src/vfs/zip_fs.cpp
   src/vfs/pack_fs.cpp
   src/vfs/virtual_file_system.cpp
+  src/scene/scene_document.cpp
+  src/asset/browser.cpp
   src/asset/decode.cpp
   src/asset/model_loader.cpp
   src/product/export.cpp
   src/render/camera.cpp
-  src/render/picking.cpp)
+  src/render/picking.cpp
+  src/render/transform_gizmo.cpp)
 target_include_directories(scuba_engine_core
   PUBLIC "${SCUBA_ENGINE_INCLUDE}"
   PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -50,7 +53,11 @@ add_library(scuba_imgui_core STATIC
   "${SCUBA_IMGUI_DIR}/imgui.cpp" "${SCUBA_IMGUI_DIR}/imgui_draw.cpp"
   "${SCUBA_IMGUI_DIR}/imgui_tables.cpp" "${SCUBA_IMGUI_DIR}/imgui_widgets.cpp")
 target_include_directories(scuba_imgui_core SYSTEM PUBLIC "${SCUBA_IMGUI_DIR}")
-add_library(scuba_native_tools STATIC src/ui/designer.cpp src/ui/net_sandbox.cpp src/ui/plugin_surface.cpp)
+add_library(scuba_native_tools STATIC
+  src/ui/designer.cpp
+  src/ui/net_sandbox.cpp
+  src/ui/plugin_surface.cpp
+  src/ui/workspace_layout.cpp)
 target_compile_definitions(scuba_native_tools PRIVATE SCUBA_DESIGNER_IMGUI)
 target_include_directories(scuba_native_tools PUBLIC "${SCUBA_ENGINE_INCLUDE}" PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(scuba_native_tools PUBLIC scuba_imgui_core scuba_engine_sco scuba_net_sim sco_widgets_imgui)

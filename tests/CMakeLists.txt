@@ -1,5 +1,5 @@
 if(SCUBA_BUILD_ENGINE)
-  foreach(name native_designer native_net_sandbox plugin_surface)
+  foreach(name native_designer native_net_sandbox plugin_surface workspace_layout)
     add_executable(test_${name} test_${name}.cpp)
     target_link_libraries(test_${name} PRIVATE scuba_native_tools)
     target_include_directories(test_${name} PRIVATE "${PROJECT_SOURCE_DIR}/engine/src")
@@ -9,7 +9,8 @@ if(SCUBA_BUILD_ENGINE)
   add_test(NAME native_designer COMMAND test_native_designer)
   add_test(NAME native_net_sandbox COMMAND test_native_net_sandbox $<TARGET_FILE:scuba-hostd>)
   add_test(NAME plugin_surface COMMAND test_plugin_surface "${PROJECT_BINARY_DIR}/plugins/runtime")
-  set_tests_properties(native_designer native_net_sandbox plugin_surface PROPERTIES TIMEOUT 120)
+  add_test(NAME workspace_layout COMMAND test_workspace_layout)
+  set_tests_properties(native_designer native_net_sandbox plugin_surface workspace_layout PROPERTIES TIMEOUT 120)
 endif()
 
 # Plugin-SDK-only builds intentionally do not provide sco_app or sco-host-sim. Keep the
@@ -463,11 +464,21 @@ add_test(NAME glb_fixtures COMMAND test_glb_fixtures "${CMAKE_CURRENT_BINARY_DIR
 set_tests_properties(glb_fixtures PROPERTIES DEPENDS test_assets TIMEOUT 60)
 
 if(TARGET scuba_engine_core)
+  add_executable(test_asset_browser test_asset_browser.cpp)
+  target_link_libraries(test_asset_browser PRIVATE scuba_engine_core)
+  scuba_warnings(test_asset_browser)
+  add_test(NAME asset_browser_model COMMAND test_asset_browser)
+
   add_executable(test_engine_core test_engine_core.cpp)
   target_link_libraries(test_engine_core PRIVATE scuba_engine_core scuba_assets scuba_miniz)
   scuba_warnings(test_engine_core)
   add_test(NAME engine_core COMMAND test_engine_core)
   set_tests_properties(engine_core PROPERTIES TIMEOUT 60)
+
+  add_executable(test_input_router test_input_router.cpp ../engine/src/ui/input_router.cpp)
+  target_include_directories(test_input_router PRIVATE "${PROJECT_SOURCE_DIR}/include")
+  scuba_warnings(test_input_router)
+  add_test(NAME input_router_capture_lifecycle COMMAND test_input_router)
 endif()
 
 # The engine's product-profile path: ScoHost::Start with productRoot, fail-closed on a missing

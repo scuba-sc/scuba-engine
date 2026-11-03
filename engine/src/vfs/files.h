@@ -7,8 +7,48 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <string_view>
+#include <vector>
 
 namespace scuba::vfs::detail {
+
+template <class Map>
+std::vector<std::string_view> SortedPathViews(const Map& entries) {
+    std::vector<std::string_view> paths;
+    paths.reserve(entries.size());
+    for (const auto& [path, value] : entries) {
+        (void)value;
+        paths.emplace_back(path);
+    }
+    std::sort(paths.begin(), paths.end());
+    return paths;
+}
+
+template <class Map, class SizeOf>
+FileListPage BuildFileListPage(const Map& entries, const std::vector<std::string_view>& paths,
+                               std::string_view prefix, std::string_view after, size_t limit, SizeOf sizeOf) {
+    FileListPage page;
+    if (limit == 0 || (!after.empty() && !prefix.empty() && !after.starts_with(prefix))) return page;
+
+    auto it = std::lower_bound(paths.begin(), paths.end(), prefix,
+                               [](std::string_view path, std::string_view key) { return path < key; });
+    if (!after.empty()) {
+        it = std::upper_bound(it, paths.end(), after,
+                              [](std::string_view key, std::string_view path) { return key < path; });
+    }
+
+    page.entries.reserve(std::min(limit, paths.size()));
+    for (; it != paths.end() && it->starts_with(prefix); ++it) {
+        if (page.entries.size() == limit) {
+            page.truncated = true;
+            break;
+        }
+        const auto found = entries.find(std::string(*it));
+        if (found == entries.end()) continue;  // The index is immutable; defensive against bad custom maps.
+        page.entries.push_back({std::string(*it), static_cast<uint64_t>(sizeOf(found->second))});
+    }
+    return page;
+}
 
 // [offset, offset + size) of an OS file: a whole disk file, a stored zip entry, a pack entry.
 class SliceFile final : public File {

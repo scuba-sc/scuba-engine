@@ -34,10 +34,10 @@ struct PackEntry {
     uint32_t crc = 0;
 };
 
-class PackFs final : public FileSystem {
+class PackFs final : public FileSystem, public PagedFileSystem {
 public:
     PackFs(std::shared_ptr<detail::OsFile> os, std::unordered_map<std::string, PackEntry> entries)
-        : os_(std::move(os)), entries_(std::move(entries)) {}
+        : os_(std::move(os)), entries_(std::move(entries)), sortedPaths_(detail::SortedPathViews(entries_)) {}
     const char* Kind() const override { return "scpak"; }
     bool Exists(std::string_view path) const override { return entries_.count(std::string(path)) != 0; }
     std::unique_ptr<File> Open(std::string_view path, Status* why) const override {
@@ -52,12 +52,17 @@ public:
         for (const auto& [path, e] : entries_)
             if (path.compare(0, prefix.size(), prefix) == 0) out.push_back({path, e.size});
     }
+    FileListPage ListPage(std::string_view prefix, std::string_view after, size_t limit) const override {
+        return detail::BuildFileListPage(entries_, sortedPaths_, prefix, after, limit,
+                                         [](const PackEntry& entry) { return entry.size; });
+    }
     const std::unordered_map<std::string, PackEntry>& entries() const { return entries_; }
     const detail::OsFile& os() const { return *os_; }
 
 private:
     std::shared_ptr<detail::OsFile> os_;
     std::unordered_map<std::string, PackEntry> entries_;
+    std::vector<std::string_view> sortedPaths_;
 };
 
 std::unique_ptr<PackFs> OpenPackImpl(const fs::path& archive, Status& status) {

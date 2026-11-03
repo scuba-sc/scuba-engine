@@ -15,7 +15,7 @@ fs::path FromUtf8(std::string_view s) {
     return fs::path(std::u8string(reinterpret_cast<const char8_t*>(s.data()), s.size()));
 }
 
-class DirectoryFs final : public FileSystem {
+class DirectoryFs final : public FileSystem, public PagedFileSystem {
 public:
     struct Indexed {
         fs::path real;
@@ -23,7 +23,7 @@ public:
     };
 
     DirectoryFs(fs::path root, std::unordered_map<std::string, Indexed> index)
-        : root_(std::move(root)), index_(std::move(index)) {}
+        : root_(std::move(root)), index_(std::move(index)), sortedPaths_(detail::SortedPathViews(index_)) {}
 
     const char* Kind() const override { return "dir"; }
 
@@ -56,6 +56,10 @@ public:
         for (const auto& [path, item] : index_)
             if (path.compare(0, prefix.size(), prefix) == 0) out.push_back({path, item.size});
     }
+    FileListPage ListPage(std::string_view prefix, std::string_view after, size_t limit) const override {
+        return detail::BuildFileListPage(index_, sortedPaths_, prefix, after, limit,
+                                         [](const Indexed& item) { return item.size; });
+    }
 
 private:
     // A file created after the index was built. The path is normalized (no "..") and symlinks are
@@ -68,6 +72,7 @@ private:
 
     fs::path root_;
     std::unordered_map<std::string, Indexed> index_;
+    std::vector<std::string_view> sortedPaths_;
 };
 
 }  // namespace

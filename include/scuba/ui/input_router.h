@@ -13,7 +13,7 @@
 
 namespace scuba::ui {
 
-enum class InputKind : uint8_t { PointerMove, PointerDown, PointerUp, Wheel, KeyDown };
+enum class InputKind : uint8_t { PointerMove, PointerDown, PointerUp, PointerCancel, Wheel, KeyDown };
 enum class PointerButton : uint8_t { None, Left, Right, Middle };
 
 struct InputEvent {
@@ -45,6 +45,9 @@ public:
 class InputRouter {
 public:
     void Add(InputLayer* layer) { layers_.push_back(layer); }
+    // PointerCancel is delivered to the current capture and always clears it; its trailing button-up
+    // is consumed so it cannot become a new click. A layer may also return Release from a key event
+    // (for example Escape) to end an active pointer gesture.
     // Returns the layer that handled the event, or nullptr.
     InputLayer* Dispatch(const InputEvent& event);
     InputLayer* captured() const noexcept { return capture_; }
@@ -53,6 +56,7 @@ private:
     std::vector<InputLayer*> layers_;
     InputLayer* capture_ = nullptr;
     PointerButton captureButton_ = PointerButton::None;
+    PointerButton suppressedReleaseButton_ = PointerButton::None;
 };
 
 }  // namespace scuba::ui

@@ -8,18 +8,20 @@
 namespace scuba::render {
 namespace {
 
-// The ray in the model's local space: undo translation, yaw and uniform scale.
-Ray ToLocal(const Ray& r, const Transform& t, float& scaleOut) {
-    const float s = t.scale != 0 ? t.scale : 1.0f;
-    const float c = std::cos(-t.yaw), sn = std::sin(-t.yaw);
-    auto local = [&](Float3 p, bool point) {
-        if (point) p = {p.x - t.position.x, p.y - t.position.y, p.z - t.position.z};
-        Float3 q{p.x * c - p.y * sn, p.x * sn + p.y * c, p.z};
-        return Float3{q.x / s, q.y / s, q.z / s};
-    };
-    scaleOut = s;
-    Ray out{local(r.origin, true), local(r.dir, false)};   // dir keeps length 1/s: t stays world distance
-    return out;
+Float3 TransformPoint(Float3 p, const Float4x4& matrix) {
+    return {p.x * matrix.m[0][0] + p.y * matrix.m[1][0] + p.z * matrix.m[2][0] + matrix.m[3][0],
+            p.x * matrix.m[0][1] + p.y * matrix.m[1][1] + p.z * matrix.m[2][1] + matrix.m[3][1],
+            p.x * matrix.m[0][2] + p.y * matrix.m[1][2] + p.z * matrix.m[2][2] + matrix.m[3][2]};
+}
+
+Float3 TransformVector(Float3 p, const Float4x4& matrix) {
+    return {p.x * matrix.m[0][0] + p.y * matrix.m[1][0] + p.z * matrix.m[2][0],
+            p.x * matrix.m[0][1] + p.y * matrix.m[1][1] + p.z * matrix.m[2][1],
+            p.x * matrix.m[0][2] + p.y * matrix.m[1][2] + p.z * matrix.m[2][2]};
+}
+
+bool Finite(Float3 p) {
+    return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
 }
 
 bool HitsBox(const Ray& r, const std::array<float, 3>& mn, const std::array<float, 3>& mx, float maxT) {
@@ -60,21 +62,35 @@ bool HitsTriangle(const Ray& r, const float* a, const float* b, const float* c, 
 }  // namespace
 
 std::optional<PickHit> Pick(const Ray& ray, std::span<const PickTarget> targets) {
+    if (!Finite(ray.origin) || !Finite(ray.dir)) return std::nullopt;
+    const float directionLength = std::sqrt(ray.dir.x * ray.dir.x + ray.dir.y * ray.dir.y + ray.dir.z * ray.dir.z);
+    if (!std::isfinite(directionLength) || directionLength <= 1e-20f) return std::nullopt;
+    const Ray worldRay{ray.origin, {ray.dir.x / directionLength, ray.dir.y / directionLength, ray.dir.z / directionLength}};
     std::optional<PickHit> best;
     float bestT = std::numeric_limits<float>::max();
     for (const auto& target : targets) {
         if (!target.model) continue;
-        float scale = 1;
-        const Ray local = ToLocal(ray, target.transform, scale);
+        Float4x4 inverse;
+        if (!InvertAffine(target.world, inverse)) continue;
+        const Ray local{TransformPoint(worldRay.origin, inverse), TransformVector(worldRay.dir, inverse)};
+        const float localDirectionLengthSquared = local.dir.x * local.dir.x + local.dir.y * local.dir.y +
+                                                  local.dir.z * local.dir.z;
+        if (!Finite(local.origin) || !Finite(local.dir) || !std::isfinite(localDirectionLengthSquared) ||
+            localDirectionLengthSquared <= 1e-30f) continue;
         if (!HitsBox(local, target.model->boundsMin, target.model->boundsMax, bestT)) continue;
         for (const auto& mesh : target.model->meshes) {
+            if (mesh.positions.size() % 3 != 0) continue;
             if (!HitsBox(local, mesh.boundsMin, mesh.boundsMax, bestT)) continue;
             const float* pos = mesh.positions.data();
             for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+                if (mesh.indices[i] >= mesh.positions.size() / 3 || mesh.indices[i + 1] >= mesh.positions.size() / 3 ||
+                    mesh.indices[i + 2] >= mesh.positions.size() / 3) continue;
                 float t = 0;
                 if (HitsTriangle(local, pos + mesh.indices[i] * 3, pos + mesh.indices[i + 1] * 3, pos + mesh.indices[i + 2] * 3, t) && t < bestT) {
                     bestT = t;
-                    best = PickHit{target.id, t, {ray.origin.x + ray.dir.x * t, ray.origin.y + ray.dir.y * t, ray.origin.z + ray.dir.z * t}};
+                    best = PickHit{target.id, t, {worldRay.origin.x + worldRay.dir.x * t,
+                                                   worldRay.origin.y + worldRay.dir.y * t,
+                                                   worldRay.origin.z + worldRay.dir.z * t}};
                 }
             }
         }

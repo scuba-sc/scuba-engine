@@ -96,7 +96,7 @@ intptr_t Window::Handle(void* hwnd, uint32_t msg, uintptr_t wparam, intptr_t lpa
         if ((wparam & 0xFFF0) == SC_KEYMENU) return 0;   // Alt doesn't open the system menu
         break;
     case WM_CLOSE:
-        closed_ = true;
+        closeRequested_ = true;
         return 0;
     case WM_DESTROY:
         hwnd_ = nullptr;

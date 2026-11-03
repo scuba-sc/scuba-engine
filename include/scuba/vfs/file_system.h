@@ -52,6 +52,22 @@ public:
     virtual void List(std::string_view prefix, std::vector<Entry>& out) const = 0;
 };
 
+struct FileListPage {
+    std::vector<Entry> entries;
+    bool truncated = false;  // More matching paths exist after the last returned entry.
+};
+
+// Optional sorted, exclusive-cursor listing. prefix is a raw byte prefix (it may end in '/');
+// after is an exclusive normalized path cursor. Implementations must return at most limit entries,
+// sorted and unique, and set truncated exactly when another match exists. Backends can retain a
+// sorted index, but each query returns only one page; custom backends may opt in separately.
+class PagedFileSystem {
+public:
+    virtual ~PagedFileSystem() = default;
+    virtual FileListPage ListPage(std::string_view prefix, std::string_view after,
+                                  size_t limit) const = 0;
+};
+
 // A directory on disk. The tree is indexed at open (symlinks skipped, at most maxEntries files),
 // which gives case-insensitive lookup and List; files created later are still found by Open
 // through a direct probe, but List shows them only after a remount.

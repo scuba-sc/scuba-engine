@@ -40,7 +40,7 @@ constexpr UINT kSrvDescriptors = 256;
 constexpr UINT kPanelSlots = 4;                          // diegetic panels alive at once
 constexpr UINT kPanelVertexStride = 84;                  // POSITION(3) + TEXCOORD(2) + WORLD(16) floats
 constexpr size_t kFrameUploadBytes = size_t{8} << 20;   // constants + instance data per frame
-constexpr size_t kInstanceStride = 96;                  // 4 world rows + color + params
+constexpr size_t kInstanceStride = 144;                 // world rows + inverse-transpose normal rows + color + params
 
 const char kShaders[] = R"hlsl(
 cbuffer Frame : register(b0) {
@@ -56,6 +56,7 @@ static const float PI = 3.14159265;
 struct VIn {
     float3 pos : POSITION; float3 nrm : NORMAL;
     float4 w0 : WORLD0; float4 w1 : WORLD1; float4 w2 : WORLD2; float4 w3 : WORLD3;
+    float4 n0 : NORMALM0; float4 n1 : NORMALM1; float4 n2 : NORMALM2;
     float4 color : COLOR; float4 params : PARAMS;
 };
 struct VOut {
@@ -68,7 +69,9 @@ VOut VSMesh(VIn v) {
     VOut o;
     o.pos = mul(wp, viewProj);
     o.wpos = wp.xyz;
-    o.nrm = mul(float4(v.nrm, 0), world).xyz;
+    o.nrm = float3(dot(v.nrm, float3(v.n0.x, v.n1.x, v.n2.x)),
+                   dot(v.nrm, float3(v.n0.y, v.n1.y, v.n2.y)),
+                   dot(v.nrm, float3(v.n0.z, v.n1.z, v.n2.z)));
     o.color = v.color;
     o.params = v.params;
     return o;
@@ -91,6 +94,7 @@ float4 PSMesh(VOut i, bool front : SV_IsFrontFace) : SV_Target {
     float3 c = (kd * base / PI + spec) * sunColor.rgb * nl;
     c += lerp(groundColor.rgb, skyColor.rgb, n.z * 0.5 + 0.5) * base * (1 - 0.5 * metallic);
     if (i.params.z > 0.5) c = lerp(c, float3(1.0, 0.62, 0.15), 0.35);
+    if (i.params.w > 0.5) c = lerp(c, float3(0.28, 0.82, 1.0), 0.58);
     c = c / (1 + c);
     return float4(pow(c, 1 / 2.2), 1);
 }
@@ -448,8 +452,11 @@ private:
             {"WORLD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 2, 16, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
             {"WORLD", 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 2, 32, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
             {"WORLD", 3, DXGI_FORMAT_R32G32B32A32_FLOAT, 2, 48, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
-            {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 2, 64, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
-            {"PARAMS", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 2, 80, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+            {"NORMALM", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 2, 64, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+            {"NORMALM", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 2, 80, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+            {"NORMALM", 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 2, 96, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+            {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 2, 112, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+            {"PARAMS", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 2, 128, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
         };
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC pso{};
@@ -798,12 +805,26 @@ private:
         std::stable_sort(items.begin(), items.end(), [](const DrawItem& a, const DrawItem& b) { return a.model < b.model; });
         size_t at = 256;
         const size_t capacity = (kFrameUploadBytes - at) / kInstanceStride;
-        if (items.size() > capacity) items.resize(capacity);
-        for (const auto& item : items) {
+        std::vector<Float4x4> normalMatrices;
+        normalMatrices.reserve(std::min(items.size(), capacity));
+        size_t renderableCount = 0;
+        for (size_t source = 0; source < items.size() && renderableCount < capacity; ++source) {
+            const DrawItem item = items[source];
+            Float4x4 normal;
+            if (!NormalMatrix(item.world, normal)) continue;
+            if (renderableCount != source) items[renderableCount] = item;
+            normalMatrices.push_back(normal);
+            ++renderableCount;
+        }
+        items.resize(renderableCount);
+        for (size_t index = 0; index < items.size(); ++index) {
+            const auto& item = items[index];
             float* p = reinterpret_cast<float*>(frame.mapped + at);
             std::memcpy(p, item.world.m, 64);
-            p[16] = item.material.baseColor.x; p[17] = item.material.baseColor.y; p[18] = item.material.baseColor.z; p[19] = item.material.baseColor.w;
-            p[20] = item.material.metallic; p[21] = item.material.roughness; p[22] = item.selected ? 1.0f : 0.0f; p[23] = 0;
+            std::memcpy(p + 16, normalMatrices[index].m, sizeof(float) * 12);
+            p[28] = item.material.baseColor.x; p[29] = item.material.baseColor.y; p[30] = item.material.baseColor.z; p[31] = item.material.baseColor.w;
+            p[32] = item.material.metallic; p[33] = item.material.roughness;
+            p[34] = item.selected ? 1.0f : 0.0f; p[35] = item.preview ? 1.0f : 0.0f;
             at += kInstanceStride;
         }
 
