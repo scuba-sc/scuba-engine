@@ -325,15 +325,9 @@ struct Editor {
 
     void FrameInstance(const Instance& inst) {
         if (!inst.model) return;
-        auto mn = inst.model->boundsMin, mx = inst.model->boundsMax;
-        for (size_t d = 0; d < 3; ++d) {
-            mn[d] *= inst.transform.scale;
-            mx[d] *= inst.transform.scale;
-        }
-        mn[0] += inst.transform.position.x; mx[0] += inst.transform.position.x;
-        mn[1] += inst.transform.position.y; mx[1] += inst.transform.position.y;
-        mn[2] += inst.transform.position.z; mx[2] += inst.transform.position.z;
-        camera.Frame(mn, mx);
+        std::array<float, 3> mn{}, mx{};
+        if (render::TransformBounds(inst.model->boundsMin, inst.model->boundsMax, inst.transform.Matrix(), mn, mx))
+            camera.Frame(mn, mx);
     }
 
     void Remove(uint32_t id) {
@@ -343,7 +337,7 @@ struct Editor {
 
     std::vector<render::PickTarget> PickTargets() const {
         std::vector<render::PickTarget> t;
-        for (const auto& i : scene) if (i.model) t.push_back({i.id, i.model.get(), i.transform});
+        for (const auto& i : scene) if (i.model) t.push_back({i.id, i.model.get(), i.transform.Matrix()});
         return t;
     }
 

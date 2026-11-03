@@ -14,6 +14,7 @@
 #include "miniz.h"
 #include "sco/vfs.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -244,6 +245,20 @@ assets::Mesh Triangle() {
     return m;
 }
 
+render::Float3 ApplyPoint(render::Float3 point, const render::Float4x4& matrix) {
+    return {point.x * matrix.m[0][0] + point.y * matrix.m[1][0] + point.z * matrix.m[2][0] + matrix.m[3][0],
+            point.x * matrix.m[0][1] + point.y * matrix.m[1][1] + point.z * matrix.m[2][1] + matrix.m[3][1],
+            point.x * matrix.m[0][2] + point.y * matrix.m[1][2] + point.z * matrix.m[2][2] + matrix.m[3][2]};
+}
+
+render::Float3 ApplyVector(render::Float3 vector, const render::Float4x4& matrix) {
+    return {vector.x * matrix.m[0][0] + vector.y * matrix.m[1][0] + vector.z * matrix.m[2][0],
+            vector.x * matrix.m[0][1] + vector.y * matrix.m[1][1] + vector.z * matrix.m[2][1],
+            vector.x * matrix.m[0][2] + vector.y * matrix.m[1][2] + vector.z * matrix.m[2][2]};
+}
+
+float Dot(render::Float3 a, render::Float3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
 // A minimal hand-written ASCII FBX 7.4 scene: one triangle with explicit per-corner normals. The
 // repository ships no third-party FBX asset, and ufbx reads ASCII FBX, so the test owns its bytes.
 // yUp selects GlobalSettings UpAxis (1 = Y-up, 2 = Z-up) and puts the tip on that axis, so both
@@ -391,10 +406,10 @@ void TestPicking() {
     model.boundsMin = cube.boundsMin;
     model.boundsMax = cube.boundsMax;
 
-    render::PickTarget a{1, &model, {}}, b{2, &model, {}};
-    a.transform.position = {0, 0, 0};
-    b.transform.position = {10, 0, 0};
-    b.transform.scale = 2;
+    render::Transform aTransform, bTransform;
+    bTransform.position = {10, 0, 0};
+    bTransform.scale = 2;
+    render::PickTarget a{1, &model, aTransform.Matrix()}, b{2, &model, bTransform.Matrix()};
     const render::PickTarget targets[] = {a, b};
     auto hit = render::Pick({{0, 0, 10}, {0, 0, -1}}, targets);
     CHECK(hit && hit->id == 1 && std::fabs(hit->distance - 9.0f) < 1e-4f);
@@ -403,6 +418,68 @@ void TestPicking() {
     CHECK(!render::Pick({{5, 0, 10}, {0, 0, -1}}, targets));
     auto ground = render::RayPlaneZ({{0, 0, 5}, {0, 0.6f, -0.8f}}, 0);
     CHECK(ground && std::fabs(ground->y - 3.75f) < 1e-4f);
+
+    render::Float4x4 parent, child;
+    CHECK(render::AffineFromTrs({4, 3, 1}, {0, 0, 0.70710678f, 0.70710678f}, {2, 1, 1}, parent));
+    CHECK(render::AffineFromTrs({0.3f, -0.2f, 0.4f}, {0, 0, 0.25881904f, 0.96592583f}, {1.5f, 0.75f, 0.5f}, child));
+    const render::Float4x4 world = render::Multiply(child, parent);  // non-uniform parent + child rotation introduces shear
+    render::Float4x4 inverse, normal;
+    CHECK(render::InvertAffine(world, inverse));
+    CHECK(render::NormalMatrix(world, normal));
+    const render::Float3 localPoint{0.2f, 0.1f, 1.0f};
+    const auto worldPoint = ApplyPoint(localPoint, world);
+    const auto recovered = ApplyPoint(worldPoint, inverse);
+    CHECK(std::fabs(recovered.x - localPoint.x) < 1e-4f && std::fabs(recovered.y - localPoint.y) < 1e-4f &&
+          std::fabs(recovered.z - localPoint.z) < 1e-4f);
+    const render::Float3 localTangent{1, -1, 0}, localNormal{1, 1, 0};
+    CHECK(std::fabs(Dot(ApplyVector(localTangent, world), ApplyVector(localNormal, normal))) < 1e-4f);
+
+    std::array<float, 3> worldMin{}, worldMax{};
+    CHECK(render::TransformBounds({-1, -1, -1}, {1, 1, 1}, world, worldMin, worldMax));
+    for (unsigned corner = 0; corner < 8; ++corner) {
+        const render::Float3 point = ApplyPoint({(corner & 1u) ? 1.0f : -1.0f,
+                                                 (corner & 2u) ? 1.0f : -1.0f,
+                                                 (corner & 4u) ? 1.0f : -1.0f}, world);
+        CHECK(point.x >= worldMin[0] - 1e-5f && point.x <= worldMax[0] + 1e-5f);
+        CHECK(point.y >= worldMin[1] - 1e-5f && point.y <= worldMax[1] + 1e-5f);
+        CHECK(point.z >= worldMin[2] - 1e-5f && point.z <= worldMax[2] + 1e-5f);
+    }
+
+    const render::PickTarget nestedTarget{3, &model, world};
+    const auto nestedHit = render::Pick({{worldPoint.x, worldPoint.y, worldPoint.z + 10}, {0, 0, -2}},
+                                        std::span<const render::PickTarget>(&nestedTarget, 1));
+    CHECK(nestedHit && nestedHit->id == 3 && std::fabs(nestedHit->distance - 10.0f) < 1e-4f);
+    if (nestedHit) CHECK(std::fabs(nestedHit->point.z - worldPoint.z) < 1e-4f);
+    const render::Float3 localDirection{0.3f, -0.2f, -1.0f};
+    const float localDirectionLength = std::sqrt(Dot(localDirection, localDirection));
+    const render::Float3 unitLocalDirection{localDirection.x / localDirectionLength,
+                                             localDirection.y / localDirectionLength,
+                                             localDirection.z / localDirectionLength};
+    constexpr float localRayDistance = 8.0f;
+    const render::Float3 localOrigin{localPoint.x - unitLocalDirection.x * localRayDistance,
+                                     localPoint.y - unitLocalDirection.y * localRayDistance,
+                                     localPoint.z - unitLocalDirection.z * localRayDistance};
+    const auto worldOrigin = ApplyPoint(localOrigin, world);
+    const auto worldDirection = ApplyVector(unitLocalDirection, world);
+    const float worldDirectionLength = std::sqrt(Dot(worldDirection, worldDirection));
+    const render::Ray obliqueRay{worldOrigin, {worldDirection.x / worldDirectionLength,
+                                               worldDirection.y / worldDirectionLength,
+                                               worldDirection.z / worldDirectionLength}};
+    const auto obliqueHit = render::Pick(obliqueRay, std::span<const render::PickTarget>(&nestedTarget, 1));
+    CHECK(obliqueHit && obliqueHit->id == 3 &&
+          std::fabs(obliqueHit->distance - localRayDistance * worldDirectionLength) < 1e-4f);
+    if (obliqueHit)
+        CHECK(std::fabs(obliqueHit->point.x - worldPoint.x) < 1e-4f &&
+              std::fabs(obliqueHit->point.y - worldPoint.y) < 1e-4f &&
+              std::fabs(obliqueHit->point.z - worldPoint.z) < 1e-4f);
+    const auto outsidePoint = ApplyPoint({1.2f, 0, 1.0f}, world);
+    CHECK(!render::Pick({{outsidePoint.x, outsidePoint.y, outsidePoint.z + 10}, {0, 0, -1}},
+                        std::span<const render::PickTarget>(&nestedTarget, 1)));
+    render::Float4x4 singular = world;
+    singular.m[0][0] = singular.m[0][1] = singular.m[0][2] = 0;
+    const render::PickTarget singularTarget{4, &model, singular};
+    CHECK(!render::Pick({{worldPoint.x, worldPoint.y, worldPoint.z + 10}, {0, 0, -1}},
+                        std::span<const render::PickTarget>(&singularTarget, 1)));
 
     render::OrbitCamera cam;
     cam.target = {0, 0, 0};
@@ -428,6 +505,8 @@ scene::Document SceneFixture() {
     bay.kind = scene::NodeKind::Group;
     bay.parentId = "root";
     bay.localTransform.translation = {10.0f, -2.5f, 0.25f};
+    bay.localTransform.rotation = {0, 0, 0.70710678f, 0.70710678f};
+    bay.localTransform.scale = {2, 1, 1};
 
     scene::Node ship;
     ship.id = "ship-01";
@@ -446,6 +525,26 @@ scene::Document SceneFixture() {
 void TestSceneDocument(const fs::path& root) {
     auto document = SceneFixture();
     CHECK(scene::Validate(document).ok());
+    std::vector<scene::ResolvedTransform> resolved;
+    CHECK(scene::ResolveWorldTransforms(document, resolved).ok());
+    CHECK(resolved.size() == document.nodes.size());
+    if (resolved.size() == 3) {
+        CHECK(resolved[0].nodeId == "root" && resolved[1].nodeId == "bay-a" && resolved[2].nodeId == "ship-01");
+        const auto shipOrigin = ApplyPoint({0, 0, 0}, resolved[2].world);
+        CHECK(std::fabs(shipOrigin.x - 8.0f) < 1e-4f && std::fabs(shipOrigin.y + 0.5f) < 1e-4f &&
+              std::fabs(shipOrigin.z - 3.25f) < 1e-4f);
+        auto reverseOrder = document;
+        std::reverse(reverseOrder.nodes.begin(), reverseOrder.nodes.end());
+        std::vector<scene::ResolvedTransform> reversedWorld;
+        CHECK(scene::ResolveWorldTransforms(reverseOrder, reversedWorld).ok());
+        CHECK(reversedWorld.size() == 3 && reversedWorld[0].nodeId == "ship-01");
+        if (reversedWorld.size() == 3) {
+            const auto reversedShipOrigin = ApplyPoint({0, 0, 0}, reversedWorld[0].world);
+            CHECK(std::fabs(reversedShipOrigin.x - shipOrigin.x) < 1e-4f &&
+                  std::fabs(reversedShipOrigin.y - shipOrigin.y) < 1e-4f &&
+                  std::fabs(reversedShipOrigin.z - shipOrigin.z) < 1e-4f);
+        }
+    }
 
     std::string encoded;
     CHECK(scene::Serialize(document, encoded).ok());
@@ -515,6 +614,30 @@ void TestSceneDocument(const fs::path& root) {
     auto invalidScale = SceneFixture();
     invalidScale.nodes[2].localTransform.scale.y = 0;
     CHECK(!scene::Validate(invalidScale).ok());
+
+    scene::Document collapsed;
+    collapsed.id = "collapsed";
+    collapsed.name = "Collapsed hierarchy";
+    for (size_t i = 0; i < 48; ++i) {
+        scene::Node group;
+        group.id = "g" + std::to_string(i);
+        group.name = "Group";
+        group.kind = scene::NodeKind::Group;
+        if (i) group.parentId = "g" + std::to_string(i - 1);
+        group.localTransform.scale = {1e-6f, 1e-6f, 1e-6f};
+        collapsed.nodes.push_back(group);
+    }
+    scene::Node collapsedModel;
+    collapsedModel.id = "model";
+    collapsedModel.name = "Model";
+    collapsedModel.kind = scene::NodeKind::ModelInstance;
+    collapsedModel.parentId = "g47";
+    collapsedModel.assetPath = "content/models/test_ship.glb";
+    collapsed.nodes.push_back(collapsedModel);
+    CHECK(scene::Validate(collapsed).ok());
+    std::vector<scene::ResolvedTransform> unchanged{{"sentinel", {}}};
+    CHECK(!scene::ResolveWorldTransforms(collapsed, unchanged).ok());
+    CHECK(unchanged.size() == 1 && unchanged.front().nodeId == "sentinel");
     auto traversalAsset = SceneFixture();
     traversalAsset.nodes[2].assetPath = "../outside.obj";
     CHECK(!scene::Validate(traversalAsset).ok());

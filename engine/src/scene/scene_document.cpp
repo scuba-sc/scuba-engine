@@ -424,6 +424,51 @@ Status Deserialize(std::string_view json, Document& document) {
     return Status::Ok();
 }
 
+Status ResolveWorldTransforms(const Document& document, std::vector<ResolvedTransform>& transforms) {
+    if (auto status = Validate(document); !status) return status;
+    std::unordered_map<std::string, size_t> indexById;
+    indexById.reserve(document.nodes.size());
+    std::vector<ResolvedTransform> resolved;
+    resolved.reserve(document.nodes.size());
+    for (size_t i = 0; i < document.nodes.size(); ++i) {
+        indexById.emplace(document.nodes[i].id, i);
+        resolved.push_back({document.nodes[i].id, {}});
+    }
+
+    std::vector<uint8_t> state(document.nodes.size(), 0);
+    for (size_t start = 0; start < document.nodes.size(); ++start) {
+        std::vector<size_t> chain;
+        std::optional<size_t> cursor = start;
+        while (cursor && state[*cursor] != 2) {
+            if (state[*cursor] == 1) return Fail("scene hierarchy contains a cycle");
+            state[*cursor] = 1;
+            chain.push_back(*cursor);
+            const auto& parentId = document.nodes[*cursor].parentId;
+            cursor = parentId ? std::optional<size_t>(indexById.at(*parentId)) : std::nullopt;
+        }
+        while (!chain.empty()) {
+            const size_t nodeIndex = chain.back();
+            chain.pop_back();
+            const auto& node = document.nodes[nodeIndex];
+            const auto& local = node.localTransform;
+            render::Float4x4 localMatrix;
+            if (!render::AffineFromTrs({local.translation.x, local.translation.y, local.translation.z},
+                                       {local.rotation.x, local.rotation.y, local.rotation.z, local.rotation.w},
+                                       {local.scale.x, local.scale.y, local.scale.z}, localMatrix))
+                return Fail("node local transform cannot be represented as a finite matrix: " + node.id);
+            render::Float4x4 world = localMatrix;
+            if (node.parentId) world = render::Multiply(localMatrix, resolved[indexById.at(*node.parentId)].world);
+            render::Float4x4 inverse;
+            if (!render::InvertAffine(world, inverse))
+                return Fail("node world transform is singular or numerically unstable: " + node.id);
+            resolved[nodeIndex].world = world;
+            state[nodeIndex] = 2;
+        }
+    }
+    transforms = std::move(resolved);
+    return Status::Ok();
+}
+
 std::optional<ProjectStore> ProjectStore::Open(
     const std::filesystem::path& projectRoot,
     std::span<const std::filesystem::path> readOnlyDirectoryRoots,

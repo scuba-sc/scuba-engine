@@ -34,7 +34,7 @@ struct Material {
 
 struct DrawItem {
     GpuModel model = 0;
-    Float4x4 world;
+    Float4x4 world;  // row-vector affine local-to-world transform, including parent-induced shear
     Material material;
     bool selected = false;
 };

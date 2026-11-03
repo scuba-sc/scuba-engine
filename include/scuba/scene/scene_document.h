@@ -2,6 +2,7 @@
 #pragma once
 
 #include "scuba/core/status.h"
+#include "scuba/render/camera.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -67,11 +68,19 @@ struct Document {
     friend bool operator==(const Document&, const Document&) = default;
 };
 
+struct ResolvedTransform {
+    std::string nodeId;
+    render::Float4x4 world;
+};
+
 // Scene asset paths use the engine VFS namespace. Project files are separate and are never
 // written through the read-only VFS.
 Status Validate(const Document& document);
 Status Serialize(const Document& document, std::string& json);
 Status Deserialize(std::string_view json, Document& document);
+// Resolves row-vector local transforms in document order, composing child-local * parent-world.
+// Returns failure without changing the output if composition overflows or becomes singular.
+Status ResolveWorldTransforms(const Document& document, std::vector<ResolvedTransform>& transforms);
 
 // Opens an existing, explicitly selected project directory. Scene files are direct children named
 // <scene-id>.scene.json; IDs are restricted to safe filename characters. Save replaces a scene

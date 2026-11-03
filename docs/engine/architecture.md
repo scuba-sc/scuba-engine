@@ -134,16 +134,16 @@ The front end is backend-neutral; D3D12 is the first backend, Vulkan the next.
   a fence-gated retire list for GPU objects, WARP fallback (`--warp`) for machines without a GPU.
 - **Meshes:** each model lives in one default-heap buffer (positions, normals, indices per mesh),
   copied from a staging buffer on the render thread. Draws are grouped by model: one instanced
-  `DrawIndexedInstanced` per mesh per model, per-instance world matrix and material in an
-  instance stream.
+  `DrawIndexedInstanced` per mesh per model, per-instance affine world matrix, inverse-transpose
+  normal matrix and material in an instance stream.
 - **Shading:** metallic-roughness PBR (GGX distribution, Smith geometry, Schlick Fresnel), one
   directional light plus a sky/ground ambient term, tone mapped and gamma corrected. Materials
   are constant factors in phase 1; texture sets come with the texture streaming phase.
 - **Grid:** an analytic line grid generated in the vertex shader (no vertex buffer), axes
   colored.
-- **Picking:** CPU ray tests against the decoded meshes (bounds, then exact triangles), with
-  the instance transform undone. The move tool drags the selection across its ground plane. A GPU
-  id buffer and full translate/rotate/scale gizmos are phase 2.
+- **Picking:** CPU ray tests against the decoded meshes (bounds, then exact triangles), with an
+  affine inverse used to transform the ray into local space. The move tool drags the selection
+  across its ground plane. A GPU id buffer and full translate/rotate/scale gizmos are phase 2.
 
 ## 2D shell and input (`include/scuba/ui/`)
 
@@ -162,10 +162,15 @@ picking (right drag orbit, middle drag pan, wheel dolly, left click select, F fr
 | Phase | Scope | Exit |
 |---|---|---|
 | 1 (this branch) | core, VFS, sco host, D3D12 loop, ImGui shell, async OBJ/glTF/CGF intake, PBR-lite, CPU picking, move tool | `engine_core` + `engine_smoke` (WARP) green on Windows |
-| 2 | gizmos (translate/rotate/scale, snapping), GPU id-buffer picking, scene documents and project save/load, glTF node hierarchy | editor round-trips a scene |
+| 2 | gizmos (translate/rotate/scale, snapping), GPU id-buffer picking, document-backed project UI/outliner, glTF node hierarchy | editor round-trips a scene |
 | 3 | textures and mip streaming (priority IO queue, budget-driven residency), material textures, DDS | Asset Lab parity |
 | 4 | studio parity: Widgets, Designer, Viewport (diegetic panels), NetSandbox panels in native UI | browser studio retired; hostd remains for headless CI |
 | 5 | Vulkan backend; Linux build of the editor | cross-platform CI (roadmap E-5) |
+
+The scene-document groundwork in the current branch provides versioned project files, hierarchy
+validation and affine world-transform resolution. The renderer/picker matrix path can represent
+those resolved transforms, including parent-induced shear. The current sample editor scene is still
+flat and is not yet bound to the document store; the Phase 2 UI round-trip remains outstanding.
 
 ## Provenance
 

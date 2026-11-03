@@ -37,6 +37,14 @@ struct Transform {
 
 Float4x4 Multiply(const Float4x4& a, const Float4x4& b);
 
+// Build and operate on affine row-vector transforms. Inverse/normal calculations refuse singular,
+// non-affine, non-finite, or numerically ill-conditioned matrices.
+bool AffineFromTrs(Float3 translation, Float4 rotation, Float3 scale, Float4x4& out);
+bool InvertAffine(const Float4x4& world, Float4x4& inverse);
+bool NormalMatrix(const Float4x4& world, Float4x4& normal);
+bool TransformBounds(const std::array<float, 3>& localMin, const std::array<float, 3>& localMax,
+                    const Float4x4& world, std::array<float, 3>& worldMin, std::array<float, 3>& worldMax);
+
 class OrbitCamera {
 public:
     Float3 target;
