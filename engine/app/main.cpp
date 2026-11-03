@@ -1623,19 +1623,44 @@ void Editor::DrawMenu(bool& quit) {
 
 void Editor::DrawContent() {
     if (!ImGui::Begin("Content", &showContent)) { ImGui::End(); return; }
-    // VFS directory mounts are indexed when mounted. Keep one merged listing until the mount
-    // stack changes; edits on disk appear after the directory mount is remounted.
+    // VFS directory mounts are indexed when mounted. Read a stable mount-stack snapshot in bounded
+    // pages; edits on disk appear after the directory mount is remounted.
     if (!contentCatalogLoaded) {
-        auto entries = vfs.List();
         contentCatalogLoaded = true;
         contentBrowserViewValid = false;
-        if (entries.size() > asset::kMaxBrowserCatalogEntries) {
-            contentCatalogRejected = true;
-            contentBrowserStatus = "Asset browser stopped: the mounted VFS lists more than 65,536 files. Reduce the mounted source set and remount.";
+        contentCatalogRejected = false;
+        contentBrowserStatus.clear();
+        contentCatalog.clear();
+        uint64_t snapshotId = 0;
+        std::string after;
+        while (contentCatalog.size() < asset::kMaxBrowserCatalogEntries) {
+            const size_t remaining = asset::kMaxBrowserCatalogEntries - contentCatalog.size();
+            const size_t limit = std::min(remaining, vfs::kMaxVfsListPageEntries);
+            vfs::VfsListPage page;
+            if (auto status = vfs.ListPage("", after, limit, snapshotId, page); !status) {
+                contentCatalogRejected = true;
+                contentBrowserStatus = "Asset browser could not read a stable VFS listing: " + status.error;
+                break;
+            }
+            if (snapshotId == 0) snapshotId = page.snapshotId;
+            if (snapshotId == 0 || page.entries.size() > limit || page.snapshotId != snapshotId ||
+                (page.entries.empty() ? !page.nextCursor.empty() : page.nextCursor != page.entries.back().path) ||
+                (page.truncated && (page.entries.empty() || page.nextCursor.empty() || page.nextCursor == after))) {
+                contentCatalogRejected = true;
+                contentBrowserStatus = "Asset browser stopped: the VFS returned an invalid listing page.";
+                break;
+            }
+            contentCatalog.insert(contentCatalog.end(), page.entries.begin(), page.entries.end());
+            if (!page.truncated) break;
+            if (contentCatalog.size() == asset::kMaxBrowserCatalogEntries) {
+                contentCatalogRejected = true;
+                contentBrowserStatus = "Asset browser stopped: the mounted VFS has more than 65,536 files. Mount a narrower directory or container.";
+                break;
+            }
+            after = page.nextCursor;
+        }
+        if (contentCatalogRejected) {
             std::vector<vfs::Entry>().swap(contentCatalog);
-        } else {
-            contentCatalogRejected = false;
-            contentCatalog = std::move(entries);
         }
     }
 

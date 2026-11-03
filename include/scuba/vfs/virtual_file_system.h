@@ -15,6 +15,7 @@
 #include "scuba/vfs/file_system.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <shared_mutex>
@@ -41,6 +42,15 @@ struct MountInfo {
     uint64_t order = 0;       // mount sequence number
 };
 
+inline constexpr size_t kMaxVfsListPageEntries = 4'096;
+
+struct VfsListPage {
+    std::vector<Entry> entries;
+    std::string nextCursor;       // Full normalized VFS path; pass back as `after` for the next page.
+    uint64_t snapshotId = 0;      // Pin subsequent pages to the same mount stack.
+    bool truncated = false;       // More unique VFS paths exist after this page.
+};
+
 class VirtualFileSystem {
 public:
     VirtualFileSystem();
@@ -62,18 +72,28 @@ public:
     Status ReadAll(std::string_view path, Bytes& out, uint64_t limit = uint64_t{256} << 20) const;
     // Union of every mount; a path served by a higher mount hides the same path below. Sorted.
     std::vector<Entry> List(std::string_view prefix = {}) const;
+    // Bounded directory enumeration. `directory` is empty for the VFS root or names a directory
+    // whose descendants should be listed. Unlike List's raw prefix, this is path-component scoped.
+    // Each page is sorted, unique, and respects mount precedence.
+    // Pass the previous page's nextCursor and snapshotId to continue. A changed mount stack returns
+    // failure instead of mixing two mount snapshots. Built-in backend indexes are immutable after
+    // mount; a custom mutable PagedFileSystem must keep its own page sequence stable. `limit` must
+    // be between 1 and kMaxVfsListPageEntries.
+    Status ListPage(std::string_view directory, std::string_view after, size_t limit,
+                    uint64_t expectedSnapshotId, VfsListPage& page) const;
     // "<label>:<relative path>" of the mount that serves path, or "" when none does.
     std::string Resolve(std::string_view path) const;
 
 private:
     struct Mounted;
-    using Stack = std::vector<std::shared_ptr<const Mounted>>;
-    std::shared_ptr<const Stack> Snapshot() const;
+    struct StackSnapshot;
+    std::shared_ptr<const StackSnapshot> Snapshot() const;
 
     mutable std::shared_mutex mutex_;
-    std::shared_ptr<const Stack> stack_;
+    std::shared_ptr<const StackSnapshot> stack_;
     MountId nextId_ = 1;
     uint64_t nextOrder_ = 1;
+    uint64_t nextSnapshotId_ = 2;
     std::atomic<const sco::vfs::MountTable*> overrides_{nullptr};
 };
 

@@ -19,6 +19,11 @@ struct VirtualFileSystem::Mounted {
     std::shared_ptr<FileSystem> fs;
 };
 
+struct VirtualFileSystem::StackSnapshot {
+    std::vector<std::shared_ptr<const Mounted>> mounts;
+    uint64_t id = 0;
+};
+
 namespace {
 
 // path relative to a mount point, or nullopt when the mount doesn't cover it. A mount point
@@ -29,6 +34,41 @@ std::optional<std::string_view> Relative(std::string_view path, const std::strin
         path[mountPoint.size()] != '/')
         return std::nullopt;
     return path.substr(mountPoint.size() + 1);
+}
+
+bool IsAtOrBelow(std::string_view path, std::string_view directory) {
+    return path == directory ||
+           (path.size() > directory.size() && path.compare(0, directory.size(), directory) == 0 &&
+            path[directory.size()] == '/');
+}
+
+bool IsBelow(std::string_view path, std::string_view directory) {
+    if (directory.empty()) return !path.empty();
+    return path.size() > directory.size() && path.compare(0, directory.size(), directory) == 0 &&
+           path[directory.size()] == '/';
+}
+
+std::optional<std::string> BackendPrefixFor(std::string_view mountPoint, std::string_view directory) {
+    if (mountPoint.empty()) return directory.empty() ? std::string{} : std::string(directory) + "/";
+    if (directory.empty() || IsAtOrBelow(mountPoint, directory)) return std::string{};
+    if (IsAtOrBelow(directory, mountPoint)) {
+        if (directory == mountPoint) return std::string{};
+        return std::string(directory.substr(mountPoint.size() + 1)) + "/";
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> BackendCursorFor(std::string_view after, std::string_view mountPoint) {
+    if (after.empty()) return std::string{};
+    if (mountPoint.empty()) return std::string(after);
+    const std::string mountPrefix = std::string(mountPoint) + "/";
+    if (after.starts_with(mountPrefix)) return std::string(after.substr(mountPrefix.size()));
+    if (after < mountPrefix) return std::string{};
+    std::string upperBound(mountPoint);
+    ++upperBound.back();  // '/' -> '0', the first key after every path under this mount point.
+    if (after >= upperBound) return std::nullopt;
+    // A normalized VFS path in this lexical interval must start with mountPrefix.
+    return std::string{};
 }
 
 // Keeps the backend alive for as long as a handle it opened is.
@@ -83,10 +123,14 @@ private:
 
 }  // namespace
 
-VirtualFileSystem::VirtualFileSystem() : stack_(std::make_shared<const Stack>()) {}
+VirtualFileSystem::VirtualFileSystem() {
+    auto initial = std::make_shared<StackSnapshot>();
+    initial->id = 1;
+    stack_ = std::move(initial);
+}
 VirtualFileSystem::~VirtualFileSystem() = default;
 
-std::shared_ptr<const VirtualFileSystem::Stack> VirtualFileSystem::Snapshot() const {
+std::shared_ptr<const VirtualFileSystem::StackSnapshot> VirtualFileSystem::Snapshot() const {
     std::shared_lock<std::shared_mutex> hold(mutex_);
     return stack_;
 }
@@ -111,11 +155,12 @@ MountId VirtualFileSystem::Mount(std::unique_ptr<FileSystem> fs, MountOptions op
     m->id = nextId_++;
     m->order = nextOrder_++;
     const MountId id = m->id;
-    auto next = std::make_shared<Stack>(*stack_);
-    next->push_back(std::move(m));
-    std::stable_sort(next->begin(), next->end(), [](const auto& a, const auto& b) {
+    auto next = std::make_shared<StackSnapshot>(*stack_);
+    next->mounts.push_back(std::move(m));
+    std::stable_sort(next->mounts.begin(), next->mounts.end(), [](const auto& a, const auto& b) {
         return a->priority != b->priority ? a->priority > b->priority : a->order > b->order;
     });
+    next->id = nextSnapshotId_++;
     stack_ = std::move(next);
     if (why) *why = Status::Ok();
     return id;
@@ -123,17 +168,20 @@ MountId VirtualFileSystem::Mount(std::unique_ptr<FileSystem> fs, MountOptions op
 
 bool VirtualFileSystem::Unmount(MountId id) {
     std::unique_lock<std::shared_mutex> hold(mutex_);
-    auto next = std::make_shared<Stack>(*stack_);
-    const auto before = next->size();
-    next->erase(std::remove_if(next->begin(), next->end(), [id](const auto& m) { return m->id == id; }), next->end());
-    if (next->size() == before) return false;
+    auto next = std::make_shared<StackSnapshot>(*stack_);
+    const auto before = next->mounts.size();
+    next->mounts.erase(std::remove_if(next->mounts.begin(), next->mounts.end(),
+                                     [id](const auto& m) { return m->id == id; }), next->mounts.end());
+    if (next->mounts.size() == before) return false;
+    next->id = nextSnapshotId_++;
     stack_ = std::move(next);
     return true;
 }
 
 std::vector<MountInfo> VirtualFileSystem::Mounts() const {
     std::vector<MountInfo> out;
-    for (const auto& m : *Snapshot())
+    const auto snapshot = Snapshot();
+    for (const auto& m : snapshot->mounts)
         out.push_back({m->id, m->mountPoint, m->label, m->fs->Kind(), m->priority, m->order});
     return out;
 }
@@ -145,7 +193,8 @@ void VirtualFileSystem::SetOverrides(const sco::vfs::MountTable* table) noexcept
 bool VirtualFileSystem::Exists(std::string_view path) const {
     const std::string norm = NormalizePath(path);
     if (norm.empty()) return false;
-    for (const auto& m : *Snapshot())
+    const auto snapshot = Snapshot();
+    for (const auto& m : snapshot->mounts)
         if (auto rel = Relative(norm, m->mountPoint); rel && m->fs->Exists(*rel)) return true;
     return false;
 }
@@ -156,7 +205,8 @@ std::unique_ptr<File> VirtualFileSystem::Open(std::string_view path, Status* why
         if (why) *why = Status::Fail("invalid path: " + std::string(path));
         return nullptr;
     }
-    for (const auto& m : *Snapshot()) {
+    const auto snapshot = Snapshot();
+    for (const auto& m : snapshot->mounts) {
         auto rel = Relative(norm, m->mountPoint);
         if (!rel) continue;
         Status st;
@@ -198,7 +248,8 @@ std::vector<Entry> VirtualFileSystem::List(std::string_view prefix) const {
     if (!prefix.empty() && pre.empty()) return {};
     std::map<std::string, uint64_t> seen;   // first insert = highest mount = the one served
     std::vector<Entry> part;
-    for (const auto& m : *Snapshot()) {
+    const auto snapshot = Snapshot();
+    for (const auto& m : snapshot->mounts) {
         std::string inner;   // prefix in the backend's own namespace
         const std::string& mp = m->mountPoint;
         if (mp.empty()) {
@@ -223,10 +274,112 @@ std::vector<Entry> VirtualFileSystem::List(std::string_view prefix) const {
     return out;
 }
 
+Status VirtualFileSystem::ListPage(std::string_view directory, std::string_view after, size_t limit,
+                                   uint64_t expectedSnapshotId, VfsListPage& page) const {
+    if (limit == 0 || limit > kMaxVfsListPageEntries)
+        return Status::Fail("VFS list page limit must be between 1 and " +
+                            std::to_string(kMaxVfsListPageEntries));
+
+    const std::string normalizedDirectory = NormalizePath(directory);
+    if (!directory.empty() && normalizedDirectory.empty())
+        return Status::Fail("invalid VFS list directory");
+    const std::string normalizedAfter = NormalizePath(after);
+    if (!after.empty() && normalizedAfter.empty()) return Status::Fail("invalid VFS list cursor");
+    if (!normalizedAfter.empty() && !IsBelow(normalizedAfter, normalizedDirectory))
+        return Status::Fail("VFS list cursor is outside the requested directory");
+
+    const auto snapshot = Snapshot();
+    if (expectedSnapshotId != 0 && expectedSnapshotId != snapshot->id)
+        return Status::Fail("VFS mount stack changed while listing; restart from the first page");
+
+    struct Stream {
+        std::string mountPoint;
+        std::string prefix;
+        const PagedFileSystem* backend = nullptr;
+        std::optional<Entry> current;
+        std::string fullPath;
+        bool truncated = false;
+    };
+
+    std::vector<Stream> streams;
+    streams.reserve(snapshot->mounts.size());
+    auto readOne = [&](Stream& stream, std::string_view cursor) -> Status {
+        const FileListPage backendPage = stream.backend->ListPage(stream.prefix, cursor, 1);
+        if (backendPage.entries.size() > 1 || (backendPage.entries.empty() && backendPage.truncated))
+            return Status::Fail("VFS backend returned an invalid bounded listing page");
+        stream.current.reset();
+        stream.fullPath.clear();
+        stream.truncated = backendPage.truncated;
+        if (backendPage.entries.empty()) return Status::Ok();
+
+        const Entry& entry = backendPage.entries.front();
+        if (entry.path.empty() || NormalizePath(entry.path) != entry.path ||
+            !entry.path.starts_with(stream.prefix) || (!cursor.empty() && entry.path <= cursor))
+            return Status::Fail("VFS backend returned a malformed or unsorted listing path");
+        stream.fullPath = stream.mountPoint.empty() ? entry.path : stream.mountPoint + "/" + entry.path;
+        if (NormalizePath(stream.fullPath) != stream.fullPath ||
+            !IsBelow(stream.fullPath, normalizedDirectory))
+            return Status::Fail("VFS backend produced a path outside the requested VFS directory");
+        stream.current = entry;
+        return Status::Ok();
+    };
+
+    for (const auto& mount : snapshot->mounts) {
+        const auto prefix = BackendPrefixFor(mount->mountPoint, normalizedDirectory);
+        if (!prefix) continue;
+        const auto backendCursor = BackendCursorFor(normalizedAfter, mount->mountPoint);
+        if (!backendCursor) continue;
+        const auto* backend = dynamic_cast<const PagedFileSystem*>(mount->fs.get());
+        if (!backend)
+            return Status::Fail(std::string("mounted backend does not support bounded listing: ") +
+                                mount->label);
+
+        Stream stream;
+        stream.mountPoint = mount->mountPoint;
+        stream.prefix = *prefix;
+        stream.backend = backend;
+        if (auto status = readOne(stream, *backendCursor); !status) return status;
+        if (stream.current) streams.push_back(std::move(stream));
+    }
+
+    VfsListPage candidate;
+    candidate.snapshotId = snapshot->id;
+    candidate.entries.reserve(limit);
+    while (candidate.entries.size() < limit) {
+        size_t winner = streams.size();
+        for (size_t i = 0; i < streams.size(); ++i) {
+            if (!streams[i].current) continue;
+            if (winner == streams.size() || streams[i].fullPath < streams[winner].fullPath)
+                winner = i;
+        }
+        if (winner == streams.size()) break;
+
+        const std::string selectedPath = streams[winner].fullPath;
+        candidate.entries.push_back({selectedPath, streams[winner].current->size});
+        for (auto& stream : streams) {
+            if (!stream.current || stream.fullPath != selectedPath) continue;
+            if (stream.truncated) {
+                const std::string cursor = stream.current->path;
+                if (auto status = readOne(stream, cursor); !status) return status;
+            } else {
+                stream.current.reset();
+                stream.fullPath.clear();
+            }
+        }
+    }
+
+    candidate.truncated = std::any_of(streams.begin(), streams.end(),
+                                      [](const Stream& stream) { return stream.current.has_value(); });
+    if (!candidate.entries.empty()) candidate.nextCursor = candidate.entries.back().path;
+    page = std::move(candidate);
+    return Status::Ok();
+}
+
 std::string VirtualFileSystem::Resolve(std::string_view path) const {
     const std::string norm = NormalizePath(path);
     if (norm.empty()) return {};
-    for (const auto& m : *Snapshot())
+    const auto snapshot = Snapshot();
+    for (const auto& m : snapshot->mounts)
         if (auto rel = Relative(norm, m->mountPoint); rel && m->fs->Exists(*rel)) return m->label + ":" + std::string(*rel);
     return {};
 }

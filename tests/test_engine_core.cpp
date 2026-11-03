@@ -19,6 +19,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -39,6 +40,20 @@ std::string Read(const vfs::VirtualFileSystem& v, std::string_view path) {
     vfs::Bytes out;
     return v.ReadAll(path, out) ? S(out) : std::string("<error>");
 }
+
+class LegacyOnlyFileSystem final : public vfs::FileSystem {
+public:
+    const char* Kind() const override { return "legacy-test"; }
+    bool Exists(std::string_view path) const override { return path == "legacy.txt"; }
+    std::unique_ptr<vfs::File> Open(std::string_view, Status* why) const override {
+        if (why) *why = Status::Fail("unused in legacy-list test");
+        return nullptr;
+    }
+    void List(std::string_view prefix, std::vector<vfs::Entry>& out) const override {
+        constexpr std::string_view path = "legacy.txt";
+        if (path.starts_with(prefix)) out.push_back({std::string(path), 6});
+    }
+};
 
 void WriteFile(const fs::path& p, std::string_view text) {
     fs::create_directories(p.parent_path());
@@ -113,9 +128,26 @@ void TestStack() {
     CHECK(list.size() == 2 && list[0].path == "ui/a.txt" && list[0].size == 6);
     CHECK(v.Mounts().size() == 2 && v.Mounts()[0].label == "high");
 
+    vfs::VfsListPage priorityPage;
+    CHECK(v.ListPage("ui", "", 1, 0, priorityPage).ok());
+    CHECK(priorityPage.entries.size() == 1 && priorityPage.entries[0].path == "ui/a.txt");
+    CHECK(priorityPage.entries[0].size == 6);  // priority 10 shadows priority 0
+
     // Equal priority: the later mount wins.
     const auto later = v.Mount(vfs::MemoryFileSystem({{"ui/a.txt", B("later a")}}), {"", 10, "later"});
     CHECK(Read(v, "ui/a.txt") == "later a");
+
+    // Bounded listing is sorted, unique, and uses the same winning mount as Open/List.
+    vfs::VfsListPage firstPage;
+    CHECK(v.ListPage("ui", "", 1, 0, firstPage).ok());
+    CHECK(firstPage.entries.size() == 1 && firstPage.entries[0].path == "ui/a.txt");
+    CHECK(firstPage.entries[0].size == 7 && firstPage.truncated);
+    CHECK(firstPage.nextCursor == "ui/a.txt" && firstPage.snapshotId != 0);
+    vfs::VfsListPage secondPage;
+    CHECK(v.ListPage("ui", firstPage.nextCursor, 1, firstPage.snapshotId, secondPage).ok());
+    CHECK(secondPage.entries.size() == 1 && secondPage.entries[0].path == "ui/only-low.txt");
+    CHECK(secondPage.entries[0].size == 8 && !secondPage.truncated);
+    CHECK(secondPage.snapshotId == firstPage.snapshotId);
 
     // A handle outlives its mount.
     auto handle = v.Open("ui/a.txt");
@@ -129,6 +161,86 @@ void TestStack() {
     CHECK(!v.Open("ui/../secret", &why) && !why.ok());
     CHECK(v.Mount(vfs::MemoryFileSystem({}), {"../x", 0, ""}, &why) == 0 && !why.ok());
     CHECK(v.Mount(nullptr, {}, &why) == 0);
+
+    // A mount change invalidates pagination rather than mixing two stack generations.
+    vfs::VfsListPage stalePage;
+    CHECK(!v.ListPage("ui", secondPage.nextCursor, 2, firstPage.snapshotId, stalePage).ok());
+    CHECK(stalePage.entries.empty());
+}
+
+void TestPagedListing() {
+    constexpr size_t kFiles = 5'003;
+    std::vector<std::pair<std::string, vfs::Bytes>> files;
+    files.reserve(kFiles + 3);
+    for (size_t i = 0; i < kFiles; ++i) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "catalog/%05zu.item", i);
+        files.emplace_back(name, B("x"));
+    }
+    files.emplace_back("catalogue/nearby.item", B("not in catalog"));
+    files.emplace_back("other/catalog/also-nearby.item", B("not in catalog"));
+    files.emplace_back("catalog/dir/nested.item", B("nested"));
+
+    vfs::VirtualFileSystem v;
+    CHECK(v.Mount(vfs::MemoryFileSystem(std::move(files)), {"", 0, "large-memory"}) != 0);
+
+    std::vector<std::string> observed;
+    std::string cursor;
+    uint64_t snapshotId = 0;
+    bool first = true;
+    size_t pageCount = 0;
+    for (;;) {
+        vfs::VfsListPage page;
+        const Status status = v.ListPage("catalog", cursor, 127, first ? 0 : snapshotId, page);
+        CHECK(status.ok());
+        if (!status) break;
+        if (first) {
+            snapshotId = page.snapshotId;
+            first = false;
+        }
+        ++pageCount;
+        CHECK(page.entries.size() <= 127);
+        CHECK(page.snapshotId == snapshotId && snapshotId != 0);
+        CHECK(page.nextCursor == (page.entries.empty() ? "" : page.entries.back().path));
+        for (const auto& entry : page.entries) observed.push_back(entry.path);
+        if (!page.truncated) break;
+        CHECK(!page.entries.empty() && page.nextCursor != cursor);
+        cursor = page.nextCursor;
+    }
+    CHECK(pageCount > 1 && pageCount <= 41);
+    CHECK(observed.size() == kFiles + 1);  // includes the nested path, excludes catalogue/ sibling
+    CHECK(std::is_sorted(observed.begin(), observed.end()));
+    CHECK(std::adjacent_find(observed.begin(), observed.end()) == observed.end());
+    CHECK(observed.front() == "catalog/00000.item");
+    CHECK(observed.back() == "catalog/dir/nested.item");
+
+    // Reject malformed or out-of-scope cursors and invalid page sizes without changing the output.
+    vfs::VfsListPage untouched;
+    untouched.nextCursor = "sentinel";
+    CHECK(!v.ListPage("catalog/../escape", "", 10, 0, untouched).ok());
+    CHECK(untouched.nextCursor == "sentinel");
+    CHECK(!v.ListPage("catalog", "elsewhere/file", 10, 0, untouched).ok());
+    CHECK(!v.ListPage("catalog", "catalog/../escape", 10, 0, untouched).ok());
+    CHECK(!v.ListPage(std::string_view("catalog\0bad", 11), "", 10, 0, untouched).ok());
+    CHECK(!v.ListPage("catalog", "", 0, 0, untouched).ok());
+    CHECK(!v.ListPage("catalog", "", vfs::kMaxVfsListPageEntries + 1, 0, untouched).ok());
+
+    // A one-entry page reports truncation only when a later matching unique path remains.
+    vfs::VfsListPage one;
+    CHECK(v.ListPage("catalog/dir", "", 1, 0, one).ok());
+    CHECK(one.entries.size() == 1 && one.entries[0].path == "catalog/dir/nested.item");
+    CHECK(!one.truncated && one.nextCursor == "catalog/dir/nested.item");
+
+    // Existing custom FileSystem implementations remain source-compatible. Legacy callers keep
+    // their old List path; bounded callers get an explicit error instead of an unbounded fallback.
+    vfs::VirtualFileSystem legacyVfs;
+    CHECK(legacyVfs.Mount(std::make_unique<LegacyOnlyFileSystem>(), {"", 0, "legacy"}) != 0);
+    const auto legacyEntries = legacyVfs.List();
+    CHECK(legacyEntries.size() == 1 && legacyEntries[0].path == "legacy.txt");
+    vfs::VfsListPage unsupported;
+    const Status unsupportedStatus = legacyVfs.ListPage("", "", 10, 0, unsupported);
+    CHECK(!unsupportedStatus.ok());
+    CHECK(unsupportedStatus.error.find("does not support bounded listing") != std::string::npos);
 }
 
 void TestDirectory(const fs::path& root) {
@@ -142,6 +254,10 @@ void TestDirectory(const fs::path& root) {
     v.Mount(std::move(backend), {"content", 0, "dir"});
     CHECK(Read(v, "content/models/ship.obj") == "v 0 0 0\n");
     CHECK(v.List("content").size() == 2);
+    vfs::VfsListPage page;
+    CHECK(v.ListPage("content", "", 1, 0, page).ok());
+    CHECK(page.entries.size() == 1 && page.entries[0].path == "content/models/ship.obj");
+    CHECK(page.truncated);
     WriteFile(dir / "late.txt", "late");   // created after the index: found by the probe
     CHECK(Read(v, "content/late.txt") == "late");
     CHECK(!vfs::OpenDirectory(dir / "missing", st) && !st.ok());
@@ -161,6 +277,14 @@ void TestPack(const fs::path& root) {
     CHECK(Read(v, "pak/b.txt") == "bravo!");
     CHECK(Read(v, "pak/empty").empty());
     CHECK(v.List("pak").size() == 3);
+    vfs::VfsListPage page;
+    CHECK(v.ListPage("pak", "", 2, 0, page).ok());
+    CHECK(page.entries.size() == 2 && page.entries[0].path == "pak/b.txt" && page.entries[1].path == "pak/empty");
+    CHECK(page.truncated);
+    vfs::VfsListPage lastPage;
+    CHECK(v.ListPage("pak", page.nextCursor, 2, page.snapshotId, lastPage).ok());
+    CHECK(lastPage.entries.size() == 1 && lastPage.entries[0].path == "pak/models/a.bin");
+    CHECK(!lastPage.truncated);
 
     CHECK(!vfs::WritePack(root / "dup.scpak", {{"a", B("1")}, {"A", B("2")}}).ok());
     CHECK(!vfs::WritePack(root / "bad.scpak", {{"../a", B("1")}}).ok());
@@ -194,6 +318,14 @@ void TestZip(const fs::path& root) {
     CHECK(Read(v, "docs/stored.txt") == "stored bytes");
     CHECK(Read(v, "data/big.txt") == big);
     CHECK(v.List().size() == 3);   // the directory record is skipped
+    vfs::VfsListPage page;
+    CHECK(v.ListPage("", "", 2, 0, page).ok());
+    CHECK(page.entries.size() == 2 && page.entries[0].path == "data/big.txt" && page.entries[1].path == "docs/stored.txt");
+    CHECK(page.truncated);
+    vfs::VfsListPage lastPage;
+    CHECK(v.ListPage("", page.nextCursor, 2, page.snapshotId, lastPage).ok());
+    CHECK(lastPage.entries.size() == 1 && lastPage.entries[0].path == "secret.bin");
+    CHECK(!lastPage.truncated);
     Status why;
     CHECK(!v.Open("secret.bin", &why) && why.error.find("encrypted") != std::string::npos);
     WriteFile(root / "junk.zip", "PK but not really");
@@ -1506,6 +1638,7 @@ int main() {
     const fs::path root = TempRoot();
     TestPaths();
     TestStack();
+    TestPagedListing();
     TestDirectory(root);
     TestPack(root);
     TestZip(root);

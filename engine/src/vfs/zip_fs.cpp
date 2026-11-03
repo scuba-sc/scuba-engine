@@ -27,10 +27,10 @@ struct ZipEntry {
     uint64_t packed = 0, size = 0, localHeader = 0;
 };
 
-class ZipFs final : public FileSystem {
+class ZipFs final : public FileSystem, public PagedFileSystem {
 public:
     ZipFs(std::shared_ptr<detail::OsFile> os, std::unordered_map<std::string, ZipEntry> entries)
-        : os_(std::move(os)), entries_(std::move(entries)) {}
+        : os_(std::move(os)), entries_(std::move(entries)), sortedPaths_(detail::SortedPathViews(entries_)) {}
 
     const char* Kind() const override { return "zip"; }
     bool Exists(std::string_view path) const override { return entries_.count(std::string(path)) != 0; }
@@ -69,10 +69,15 @@ public:
         for (const auto& [path, e] : entries_)
             if (path.compare(0, prefix.size(), prefix) == 0) out.push_back({path, e.size});
     }
+    FileListPage ListPage(std::string_view prefix, std::string_view after, size_t limit) const override {
+        return detail::BuildFileListPage(entries_, sortedPaths_, prefix, after, limit,
+                                         [](const ZipEntry& entry) { return entry.size; });
+    }
 
 private:
     std::shared_ptr<detail::OsFile> os_;
     std::unordered_map<std::string, ZipEntry> entries_;
+    std::vector<std::string_view> sortedPaths_;
 };
 
 }  // namespace

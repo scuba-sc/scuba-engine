@@ -108,10 +108,27 @@ canonical sorted unique path list and shows the resolved mount source in the fil
 overlays use the VFS winner. Material edits are currently session-only because materials are not
 in scene schema version 1. The browser refuses catalogs larger than 65,536 entries and shows at most 4,096 folders
 and 4,096 files per view, reporting omitted rows so users can narrow the search or enter a folder.
-The current VFS `List` API materializes its merged result before the browser can apply that cap, so
-very large mount stacks can still incur listing cost before the browser refuses the result; paged VFS
-enumeration is a separate follow-up. The Windows-only ImGui browser and D3D12 viewport have not been
-compiled or visually validated here; portable tests cover the browser model, not UI behavior.
+It reads through the VFS `ListPage` API, which treats its argument as a directory path (the empty
+path is the VFS root), merges sorted backend pages, and returns at most 4,096 unique paths per call.
+This is component-scoped directory enumeration; legacy `List` keeps its raw-prefix behavior. The page
+cursor uses the full normalized VFS path, and the mount-stack snapshot ID makes a mount change fail
+explicitly instead of mixing pages from different overlays. Built-in
+directory, ZIP, `.scpak`, and memory backends support pages. A custom backend that only implements
+the legacy `FileSystem::List` API produces an explicit browser listing error; the VFS does not fall
+back to materializing its full listing. The legacy `List` API remains available and retains its
+previous behavior for existing callers.
+
+Page delivery is bounded, but backend indexing is still eager. Each built-in backend retains its
+full file index and a sorted vector of path references for paging, so that auxiliary vector also
+grows with the entire mounted catalogue. Directory mounts scan and index up to 1,048,576 files by
+default when mounted. ZIP mounts read the complete central directory at open: its size is a 32-bit
+field (up to 4 GiB minus one byte, subject to the archive bounds and available memory), with at most
+65,534 entries because Zip64 is unsupported. `.scpak` mounts read their complete index at open, capped
+at 64 MiB and 1,048,576 entries. Large archives can therefore still require substantial time and
+memory to mount. The browser also keeps its bounded catalogue of up to 65,536 entries after paging;
+the improvement is that it no longer first materializes an unbounded merged `Entry` vector. The
+Windows-only ImGui browser and D3D12 viewport have not been compiled or visually validated here;
+portable tests cover the browser model, not UI behavior.
 
 Saving is explicit through the Scene panel or File menu (`Ctrl+S`). The Scene panel reports saved,
 unsaved, and save-error states; there is no automatic save. Switching scenes or quitting with dirty
