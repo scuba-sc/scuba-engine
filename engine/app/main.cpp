@@ -780,6 +780,8 @@ struct Editor {
         std::vector<std::string> listed;
         const auto sources = MountedSourcePaths();
         if (auto status = projectStore->ListScenes(listed, sources); !status) {
+            projectScenes.clear();
+            selectedProjectScene.clear();
             sceneBrowserStatus = "Cannot list project scenes: " + status.error;
             return;
         }
