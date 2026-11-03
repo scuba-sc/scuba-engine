@@ -6,6 +6,7 @@
 #include "scuba/asset/model_loader.h"
 #include "scuba/core/job_system.h"
 #include "scuba/render/picking.h"
+#include "scuba/scene/scene_document.h"
 #include "scuba/vfs/pack.h"
 #include "scuba/vfs/virtual_file_system.h"
 
@@ -13,12 +14,14 @@
 #include "miniz.h"
 #include "sco/vfs.h"
 
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 
 using namespace scuba;
@@ -410,6 +413,136 @@ void TestPicking() {
     CHECK(std::fabs(center.dir.x + eye.x / len) < 1e-4f && std::fabs(center.dir.z + eye.z / len) < 1e-4f);
 }
 
+scene::Document SceneFixture() {
+    scene::Document document;
+    document.id = "hangar-test";
+    document.name = "Synthetic Hangar";
+    scene::Node root;
+    root.id = "root";
+    root.name = "Hangar";
+    root.kind = scene::NodeKind::Group;
+
+    scene::Node bay;
+    bay.id = "bay-a";
+    bay.name = "Bay A";
+    bay.kind = scene::NodeKind::Group;
+    bay.parentId = "root";
+    bay.localTransform.translation = {10.0f, -2.5f, 0.25f};
+
+    scene::Node ship;
+    ship.id = "ship-01";
+    ship.name = "Test ship";
+    ship.kind = scene::NodeKind::ModelInstance;
+    ship.parentId = "bay-a";
+    ship.assetPath = "content/models/test_ship.glb";
+    ship.localTransform.translation = {1.0f, 2.0f, 3.0f};
+    ship.localTransform.rotation = {0.0f, 0.0f, 0.38268343f, 0.92387950f};
+    ship.localTransform.scale = {1.25f, 0.75f, 2.0f};
+
+    document.nodes = {root, bay, ship};
+    return document;
+}
+
+void TestSceneDocument(const fs::path& root) {
+    auto document = SceneFixture();
+    CHECK(scene::Validate(document).ok());
+
+    std::string encoded;
+    CHECK(scene::Serialize(document, encoded).ok());
+    scene::Document decoded;
+    CHECK(scene::Deserialize(encoded, decoded).ok());
+    CHECK(decoded == document);
+
+    const fs::path projectRoot = root / "scene-project";
+    const fs::path assetRoot = root / "scene-assets";
+    fs::create_directories(projectRoot);
+    fs::create_directories(assetRoot);
+    WriteFile(assetRoot / "source.txt", "read-only asset bytes");
+    Status openStatus;
+    const std::array<fs::path, 1> readOnlyRoots{assetRoot};
+    auto project = scene::ProjectStore::Open(projectRoot, readOnlyRoots, &openStatus);
+    CHECK(project && openStatus.ok());
+    if (!project) return;
+    CHECK(!scene::ProjectStore::Open(assetRoot, readOnlyRoots).has_value());
+    CHECK(!scene::ProjectStore::Open(assetRoot / "nested", readOnlyRoots).has_value());
+
+    CHECK(project->Save(document).ok());
+    CHECK(fs::exists(projectRoot / "hangar-test.scene.json"));
+    std::ifstream assetInput(assetRoot / "source.txt", std::ios::binary);
+    std::string assetBytes((std::istreambuf_iterator<char>(assetInput)), std::istreambuf_iterator<char>());
+    CHECK(assetBytes == "read-only asset bytes");
+    scene::Document reopened;
+    CHECK(project->Load("hangar-test", reopened).ok());
+    CHECK(reopened == document);
+    CHECK(reopened.nodes.size() == 3);
+    CHECK(reopened.nodes[1].parentId == std::optional<std::string>("root"));
+    CHECK(reopened.nodes[2].parentId == std::optional<std::string>("bay-a"));
+    CHECK(reopened.nodes[2].localTransform == document.nodes[2].localTransform);
+    CHECK(reopened.nodes[2].assetPath == "content/models/test_ship.glb");
+
+    // A second save atomically replaces the existing document.
+    document.nodes[2].localTransform.translation.x = 9.5f;
+    CHECK(project->Save(document).ok());
+    CHECK(project->Load("hangar-test", reopened).ok());
+    CHECK(reopened == document);
+
+    // Failed validation cannot replace the last valid file.
+    auto invalid = document;
+    invalid.nodes[2].id = invalid.nodes[1].id;
+    CHECK(!project->Save(invalid).ok());
+    scene::Document preserved;
+    CHECK(project->Load("hangar-test", preserved).ok());
+    CHECK(preserved == document);
+
+    auto duplicate = SceneFixture();
+    duplicate.nodes[2].id = duplicate.nodes[1].id;
+    CHECK(!scene::Validate(duplicate).ok());
+    auto missingParent = SceneFixture();
+    missingParent.nodes[1].parentId = "absent";
+    CHECK(!scene::Validate(missingParent).ok());
+    auto modelParent = SceneFixture();
+    modelParent.nodes[1].parentId = "ship-01";
+    CHECK(!scene::Validate(modelParent).ok());
+    auto cycle = SceneFixture();
+    cycle.nodes[0].parentId = "bay-a";
+    CHECK(!scene::Validate(cycle).ok());
+    auto invalidQuaternion = SceneFixture();
+    invalidQuaternion.nodes[2].localTransform.rotation = {0, 0, 0, 0};
+    CHECK(!scene::Validate(invalidQuaternion).ok());
+    auto invalidUtf8 = SceneFixture();
+    invalidUtf8.name = std::string("bad\xff", 4);
+    CHECK(!scene::Validate(invalidUtf8).ok());
+    auto invalidScale = SceneFixture();
+    invalidScale.nodes[2].localTransform.scale.y = 0;
+    CHECK(!scene::Validate(invalidScale).ok());
+    auto traversalAsset = SceneFixture();
+    traversalAsset.nodes[2].assetPath = "../outside.obj";
+    CHECK(!scene::Validate(traversalAsset).ok());
+    auto traversalScene = SceneFixture();
+    traversalScene.id = "../escape";
+    CHECK(!project->Save(traversalScene).ok());
+    traversalScene.id = "CON";
+    CHECK(!project->Save(traversalScene).ok());
+    traversalScene.id = "con";
+    CHECK(!project->Save(traversalScene).ok());
+    CHECK(!fs::exists(root / "escape.scene.json"));
+    CHECK(!project->Load("../escape", reopened).ok());
+    CHECK(reopened == preserved);
+
+    scene::Document unknownFields;
+    CHECK(!scene::Deserialize(R"({"format":"scuba.scene","format":"scuba.scene","schema_version":1,"scene_id":"x","name":"x","nodes":[]})", unknownFields).ok());
+    CHECK(!scene::Deserialize(R"({"format":"scuba.scene","schema_version":1,"scene_id":"x","name":"x","nodes":[],"extra":1})", unknownFields).ok());
+    CHECK(!scene::Deserialize(R"({"format":"scuba.scene","schema_version":2,"scene_id":"x","name":"x","nodes":[]})", unknownFields).ok());
+
+    // ProjectStore requires an existing directory and refuses a symlinked scene file when supported.
+    CHECK(!scene::ProjectStore::Open(projectRoot / "missing", readOnlyRoots).has_value());
+    const fs::path outside = root / "outside.scene.json";
+    WriteFile(outside, encoded);
+    std::error_code symlinkError;
+    fs::create_symlink(outside, projectRoot / "linked.scene.json", symlinkError);
+    if (!symlinkError) CHECK(!project->Load("linked", reopened).ok());
+}
+
 }  // namespace
 
 int main() {
@@ -425,6 +558,7 @@ int main() {
     TestFbx();
     TestLoader();
     TestPicking();
+    TestSceneDocument(root);
     std::error_code ec;
     fs::remove_all(root, ec);
     return CheckExit("test_engine_core");
