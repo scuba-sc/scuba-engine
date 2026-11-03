@@ -214,6 +214,76 @@ void TestPagedListing() {
     CHECK(observed.front() == "catalog/00000.item");
     CHECK(observed.back() == "catalog/dir/nested.item");
 
+    // Nested mounts must translate the full VFS cursor without restarting when the cursor
+    // moves into a sibling prefix such as "a/z0-file" or "a/zebra/child".
+    vfs::VirtualFileSystem nestedVfs;
+    CHECK(nestedVfs.Mount(vfs::MemoryFileSystem({
+        {"a/before", B("root-before")},
+        {"a/z/one", B("root-one")},
+        {"a/z/two", B("root-two")},
+        {"a/z0-file", B("root-edge")},
+        {"a/zz-last", B("root-last")},
+        {"b/after", B("root-after")},
+    }), {"", 0, "root"}) != 0);
+    CHECK(nestedVfs.Mount(vfs::MemoryFileSystem({
+        {"one", B("nested-one-wins")},
+        {"two", B("nested-two-wins")},
+    }), {"a/z", 10, "nested"}) != 0);
+    CHECK(nestedVfs.Mount(vfs::MemoryFileSystem({
+        {"child", B("sibling-child")},
+    }), {"a/zebra", 5, "adjacent-sibling"}) != 0);
+
+    const std::vector<std::string> expectedPaths = {
+        "a/before", "a/z/one", "a/z/two", "a/z0-file", "a/zebra/child", "a/zz-last", "b/after"};
+    std::vector<std::string> nestedObserved;
+    std::string nestedCursor;
+    uint64_t nestedSnapshotId = 0;
+    for (size_t i = 0; i < expectedPaths.size() + 2; ++i) {
+        vfs::VfsListPage nestedPage;
+        const Status status = nestedVfs.ListPage("", nestedCursor, 1,
+                                                  nestedSnapshotId, nestedPage);
+        CHECK(status.ok());
+        if (!status || nestedPage.entries.empty()) break;
+        nestedSnapshotId = nestedPage.snapshotId;
+        const std::string& path = nestedPage.entries.front().path;
+        CHECK(nestedCursor.empty() || path > nestedCursor);
+        nestedObserved.push_back(path);
+        CHECK(nestedPage.nextCursor == path);
+        if (!nestedPage.truncated) break;
+        CHECK(nestedPage.nextCursor > nestedCursor);
+        nestedCursor = nestedPage.nextCursor;
+    }
+    CHECK(nestedObserved == expectedPaths);
+
+    // The higher-priority nested backend wins a path also present in the root backend.
+    vfs::VfsListPage precedencePage;
+    CHECK(nestedVfs.ListPage("a/z", "", 2, nestedSnapshotId, precedencePage).ok());
+    CHECK(precedencePage.entries.size() == 2);
+    CHECK(precedencePage.entries[0].path == "a/z/one");
+    CHECK(precedencePage.entries[0].size == std::string("nested-one-wins").size());
+    CHECK(precedencePage.entries[1].path == "a/z/two");
+    CHECK(precedencePage.entries[1].size == std::string("nested-two-wins").size());
+
+    // A root cursor after the nested tree must advance to the adjacent mount, while a cursor
+    // within the nested directory advances in that directory's full-path coordinate system.
+    vfs::VfsListPage afterSiblingPrefix;
+    CHECK(nestedVfs.ListPage("", "a/z0-file", 1, nestedSnapshotId, afterSiblingPrefix).ok());
+    CHECK(afterSiblingPrefix.entries.size() == 1);
+    CHECK(afterSiblingPrefix.entries[0].path == "a/zebra/child");
+    vfs::VfsListPage siblingDirectory;
+    CHECK(nestedVfs.ListPage("a/zebra", "", 1, nestedSnapshotId, siblingDirectory).ok());
+    CHECK(siblingDirectory.entries.size() == 1);
+    CHECK(siblingDirectory.entries[0].path == "a/zebra/child");
+    CHECK(!siblingDirectory.truncated);
+    vfs::VfsListPage nestedFirst;
+    CHECK(nestedVfs.ListPage("a/z", "", 1, nestedSnapshotId, nestedFirst).ok());
+    CHECK(nestedFirst.entries.size() == 1 && nestedFirst.entries[0].path == "a/z/one");
+    CHECK(nestedFirst.truncated);
+    vfs::VfsListPage nestedSecond;
+    CHECK(nestedVfs.ListPage("a/z", nestedFirst.nextCursor, 1, nestedSnapshotId, nestedSecond).ok());
+    CHECK(nestedSecond.entries.size() == 1 && nestedSecond.entries[0].path == "a/z/two");
+    CHECK(!nestedSecond.truncated);
+
     // Reject malformed or out-of-scope cursors and invalid page sizes without changing the output.
     vfs::VfsListPage untouched;
     untouched.nextCursor = "sentinel";

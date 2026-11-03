@@ -64,7 +64,7 @@ std::optional<std::string> BackendCursorFor(std::string_view after, std::string_
     const std::string mountPrefix = std::string(mountPoint) + "/";
     if (after.starts_with(mountPrefix)) return std::string(after.substr(mountPrefix.size()));
     if (after < mountPrefix) return std::string{};
-    std::string upperBound(mountPoint);
+    std::string upperBound(mountPrefix);
     ++upperBound.back();  // '/' -> '0', the first key after every path under this mount point.
     if (after >= upperBound) return std::nullopt;
     // A normalized VFS path in this lexical interval must start with mountPrefix.
