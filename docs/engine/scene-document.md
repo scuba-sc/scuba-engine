@@ -41,14 +41,20 @@ contained by any of those asset directories, and rechecks that separation before
 It stores a document as `<scene-id>.scene.json` directly inside the project directory. The scene ID
 is validated before it is used as a filename; callers cannot supply a path. Saves write a unique
 sibling temporary file and atomically replace the destination. Loads reject symlinked scene files,
-enforce the file-size cap, and leave the caller's output document unchanged on failure.
+enforce the file-size cap, and leave the caller's output document unchanged on failure. `ListScenes`
+returns sorted IDs for direct-child regular scene files and skips symlinks. `Create` writes atomically
+without replacing an existing scene file.
 
 The project writer is separate from the VFS. Asset directories, archives, and `.scpak` mounts stay
 read-only inputs. The native editor opens one scene by stable ID with
 `scuba-engine.exe --project <existing-project-directory> --scene <scene-id>`; `--scene` defaults to
-`main`. If the scene file does not exist, the editor starts an empty, unsaved scene. It does not
-create the project directory. The app checks directory mounts through `ProjectStore` and checks
-archive mount paths separately before opening the session.
+`main`. The File menu and Scene panel also open a project-scene browser where saved scenes can be
+listed, opened, and created without restarting the editor or supplying a scene ID on the command
+line. Switching away from unsaved edits asks whether to save, discard the in-memory changes, or
+cancel. Creating a scene refuses to replace an existing file. If the default scene file does not
+exist, the editor starts an empty, unsaved scene. It does not create the project directory. The app
+checks directory mounts through `ProjectStore` and checks archive mount paths separately before
+opening the session.
 
 The Scene panel is a document-backed outliner. Stable node IDs are used for selection and the
 Inspector edits local translation, quaternion rotation, and nonuniform scale. Groups can be added

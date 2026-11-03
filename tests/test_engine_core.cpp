@@ -585,6 +585,21 @@ void TestSceneDocument(const fs::path& root) {
 
     CHECK(project->Save(document).ok());
     CHECK(fs::exists(projectRoot / "hangar-test.scene.json"));
+    std::vector<std::string> projectScenes;
+    CHECK(project->ListScenes(projectScenes).ok());
+    CHECK(projectScenes == std::vector<std::string>{"hangar-test"});
+    scene::Document emptyScene;
+    emptyScene.id = "empty-scene";
+    emptyScene.name = "Empty scene";
+    CHECK(project->Create(emptyScene).ok());
+    CHECK(project->ListScenes(projectScenes).ok());
+    CHECK(projectScenes == (std::vector<std::string>{"empty-scene", "hangar-test"}));
+    auto attemptedOverwrite = emptyScene;
+    attemptedOverwrite.name = "Must not replace existing scene";
+    CHECK(!project->Create(attemptedOverwrite).ok());
+    scene::Document createdScene;
+    CHECK(project->Load("empty-scene", createdScene).ok());
+    CHECK(createdScene == emptyScene);
     std::ifstream assetInput(assetRoot / "source.txt", std::ios::binary);
     std::string assetBytes((std::istreambuf_iterator<char>(assetInput)), std::istreambuf_iterator<char>());
     CHECK(assetBytes == "read-only asset bytes");
@@ -662,6 +677,7 @@ void TestSceneDocument(const fs::path& root) {
     auto traversalScene = SceneFixture();
     traversalScene.id = "../escape";
     CHECK(!project->Save(traversalScene).ok());
+    CHECK(!project->Create(traversalScene).ok());
     traversalScene.id = "CON";
     CHECK(!project->Save(traversalScene).ok());
     traversalScene.id = "con";
@@ -822,7 +838,11 @@ void TestSceneDocument(const fs::path& root) {
     WriteFile(outside, encoded);
     std::error_code symlinkError;
     fs::create_symlink(outside, projectRoot / "linked.scene.json", symlinkError);
-    if (!symlinkError) CHECK(!project->Load("linked", reopened).ok());
+    if (!symlinkError) {
+        CHECK(!project->Load("linked", reopened).ok());
+        CHECK(project->ListScenes(projectScenes).ok());
+        CHECK(std::find(projectScenes.begin(), projectScenes.end(), "linked") == projectScenes.end());
+    }
 }
 
 }  // namespace

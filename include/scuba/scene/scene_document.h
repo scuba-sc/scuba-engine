@@ -112,6 +112,9 @@ public:
                                             std::span<const std::filesystem::path> readOnlyDirectoryRoots,
                                             Status* status = nullptr);
 
+    Status ListScenes(std::vector<std::string>& sceneIds) const;
+    // Creates a new file atomically and refuses to replace an existing scene.
+    Status Create(const Document& document) const;
     Status Save(const Document& document) const;
     Status Load(std::string_view sceneId, Document& document) const;
 

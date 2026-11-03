@@ -203,8 +203,8 @@ bool ReadNode(const Json& value, Node& out) {
     return ReadTransform(value.find("transform"), out.localTransform);
 }
 
-Status AtomicReplace(const std::filesystem::path& root, const std::filesystem::path& target,
-                     std::string_view contents) {
+Status AtomicWrite(const std::filesystem::path& root, const std::filesystem::path& target,
+                   std::string_view contents, bool replace) {
     static std::atomic<uint64_t> sequence{0};
 #ifdef _WIN32
     const auto processId = static_cast<uint64_t>(GetCurrentProcessId());
@@ -240,10 +240,15 @@ Status AtomicReplace(const std::filesystem::path& root, const std::filesystem::p
             DeleteFileW(temporary.c_str());
             return Fail("cannot write temporary scene file");
         }
-        if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DWORD moveFlags = MOVEFILE_WRITE_THROUGH;
+        if (replace) moveFlags |= MOVEFILE_REPLACE_EXISTING;
+        if (!MoveFileExW(temporary.c_str(), target.c_str(), moveFlags)) {
             const DWORD error = GetLastError();
             DeleteFileW(temporary.c_str());
-            return Fail("cannot atomically replace scene file (Windows error " + std::to_string(error) + ")");
+            if (!replace && (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS))
+                return Fail("scene file already exists");
+            return Fail("cannot atomically " + std::string(replace ? "replace" : "create") +
+                        " scene file (Windows error " + std::to_string(error) + ")");
         }
 #else
         const int fd = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
@@ -277,12 +282,20 @@ Status AtomicReplace(const std::filesystem::path& root, const std::filesystem::p
             return Fail("cannot write temporary scene file: " +
                         std::error_code(savedError, std::generic_category()).message());
         }
-        if (::rename(temporary.c_str(), target.c_str()) != 0) {
+        const int writeResult = replace ? ::rename(temporary.c_str(), target.c_str())
+                                        : ::link(temporary.c_str(), target.c_str());
+        if (writeResult != 0) {
             const int error = errno;
             std::error_code ignored;
             std::filesystem::remove(temporary, ignored);
-            return Fail("cannot atomically replace scene file: " +
+            if (!replace && error == EEXIST) return Fail("scene file already exists");
+            return Fail("cannot atomically " + std::string(replace ? "replace" : "create") + " scene file: " +
                         std::error_code(error, std::generic_category()).message());
+        }
+        if (!replace) {
+            // The completed temporary inode is now visible under its final name. A failed cleanup
+            // only leaves a harmless extra temp entry; the new scene is already committed.
+            ::unlink(temporary.c_str());
         }
 #endif
         return Status::Ok();
@@ -807,6 +820,32 @@ std::filesystem::path ProjectStore::ScenePath(std::string_view sceneId) const {
     return root_ / (std::string(sceneId) + ".scene.json");
 }
 
+Status ProjectStore::ListScenes(std::vector<std::string>& sceneIds) const {
+    if (auto status = CheckRootSeparation(); !status) return status;
+    constexpr size_t kMaxListedScenes = 4096;
+    std::vector<std::string> listed;
+    std::error_code ec;
+    std::filesystem::directory_iterator it(root_, ec), end;
+    if (ec) return Fail("cannot list project scenes: " + ec.message());
+    for (; it != end; it.increment(ec)) {
+        if (ec) return Fail("project directory changed while listing scenes: " + ec.message());
+        const std::string filename = it->path().filename().string();
+        constexpr std::string_view suffix = ".scene.json";
+        if (!filename.ends_with(suffix)) continue;
+        const std::string id = filename.substr(0, filename.size() - suffix.size());
+        if (!ValidIdentifier(id)) continue;
+        const auto fileStatus = it->symlink_status(ec);
+        if (ec) return Fail("cannot inspect project scene entry: " + ec.message());
+        if (!std::filesystem::is_regular_file(fileStatus) || std::filesystem::is_symlink(fileStatus)) continue;
+        listed.push_back(id);
+        if (listed.size() > kMaxListedScenes) return Fail("project has too many scene files to list");
+    }
+    if (ec) return Fail("project directory changed while listing scenes: " + ec.message());
+    std::sort(listed.begin(), listed.end());
+    sceneIds = std::move(listed);
+    return Status::Ok();
+}
+
 Status ProjectStore::CheckRootSeparation() const {
     std::error_code ec;
     const auto canonicalRoot = std::filesystem::canonical(root_, ec);
@@ -827,7 +866,15 @@ Status ProjectStore::Save(const Document& document) const {
     if (auto status = Validate(document); !status) return status;
     std::string json;
     if (auto status = Serialize(document, json); !status) return status;
-    return AtomicReplace(root_, ScenePath(document.id), json);
+    return AtomicWrite(root_, ScenePath(document.id), json, true);
+}
+
+Status ProjectStore::Create(const Document& document) const {
+    if (auto status = CheckRootSeparation(); !status) return status;
+    if (auto status = Validate(document); !status) return status;
+    std::string json;
+    if (auto status = Serialize(document, json); !status) return status;
+    return AtomicWrite(root_, ScenePath(document.id), json, false);
 }
 
 Status ProjectStore::Load(std::string_view sceneId, Document& document) const {

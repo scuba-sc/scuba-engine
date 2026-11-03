@@ -241,6 +241,8 @@ render::Float3 TransformPoint(render::Float3 point, const render::Float4x4& matr
 }
 
 struct Editor {
+    enum class PendingSceneAction : uint8_t { None, Open, Create };
+
     vfs::VirtualFileSystem vfs;
     JobSystem jobs;
     std::unique_ptr<asset::ModelLoader> loader;
@@ -298,6 +300,13 @@ struct Editor {
     std::string reparentTarget;
     std::string reparentTargetNode;
     bool renameBufferDirty = false;
+    bool showSceneBrowser = false;
+    char newSceneId[65] = "";
+    std::vector<std::string> projectScenes;
+    std::string selectedProjectScene;
+    std::string sceneBrowserStatus;
+    PendingSceneAction pendingSceneAction = PendingSceneAction::None;
+    std::string pendingSceneId;
     bool frameOnLoad = true;
 
     ~Editor() {
@@ -457,6 +466,8 @@ struct Editor {
             sceneDirty = true;
             return Status::Ok();
         }
+        savedDocument.reset();
+        sceneDirty = true;
         std::string saved;
         if (auto status = scene::Serialize(document, saved); !status) return status;
         savedDocument = std::move(saved);
@@ -578,6 +589,116 @@ struct Editor {
         }
         sceneStatus = "Saved " + document.id;
         log::Info("scene", sceneStatus);
+    }
+
+    void RefreshProjectScenes() {
+        if (!projectStore) {
+            sceneBrowserStatus = "Open a project with --project DIR to browse scenes.";
+            projectScenes.clear();
+            return;
+        }
+        std::vector<std::string> listed;
+        if (auto status = projectStore->ListScenes(listed); !status) {
+            sceneBrowserStatus = "Cannot list project scenes: " + status.error;
+            return;
+        }
+        projectScenes = std::move(listed);
+        if (std::find(projectScenes.begin(), projectScenes.end(), selectedProjectScene) == projectScenes.end())
+            selectedProjectScene.clear();
+        sceneBrowserStatus.clear();
+    }
+
+    void OpenSceneBrowser() {
+        if (!projectStore) {
+            sceneStatus = "Open a project with --project DIR to browse scenes.";
+            return;
+        }
+        showSceneBrowser = true;
+        RefreshProjectScenes();
+        selectedProjectScene = std::find(projectScenes.begin(), projectScenes.end(), document.id) != projectScenes.end()
+            ? document.id : std::string{};
+    }
+
+    void RequestOpenScene(std::string sceneId) {
+        if (!projectStore) return;
+        if (sceneId.empty() || sceneId == document.id) return;
+        pendingSceneAction = PendingSceneAction::Open;
+        pendingSceneId = std::move(sceneId);
+        if (sceneDirty) ImGui::OpenPopup("Confirm scene change");
+        else CompletePendingSceneAction();
+    }
+
+    void RequestCreateScene(std::string sceneId) {
+        if (!projectStore) return;
+        scene::Document candidate;
+        candidate.id = std::move(sceneId);
+        candidate.name = candidate.id;
+        if (auto status = scene::Validate(candidate); !status) {
+            sceneBrowserStatus = "Cannot create scene: " + status.error;
+            return;
+        }
+        RefreshProjectScenes();
+        if (!sceneBrowserStatus.empty()) return;
+        if (std::find(projectScenes.begin(), projectScenes.end(), candidate.id) != projectScenes.end()) {
+            sceneBrowserStatus = "A scene with that ID already exists.";
+            return;
+        }
+        pendingSceneAction = PendingSceneAction::Create;
+        pendingSceneId = std::move(candidate.id);
+        if (sceneDirty) ImGui::OpenPopup("Confirm scene change");
+        else CompletePendingSceneAction();
+    }
+
+    void CompletePendingSceneAction() {
+        if (!projectStore || pendingSceneAction == PendingSceneAction::None) return;
+        const PendingSceneAction action = pendingSceneAction;
+        const std::string sceneId = pendingSceneId;
+        pendingSceneAction = PendingSceneAction::None;
+        pendingSceneId.clear();
+
+        scene::Document candidate;
+        if (action == PendingSceneAction::Open) {
+            if (auto status = projectStore->Load(sceneId, candidate); !status) {
+                sceneBrowserStatus = "Cannot open scene " + sceneId + ": " + status.error;
+                return;
+            }
+        } else {
+            candidate.id = sceneId;
+            candidate.name = sceneId;
+            if (auto status = projectStore->Create(candidate); !status) {
+                const std::string failure = "Cannot create scene " + sceneId + ": " + status.error;
+                RefreshProjectScenes();
+                sceneBrowserStatus = failure;
+                return;
+            }
+        }
+
+        if (auto status = InstallDocument(std::move(candidate), false); !status) {
+            sceneBrowserStatus = std::string(action == PendingSceneAction::Open ? "Cannot install scene " :
+                                                                          "Scene was created but cannot be opened ") +
+                                 sceneId + ": " + status.error;
+            return;
+        }
+        sceneHistory.Clear();
+        if (auto status = SetSavedBaseline(true); !status) {
+            sceneBrowserStatus = "Scene is open but its saved baseline could not be recorded: " + status.error;
+            return;
+        }
+        selectedNode.clear();
+        inspectorUndoCaptured = false;
+        inspectorUndoNode.clear();
+        renameTarget.clear();
+        renameSourceName.clear();
+        renameBufferDirty = false;
+        reparentTarget.clear();
+        reparentTargetNode.clear();
+        CancelPlacement("Scene changed");
+        sceneStatus = std::string(action == PendingSceneAction::Open ? "Loaded scene " : "Created scene ") + sceneId;
+        selectedProjectScene = sceneId;
+        std::snprintf(newSceneId, sizeof(newSceneId), "%s", "");
+        RefreshProjectScenes();
+        showSceneBrowser = true;
+        sceneBrowserStatus.clear();
     }
 
     void Spawn(const std::string& path) {
@@ -852,6 +973,8 @@ struct Editor {
     void DrawContent();
     void DrawMounts();
     void DrawScene();
+    void DrawSceneBrowser();
+    void DrawSceneChangeConfirmation();
     void DrawInspector();
     void DrawPlugins();
     void DrawLoader();
@@ -1022,6 +1145,7 @@ void Editor::DrawMenu(bool& quit) {
         if (ImGui::MenuItem("Undo", "Ctrl+Z", false, sceneHistory.CanUndo())) UndoScene();
         if (ImGui::MenuItem("Redo", "Ctrl+Y", false, sceneHistory.CanRedo())) RedoScene();
         ImGui::Separator();
+        if (ImGui::MenuItem("Project scenes...", nullptr, false, projectStore.has_value())) OpenSceneBrowser();
         if (ImGui::MenuItem("Save scene", "Ctrl+S", false, projectStore.has_value())) SaveScene();
         if (ImGui::MenuItem("Clear scene")) ClearScene();
         ImGui::Separator();
@@ -1137,6 +1261,7 @@ void Editor::DrawScene() {
         ImGui::SameLine();
         ImGui::TextUnformatted(sceneDirty ? "Unsaved" : "Saved");
     }
+    if (ImGui::Button("Browse scenes")) OpenSceneBrowser();
     if (ImGui::Button("Add group")) AddGroup();
     if (const scene::Node* selected = FindNode(selectedNode)) {
         const std::string selectedId = selected->id;
@@ -1251,6 +1376,63 @@ void Editor::DrawScene() {
     if (placement.active) ImGui::TextWrapped("Placement preview: %s · click viewport to place · Esc cancels",
                                                placement.assetPath.c_str());
     ImGui::End();
+}
+
+void Editor::DrawSceneBrowser() {
+    if (!showSceneBrowser) return;
+    if (!ImGui::Begin("Project scenes", &showSceneBrowser)) { ImGui::End(); return; }
+    if (ImGui::Button("Refresh")) RefreshProjectScenes();
+    ImGui::SameLine();
+    ImGui::TextWrapped("Project: %s", projectRoot.generic_string().c_str());
+    ImGui::BeginChild("project-scenes", {0, 180}, ImGuiChildFlags_Borders);
+    if (projectScenes.empty()) ImGui::TextDisabled("No saved scenes in this project.");
+    for (const auto& id : projectScenes) {
+        const std::string label = id == document.id ? id + "  (current)" : id;
+        if (ImGui::Selectable(label.c_str(), selectedProjectScene == id)) selectedProjectScene = id;
+    }
+    ImGui::EndChild();
+    ImGui::BeginDisabled(selectedProjectScene.empty() || selectedProjectScene == document.id);
+    if (ImGui::Button("Open selected")) RequestOpenScene(selectedProjectScene);
+    ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Create scene");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##new-scene-id", "scene ID (for example, hangar)", newSceneId, sizeof(newSceneId));
+    ImGui::BeginDisabled(newSceneId[0] == '\0');
+    if (ImGui::Button("Create scene")) RequestCreateScene(newSceneId);
+    ImGui::EndDisabled();
+    if (!sceneBrowserStatus.empty()) ImGui::TextWrapped("%s", sceneBrowserStatus.c_str());
+    ImGui::End();
+}
+
+void Editor::DrawSceneChangeConfirmation() {
+    if (pendingSceneAction == PendingSceneAction::None) return;
+    if (!ImGui::BeginPopupModal("Confirm scene change", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::TextWrapped("Scene %s has unsaved changes. Save them before switching?",
+                       document.id.c_str());
+    ImGui::Separator();
+    if (ImGui::Button("Save and continue")) {
+        SaveScene();
+        if (!sceneDirty) {
+            CompletePendingSceneAction();
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Discard changes and continue")) {
+        CompletePendingSceneAction();
+        ImGui::CloseCurrentPopup();
+    }
+    if (ImGui::Button("Cancel")) {
+        pendingSceneAction = PendingSceneAction::None;
+        pendingSceneId.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    if (!sceneDirty && pendingSceneAction != PendingSceneAction::None)
+        ImGui::TextWrapped("Save completed; the scene switch is waiting to finish.");
+    else if (sceneStatus.starts_with("Save failed") || sceneStatus.starts_with("Saved, but"))
+        ImGui::TextWrapped("%s", sceneStatus.c_str());
+    ImGui::EndPopup();
 }
 
 void Editor::DrawInspector() {
@@ -1529,6 +1711,8 @@ void Editor::DrawUi() {
         inspectorUndoCaptured = false;
         inspectorUndoNode.clear();
     }
+    DrawSceneBrowser();
+    DrawSceneChangeConfirmation();
     if (showPlugins) DrawPlugins();
     if (showLoader) DrawLoader();
     if (showStats) DrawStats();

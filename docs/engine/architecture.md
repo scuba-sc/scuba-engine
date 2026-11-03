@@ -162,7 +162,7 @@ picking (right drag orbit, middle drag pan, wheel dolly, left click select, F fr
 | Phase | Scope | Exit |
 |---|---|---|
 | 1 (this branch) | core, VFS, sco host, D3D12 loop, ImGui shell, async OBJ/glTF/CGF intake, PBR-lite, CPU picking, move tool | `engine_core` + `engine_smoke` (WARP) green on Windows |
-| 2 | gizmos (translate/rotate/scale, snapping), GPU id-buffer picking, project/scene browser, glTF node hierarchy | editor round-trips a scene |
+| 2 | gizmos (translate/rotate/scale, snapping), GPU id-buffer picking, project picker, glTF node hierarchy | editor round-trips a scene |
 | 3 | textures and mip streaming (priority IO queue, budget-driven residency), material textures, DDS | Asset Lab parity |
 | 4 | studio parity: Widgets, Designer, Viewport (diegetic panels), NetSandbox panels in native UI | browser studio retired; hostd remains for headless CI |
 | 5 | Vulkan backend; Linux build of the editor | cross-platform CI (roadmap E-5) |
