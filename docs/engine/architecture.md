@@ -160,7 +160,8 @@ handled, capture, release) instead of changing global state. A capturing layer r
 pointer event until it releases or its button goes up. The editor's chain: UI blocker (ImGui
 wants the pointer, or it is outside the viewport) → placement preview → transform gizmo → move tool
 (Ctrl + left drag) → camera and picking (right drag orbit, middle drag pan, wheel dolly, left click
-select, F frame, Del remove). An active placement preview owns viewport clicks; visible gizmo
+select, F frame selection, Del remove). Framing a group uses loaded descendant model bounds; missing
+or loading assets are reported. An active placement preview owns viewport clicks; visible gizmo
 handles take precedence over ordinary model picking.
 
 ## Phases

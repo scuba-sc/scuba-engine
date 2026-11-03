@@ -741,6 +741,26 @@ void TestPicking() {
     const auto eye = cam.Eye();
     const float len = std::sqrt(eye.x * eye.x + eye.y * eye.y + eye.z * eye.z);
     CHECK(std::fabs(center.dir.x + eye.x / len) < 1e-4f && std::fabs(center.dir.z + eye.z / len) < 1e-4f);
+
+    render::OrbitCamera frameCamera;
+    frameCamera.target = {2, 3, 4};
+    frameCamera.distance = 12;
+    CHECK(frameCamera.TryFrame({0, 0, 0}, {0, 0, 0}));  // Point bounds use the safe minimum distance.
+    CHECK(frameCamera.target.x == 0 && frameCamera.target.y == 0 && frameCamera.target.z == 0);
+    CHECK(frameCamera.distance == 0.5f);
+    const auto framedTarget = frameCamera.target;
+    const float framedDistance = frameCamera.distance;
+    CHECK(!frameCamera.TryFrame({1, 0, 0}, {0, 0, 0}));
+    CHECK(frameCamera.target.x == framedTarget.x && frameCamera.target.y == framedTarget.y &&
+          frameCamera.target.z == framedTarget.z && frameCamera.distance == framedDistance);
+    CHECK(!frameCamera.TryFrame({-1e20f, -1e20f, -1e20f}, {1e20f, 1e20f, 1e20f}));
+    CHECK(frameCamera.target.x == framedTarget.x && frameCamera.target.y == framedTarget.y &&
+          frameCamera.target.z == framedTarget.z && frameCamera.distance == framedDistance);
+    CHECK(!frameCamera.TryFrame({std::numeric_limits<float>::quiet_NaN(), 0, 0}, {1, 1, 1}));
+    CHECK(frameCamera.target.x == framedTarget.x && frameCamera.distance == framedDistance);
+    const float distantPoint = 1e12f;
+    CHECK(!frameCamera.TryFrame({distantPoint, 0, 0}, {distantPoint, 0, 0}));
+    CHECK(frameCamera.target.x == framedTarget.x && frameCamera.distance == framedDistance);
 }
 
 void TestTransformGizmoMath() {
@@ -981,6 +1001,68 @@ scene::Document SceneFixture() {
 void TestSceneDocument(const fs::path& root) {
     auto document = SceneFixture();
     CHECK(scene::Validate(document).ok());
+    const std::array<scene::ModelLocalBounds, 1> loadedShipBounds{{
+        {"ship-01", {-1, -1, -1}, {1, 1, 1}},
+    }};
+    scene::ResolvedSubtreeBounds framedScene;
+    CHECK(scene::ComputeSubtreeBounds(document, "root", loadedShipBounds, framedScene).ok());
+    CHECK(framedScene.hasBounds() && framedScene.loadedModelCount == 1 &&
+          framedScene.unavailableModelCount == 0);
+    std::vector<scene::ResolvedTransform> shipWorldTransforms;
+    CHECK(scene::ResolveWorldTransforms(document, shipWorldTransforms).ok());
+    const auto shipWorld = std::find_if(shipWorldTransforms.begin(), shipWorldTransforms.end(),
+        [](const auto& transform) { return transform.nodeId == "ship-01"; });
+    CHECK(shipWorld != shipWorldTransforms.end());
+    if (shipWorld != shipWorldTransforms.end()) {
+        std::array<float, 3> expectedWorldMin{}, expectedWorldMax{};
+        CHECK(render::TransformBounds({-1, -1, -1}, {1, 1, 1}, shipWorld->world,
+                                      expectedWorldMin, expectedWorldMax));
+        CHECK(framedScene.boundsMin == expectedWorldMin && framedScene.boundsMax == expectedWorldMax);
+    }
+    scene::ResolvedSubtreeBounds focusedShip;
+    CHECK(scene::ComputeSubtreeBounds(document, "ship-01", loadedShipBounds, focusedShip).ok());
+    CHECK(focusedShip.hasBounds() && focusedShip.loadedModelCount == 1);
+    scene::ResolvedSubtreeBounds missingShip;
+    CHECK(scene::ComputeSubtreeBounds(document, "ship-01", {}, missingShip).ok());
+    CHECK(!missingShip.hasBounds() && missingShip.unavailableModelCount == 1);
+
+    auto multipleModels = document;
+    CHECK(scene::AddModelInstance(multipleModels, "ship-02", "Second ship", "content/models/second.obj",
+                                   std::string("bay-a")).ok());
+    CHECK(scene::AddGroup(multipleModels, "empty-group", "Empty group").ok());
+    scene::ResolvedSubtreeBounds partialGroup;
+    CHECK(scene::ComputeSubtreeBounds(multipleModels, "root", loadedShipBounds, partialGroup).ok());
+    CHECK(partialGroup.hasBounds() && partialGroup.loadedModelCount == 1 &&
+          partialGroup.unavailableModelCount == 1);
+    scene::ResolvedSubtreeBounds emptyGroup;
+    CHECK(scene::ComputeSubtreeBounds(multipleModels, "empty-group", loadedShipBounds, emptyGroup).ok());
+    CHECK(!emptyGroup.hasBounds() && emptyGroup.loadedModelCount == 0 &&
+          emptyGroup.unavailableModelCount == 0);
+    scene::ResolvedSubtreeBounds noLoadedGroup;
+    CHECK(scene::ComputeSubtreeBounds(multipleModels, "root", {}, noLoadedGroup).ok());
+    CHECK(!noLoadedGroup.hasBounds() && noLoadedGroup.unavailableModelCount == 2);
+
+    const auto framedSceneSentinel = framedScene;
+    const std::array<scene::ModelLocalBounds, 1> invalidShipBounds{{
+        {"ship-01", {1, 0, 0}, {-1, 0, 0}},
+    }};
+    CHECK(!scene::ComputeSubtreeBounds(document, "root", invalidShipBounds, framedScene).ok());
+    CHECK(framedScene.loadedModelCount == framedSceneSentinel.loadedModelCount &&
+          framedScene.unavailableModelCount == framedSceneSentinel.unavailableModelCount &&
+          framedScene.boundsMin == framedSceneSentinel.boundsMin &&
+          framedScene.boundsMax == framedSceneSentinel.boundsMax);
+    CHECK(!scene::ComputeSubtreeBounds(document, "missing-node", loadedShipBounds, framedScene).ok());
+    CHECK(framedScene.loadedModelCount == framedSceneSentinel.loadedModelCount &&
+          framedScene.boundsMin == framedSceneSentinel.boundsMin &&
+          framedScene.boundsMax == framedSceneSentinel.boundsMax);
+
+    const std::array<scene::ModelLocalBounds, 1> pointShipBounds{{
+        {"ship-01", {0, 0, 0}, {0, 0, 0}},
+    }};
+    scene::ResolvedSubtreeBounds pointBounds;
+    CHECK(scene::ComputeSubtreeBounds(document, "ship-01", pointShipBounds, pointBounds).ok());
+    CHECK(pointBounds.hasBounds() && pointBounds.boundsMin == pointBounds.boundsMax);
+    CHECK(document == SceneFixture());
     scene::Document copiedDocument;
     CHECK(scene::MakeSceneCopy(document, "hangar-copy", copiedDocument).ok());
     auto expectedCopy = document;

@@ -4,6 +4,7 @@
 #include "scuba/core/status.h"
 #include "scuba/render/camera.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -75,6 +76,21 @@ struct ResolvedTransform {
     render::Float4x4 world;
 };
 
+struct ModelLocalBounds {
+    std::string nodeId;
+    std::array<float, 3> boundsMin{};
+    std::array<float, 3> boundsMax{};
+};
+
+struct ResolvedSubtreeBounds {
+    std::array<float, 3> boundsMin{};
+    std::array<float, 3> boundsMax{};
+    size_t loadedModelCount = 0;
+    size_t unavailableModelCount = 0;
+
+    bool hasBounds() const noexcept { return loadedModelCount != 0; }
+};
+
 // Scene asset paths use the engine VFS namespace. Project files are separate and are never
 // written through the read-only VFS.
 Status Validate(const Document& document);
@@ -100,6 +116,14 @@ Status SearchOutliner(const Document& document, std::string_view query, Outliner
 // Resolves row-vector local transforms in document order, composing child-local * parent-world.
 // Returns failure without changing the output if composition overflows or becomes singular.
 Status ResolveWorldTransforms(const Document& document, std::vector<ResolvedTransform>& transforms);
+// Computes the world-space union of loaded model bounds under the selected node, including its
+// own model bounds if it is an instance. Models without supplied bounds are counted unavailable.
+// Flat/point bounds are valid. Only supplied bounds for descendant models are used. Invalid nodes,
+// duplicate/invalid relevant bounds, or transform failures leave output unchanged; an empty/unloaded
+// subtree succeeds with hasBounds()==false.
+Status ComputeSubtreeBounds(const Document& document, std::string_view nodeId,
+                            std::span<const ModelLocalBounds> loadedBounds,
+                            ResolvedSubtreeBounds& bounds);
 // Intrinsic local XYZ Euler angles in degrees, applied X then Y then Z. Conversion is
 // transactional and rejects non-finite input; quaternion-to-Euler returns the canonical range.
 Status EulerXYZDegreesToQuaternion(Vec3 degrees, Quaternion& rotation);

@@ -227,3 +227,14 @@ Selection is editor-session state: opening a scene clears the previous selection
 selected from the outliner, and loaded models can also be selected in the viewport. The project
 scene browser is available from the File menu and Scene panel. Windows D3D12 compilation and visual
 validation remain pending; the focused Linux core tests do not establish Windows rendering behavior.
+
+Press **F** or choose **Frame selection** in the Inspector to focus the viewport. A model selection
+uses its transformed world bounds; a group uses the union of bounds from its loaded descendant
+models, including nested groups. Missing, failed, and still-loading assets are counted and reported;
+if some group models are loaded, the camera frames those and names the skipped count. If none are
+loaded, a model or nonempty group reports that there are no bounds to frame. An empty group reports
+that it contains no model instances. Finite flat or point bounds are supported, with the camera's
+minimum viewing distance. Invalid bounds, an out-of-range scene, or coordinates too large for the
+camera's float precision leave the camera unchanged. Framing changes only camera/session status; it
+does not alter the scene document, selection, or undo history. Windows visual and input acceptance
+remains pending.

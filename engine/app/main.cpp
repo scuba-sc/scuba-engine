@@ -1383,11 +1383,55 @@ struct Editor {
         else log::Info("scenario", path + ": " + scenarioStatus);
     }
 
-    void FrameInstance(const Instance& inst) {
-        if (!inst.model) return;
+    bool FrameInstance(const Instance& inst) {
+        if (!inst.model) return false;
         std::array<float, 3> mn{}, mx{};
         if (render::TransformBounds(inst.model->boundsMin, inst.model->boundsMax, inst.world, mn, mx))
-            camera.Frame(mn, mx);
+            return camera.TryFrame(mn, mx);
+        return false;
+    }
+
+    void FrameSelection() {
+        const scene::Node* selected = FindNode(selectedNode);
+        if (!selected) {
+            sceneStatus = "Select a scene node before framing the viewport.";
+            return;
+        }
+
+        std::vector<scene::ModelLocalBounds> loadedBounds;
+        loadedBounds.reserve(instances.size());
+        for (const auto& inst : instances)
+            if (inst.model)
+                loadedBounds.push_back({inst.nodeId, inst.model->boundsMin, inst.model->boundsMax});
+
+        scene::ResolvedSubtreeBounds subtree;
+        if (auto status = scene::ComputeSubtreeBounds(document, selectedNode, loadedBounds, subtree); !status) {
+            sceneStatus = "Cannot frame selection: " + status.error;
+            return;
+        }
+        if (!subtree.hasBounds()) {
+            if (subtree.unavailableModelCount != 0) {
+                sceneStatus = "Cannot frame selection: no model bounds are loaded (" +
+                    std::to_string(subtree.unavailableModelCount) +
+                    " asset(s) are missing, failed, or still loading).";
+            } else if (selected->kind == scene::NodeKind::Group) {
+                sceneStatus = "Cannot frame group: it contains no model instances.";
+            } else {
+                sceneStatus = "Cannot frame model: its asset is missing, failed, or still loading.";
+            }
+            return;
+        }
+        if (!camera.TryFrame(subtree.boundsMin, subtree.boundsMax)) {
+            sceneStatus = "Cannot frame selection: bounds are invalid or exceed the camera's view or precision range.";
+            return;
+        }
+
+        const std::string subject = selected->kind == scene::NodeKind::Group ? "group" : "model";
+        sceneStatus = "Framed " + subject + " using " + std::to_string(subtree.loadedModelCount) +
+            " loaded model(s).";
+        if (subtree.unavailableModelCount != 0)
+            sceneStatus += " Skipped " + std::to_string(subtree.unavailableModelCount) +
+                " asset(s) that are missing, failed, or still loading.";
     }
 
     std::vector<render::PickTarget> PickTargets() const {
@@ -1850,7 +1894,7 @@ public:
                 return ui::Reply::Handled();
             }
             if (ev.key == ImGuiKey_S && ev.ctrl) { e_.SaveScene(); return ui::Reply::Handled(); }
-            if (ev.key == ImGuiKey_F) { if (auto* s = e_.FindNodeInstance(e_.selectedNode)) e_.FrameInstance(*s); return ui::Reply::Handled(); }
+            if (ev.key == ImGuiKey_F) { e_.FrameSelection(); return ui::Reply::Handled(); }
             if (ev.key == ImGuiKey_Delete && !e_.selectedNode.empty()) { e_.RemoveSelected(); return ui::Reply::Handled(); }
             if (ev.key == ImGuiKey_Escape) { e_.selectedNode.clear(); return ui::Reply::Handled(); }
             break;
@@ -2650,8 +2694,8 @@ void Editor::DrawInspector() {
         ImGui::SliderFloat("metallic", &inst->material.metallic, 0, 1);
         ImGui::SliderFloat("roughness", &inst->material.roughness, 0.04f, 1);
     }
-    if (inst) {
-        if (ImGui::Button("Frame (F)")) FrameInstance(*inst);
+    if (FindNode(selectedNode)) {
+        if (ImGui::Button("Frame selection (F)")) FrameSelection();
         ImGui::SameLine();
     }
     if (ImGui::Button("Delete (Del)")) RemoveSelected();

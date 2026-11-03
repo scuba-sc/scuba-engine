@@ -200,10 +200,43 @@ void OrbitCamera::Dolly(float wheelSteps) {
 }
 
 void OrbitCamera::Frame(const std::array<float, 3>& mn, const std::array<float, 3>& mx) {
-    target = {(mn[0] + mx[0]) * 0.5f, (mn[1] + mx[1]) * 0.5f, (mn[2] + mx[2]) * 0.5f};
-    const float r = 0.5f * std::sqrt((mx[0] - mn[0]) * (mx[0] - mn[0]) + (mx[1] - mn[1]) * (mx[1] - mn[1]) +
-                                     (mx[2] - mn[2]) * (mx[2] - mn[2]));
-    distance = std::max(r / std::sin(fovY * 0.5f) * 1.1f, 0.5f);
+    (void)TryFrame(mn, mx);
+}
+
+bool OrbitCamera::TryFrame(const std::array<float, 3>& mn, const std::array<float, 3>& mx) {
+    if (!std::isfinite(fovY) || fovY <= 0.0f || fovY >= 3.14159265f ||
+        !std::isfinite(farZ) || farZ <= 1.0f)
+        return false;
+    for (size_t axis = 0; axis < 3; ++axis)
+        if (!std::isfinite(mn[axis]) || !std::isfinite(mx[axis]) || mn[axis] > mx[axis]) return false;
+
+    const double dx = static_cast<double>(mx[0]) - mn[0];
+    const double dy = static_cast<double>(mx[1]) - mn[1];
+    const double dz = static_cast<double>(mx[2]) - mn[2];
+    const double radius = 0.5 * std::hypot(dx, dy, dz);
+    const double sinHalfFov = std::sin(static_cast<double>(fovY) * 0.5);
+    const double framedDistance = std::max(radius / sinHalfFov * 1.1, 0.5);
+    const double maxDistance = static_cast<double>(farZ) * 0.5;
+    if (!std::isfinite(framedDistance) || framedDistance > maxDistance) return false;
+
+    std::array<float, 3> framedTarget{};
+    for (size_t axis = 0; axis < 3; ++axis) {
+        const double center = static_cast<double>(mn[axis]) +
+                              (static_cast<double>(mx[axis]) - mn[axis]) * 0.5;
+        if (!std::isfinite(center) || std::fabs(center) > std::numeric_limits<float>::max()) return false;
+        framedTarget[axis] = static_cast<float>(center);
+        const float nextUp = std::nextafter(framedTarget[axis], std::numeric_limits<float>::infinity());
+        const float nextDown = std::nextafter(framedTarget[axis], -std::numeric_limits<float>::infinity());
+        const double coordinateResolution = std::max(
+            std::fabs(static_cast<double>(nextUp) - framedTarget[axis]),
+            std::fabs(static_cast<double>(framedTarget[axis]) - nextDown));
+        if (!std::isfinite(coordinateResolution) || coordinateResolution > framedDistance * 0.25)
+            return false;
+    }
+
+    target = {framedTarget[0], framedTarget[1], framedTarget[2]};
+    distance = static_cast<float>(framedDistance);
+    return true;
 }
 
 Float3 OrbitCamera::Eye() const {

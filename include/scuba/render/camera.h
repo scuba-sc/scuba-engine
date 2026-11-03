@@ -56,7 +56,11 @@ public:
     void Orbit(float dxPixels, float dyPixels);
     void Pan(float dxPixels, float dyPixels, float viewportHeight);
     void Dolly(float wheelSteps);
+    // Existing convenience API; invalid bounds leave the camera unchanged.
     void Frame(const std::array<float, 3>& boundsMin, const std::array<float, 3>& boundsMax);
+    // Focuses the camera on finite, ordered bounds. Point/flat bounds are valid and use the
+    // minimum viewing distance; invalid or out-of-range bounds leave the camera unchanged.
+    bool TryFrame(const std::array<float, 3>& boundsMin, const std::array<float, 3>& boundsMax);
 
     Float3 Eye() const;
     Float4x4 View() const;

@@ -935,6 +935,88 @@ Status ResolveWorldTransforms(const Document& document, std::vector<ResolvedTran
     return Status::Ok();
 }
 
+Status ComputeSubtreeBounds(const Document& document, std::string_view nodeId,
+                            std::span<const ModelLocalBounds> loadedBounds,
+                            ResolvedSubtreeBounds& bounds) {
+    if (auto status = Validate(document); !status)
+        return Fail("cannot frame an invalid scene: " + status.error);
+
+    std::unordered_map<std::string, const Node*> nodesById;
+    std::unordered_map<std::string, std::vector<const Node*>> childrenByParent;
+    nodesById.reserve(document.nodes.size());
+    childrenByParent.reserve(document.nodes.size());
+    for (const auto& node : document.nodes) {
+        nodesById.emplace(node.id, &node);
+        if (node.parentId) childrenByParent[*node.parentId].push_back(&node);
+    }
+    const auto selected = nodesById.find(std::string(nodeId));
+    if (selected == nodesById.end()) return Fail("cannot frame a missing scene node");
+
+    std::unordered_set<std::string> subtreeIds;
+    subtreeIds.reserve(document.nodes.size());
+    std::vector<const Node*> pending{selected->second};
+    while (!pending.empty()) {
+        const Node* current = pending.back();
+        pending.pop_back();
+        if (!subtreeIds.insert(current->id).second) continue;
+        if (const auto found = childrenByParent.find(current->id); found != childrenByParent.end())
+            pending.insert(pending.end(), found->second.begin(), found->second.end());
+    }
+
+    std::unordered_map<std::string, const ModelLocalBounds*> boundsByNode;
+    boundsByNode.reserve(loadedBounds.size());
+    for (const auto& modelBounds : loadedBounds) {
+        if (!subtreeIds.contains(modelBounds.nodeId)) continue;
+        const auto node = nodesById.find(modelBounds.nodeId);
+        if (node == nodesById.end() || node->second->kind != NodeKind::ModelInstance)
+            return Fail("loaded bounds do not reference a model instance in the selected subtree");
+        if (!boundsByNode.emplace(modelBounds.nodeId, &modelBounds).second)
+            return Fail("selected subtree contains duplicate loaded model bounds");
+        for (size_t axis = 0; axis < 3; ++axis)
+            if (!std::isfinite(modelBounds.boundsMin[axis]) ||
+                !std::isfinite(modelBounds.boundsMax[axis]) ||
+                modelBounds.boundsMin[axis] > modelBounds.boundsMax[axis])
+                return Fail("selected subtree contains invalid model bounds");
+    }
+
+    std::vector<ResolvedTransform> resolved;
+    if (auto status = ResolveWorldTransforms(document, resolved); !status)
+        return Fail("cannot frame scene transforms: " + status.error);
+    std::unordered_map<std::string, const render::Float4x4*> worldByNode;
+    worldByNode.reserve(resolved.size());
+    for (const auto& transform : resolved) worldByNode.emplace(transform.nodeId, &transform.world);
+
+    ResolvedSubtreeBounds candidate;
+    for (const auto& node : document.nodes) {
+        if (node.kind != NodeKind::ModelInstance || !subtreeIds.contains(node.id)) continue;
+        const auto modelBounds = boundsByNode.find(node.id);
+        if (modelBounds == boundsByNode.end()) {
+            ++candidate.unavailableModelCount;
+            continue;
+        }
+        const auto world = worldByNode.find(node.id);
+        if (world == worldByNode.end()) return Fail("cannot resolve selected model transform");
+        std::array<float, 3> worldMin{}, worldMax{};
+        if (!render::TransformBounds(modelBounds->second->boundsMin, modelBounds->second->boundsMax,
+                                     *world->second, worldMin, worldMax))
+            return Fail("cannot transform selected model bounds");
+
+        if (candidate.loadedModelCount == 0) {
+            candidate.boundsMin = worldMin;
+            candidate.boundsMax = worldMax;
+        } else {
+            for (size_t axis = 0; axis < 3; ++axis) {
+                candidate.boundsMin[axis] = std::min(candidate.boundsMin[axis], worldMin[axis]);
+                candidate.boundsMax[axis] = std::max(candidate.boundsMax[axis], worldMax[axis]);
+            }
+        }
+        ++candidate.loadedModelCount;
+    }
+
+    bounds = std::move(candidate);
+    return Status::Ok();
+}
+
 Status ComputeGroundPlacement(std::optional<render::Float4x4> parentWorld,
                               render::Float3 worldPoint, const std::array<float, 3>& modelBoundsMin,
                               const std::array<float, 3>& modelBoundsMax, LocalTransform& local,
