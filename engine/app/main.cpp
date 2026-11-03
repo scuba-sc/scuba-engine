@@ -36,6 +36,7 @@
 #include "scuba/product/export.h"
 #include "scuba/render/picking.h"
 #include "scuba/render/renderer.h"
+#include "scuba/render/transform_gizmo.h"
 #include "scuba/scene/scene_document.h"
 #include "scuba/sco/sco_host.h"
 #include "scuba/ui/input_router.h"
@@ -55,6 +56,7 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -221,6 +223,12 @@ struct Instance {
     uint64_t autoPlaceHistoryRevision = 0;
 };
 
+struct TranslationGizmoGeometry {
+    render::ScreenPoint center;
+    std::array<render::ScreenSegment, 3> axes;
+    std::array<render::ScreenSegment, 3> hitHandles;
+};
+
 struct Placement {
     bool active = false;
     bool hasPreview = false;
@@ -296,6 +304,8 @@ struct Editor {
     std::string inspectorRotationNode;
     bool inspectorRotationInitialized = false;
     bool inspectorRotationActive = false;
+    bool translationGizmoDragging = false;
+    int translationGizmoAxis = -1;
     char renameBuffer[129] = "";  // scene node names are capped at 128 UTF-8 bytes
     std::string renameTarget;
     std::string renameSourceName;
@@ -459,6 +469,46 @@ struct Editor {
         for (const auto& item : resolved) result.emplace(item.nodeId, item.world);
         worlds = std::move(result);
         return Status::Ok();
+    }
+
+    bool BuildTranslationGizmoGeometry(TranslationGizmoGeometry& geometry) const {
+        if (selectedNode.empty()) return false;
+        const auto* world = World(selectedNode);
+        if (!world) return false;
+        const auto viewport = ui.viewport();
+        if (viewport.w <= 1 || viewport.h <= 1) return false;
+        const auto origin = TransformPoint({0, 0, 0}, *world);
+        const auto view = camera.View();
+        const auto projection = camera.Projection(viewport.w / viewport.h);
+        if (!render::ProjectPoint(origin, view, projection, viewport, geometry.center)) return false;
+
+        const auto eye = camera.Eye();
+        const float dx = origin.x - eye.x, dy = origin.y - eye.y, dz = origin.z - eye.z;
+        const float cameraDistance = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (!std::isfinite(cameraDistance) || cameraDistance <= 0) return false;
+        const float worldLength = std::clamp(
+            2.0f * std::tan(camera.fovY * 0.5f) * cameraDistance * 90.0f / viewport.h,
+            0.01f, 100000.0f);
+        constexpr render::Float3 directions[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+        for (size_t axis = 0; axis < 3; ++axis) {
+            const render::Float3 endpoint{origin.x + directions[axis].x * worldLength,
+                                          origin.y + directions[axis].y * worldLength,
+                                          origin.z + directions[axis].z * worldLength};
+            render::ScreenPoint end;
+            if (!render::ProjectPoint(endpoint, view, projection, viewport, end)) {
+                geometry.axes[axis] = {geometry.center, geometry.center};
+                geometry.hitHandles[axis] = {geometry.center, geometry.center};
+                continue;
+            }
+            geometry.axes[axis] = {geometry.center, end};
+            constexpr float kHandleStartFraction = 0.18f;
+            const render::ScreenPoint handleStart{
+                geometry.center.x + (end.x - geometry.center.x) * kHandleStartFraction,
+                geometry.center.y + (end.y - geometry.center.y) * kHandleStartFraction,
+                geometry.center.depth + (end.depth - geometry.center.depth) * kHandleStartFraction};
+            geometry.hitHandles[axis] = {handleStart, end};
+        }
+        return true;
     }
 
     void RefreshInstances() {
@@ -1005,6 +1055,7 @@ struct Editor {
     }
 
     void DrawUi(bool& quit);
+    void DrawTransformGizmo() const;
     void DrawMenu(bool& quit);
     void DrawContent();
     void DrawMounts();
@@ -1066,6 +1117,97 @@ public:
 
 private:
     Editor& e_;
+};
+
+// Drag an axis handle to translate the selected node along that world axis. The move is converted
+// back through the parent's inverse matrix, so child nodes keep the same local/world semantics.
+class AxisTranslateTool final : public ui::InputLayer {
+public:
+    explicit AxisTranslateTool(Editor& editor) : editor_(editor) {}
+    const char* Name() const override { return "translate-gizmo"; }
+
+    ui::Reply OnInput(const ui::InputEvent& event) override {
+        if (event.kind == ui::InputKind::PointerUp && event.button == ui::PointerButton::Left) {
+            if (!dragging_ && !suppressClick_) return ui::Reply::Unhandled();
+            dragging_ = false;
+            suppressClick_ = false;
+            undoCaptured_ = false;
+            draggedNode_.clear();
+            editor_.translationGizmoDragging = false;
+            editor_.translationGizmoAxis = -1;
+            return ui::Reply::Release();
+        }
+        if (event.kind == ui::InputKind::PointerDown && event.button == ui::PointerButton::Left) {
+            if (event.ctrl) return ui::Reply::Unhandled();  // Keep Ctrl+drag's legacy ground-plane move.
+            TranslationGizmoGeometry geometry;
+            if (!editor_.BuildTranslationGizmoGeometry(geometry)) return ui::Reply::Unhandled();
+            const int axisIndex = render::HitTestScreenSegments(event.x, event.y, geometry.hitHandles);
+            if (axisIndex < 0) return ui::Reply::Unhandled();
+            const scene::Node* selected = editor_.FindNode(editor_.selectedNode);
+            const auto* world = selected ? editor_.World(selected->id) : nullptr;
+            if (!selected || !world) return ui::Reply::Unhandled();
+
+            constexpr render::Float3 kWorldAxes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+            axis_ = kWorldAxes[axisIndex];
+            startWorldPosition_ = TransformPoint({0, 0, 0}, *world);
+            const auto startRay = editor_.camera.ScreenRay(event.x, event.y, editor_.ui.viewport());
+            if (!render::ClosestRayAxisParameter(startRay, startWorldPosition_, axis_, startParameter_)) {
+                editor_.sceneStatus = "Axis translation unavailable from this view direction";
+                suppressClick_ = true;
+                return ui::Reply::Capture();
+            }
+            if (selected->parentId) {
+                const auto* parentWorld = editor_.World(*selected->parentId);
+                if (!parentWorld || !render::InvertAffine(*parentWorld, parentInverse_)) {
+                    editor_.sceneStatus = "Axis translation unavailable: parent transform cannot be inverted";
+                    suppressClick_ = true;
+                    return ui::Reply::Capture();
+                }
+            } else {
+                parentInverse_ = {};
+            }
+            draggedNode_ = selected->id;
+            undoCaptured_ = false;
+            dragging_ = true;
+            editor_.translationGizmoDragging = true;
+            editor_.translationGizmoAxis = axisIndex;
+            return ui::Reply::Capture();
+        }
+        if (event.kind == ui::InputKind::PointerMove && dragging_ && event.leftHeld) {
+            if (!editor_.FindNode(draggedNode_)) return ui::Reply::Handled();
+            const auto ray = editor_.camera.ScreenRay(event.x, event.y, editor_.ui.viewport());
+            float currentParameter = 0;
+            render::Float3 desiredWorld;
+            if (!render::ClosestRayAxisParameter(ray, startWorldPosition_, axis_, currentParameter) ||
+                !render::AxisTranslationFromParameter(startWorldPosition_, axis_, startParameter_,
+                                                      currentParameter, desiredWorld))
+                return ui::Reply::Handled();
+            const auto localTranslation = TransformPoint(desiredWorld, parentInverse_);
+            if (!std::isfinite(localTranslation.x) || !std::isfinite(localTranslation.y) ||
+                !std::isfinite(localTranslation.z))
+                return ui::Reply::Handled();
+            scene::Document candidate = editor_.document;
+            const auto node = std::find_if(candidate.nodes.begin(), candidate.nodes.end(), [&](const auto& item) {
+                return item.id == draggedNode_;
+            });
+            if (node == candidate.nodes.end()) return ui::Reply::Handled();
+            node->localTransform.translation = {localTranslation.x, localTranslation.y, localTranslation.z};
+            editor_.CommitInteractiveDocument(std::move(candidate), undoCaptured_);
+            return ui::Reply::Handled();
+        }
+        return ui::Reply::Unhandled();
+    }
+
+private:
+    Editor& editor_;
+    render::Float3 axis_{};
+    render::Float3 startWorldPosition_{};
+    float startParameter_ = 0;
+    render::Float4x4 parentInverse_{};
+    std::string draggedNode_;
+    bool dragging_ = false;
+    bool suppressClick_ = false;
+    bool undoCaptured_ = false;
 };
 
 // Ctrl + left drag moves the selection across its ground plane.
@@ -1832,6 +1974,40 @@ void Editor::DrawUi(bool& quit) {
         }
     }
     if (showDemo) ImGui::ShowDemoWindow(&showDemo);
+    DrawTransformGizmo();
+}
+
+void Editor::DrawTransformGizmo() const {
+    TranslationGizmoGeometry geometry;
+    if (!BuildTranslationGizmoGeometry(geometry)) return;
+    const auto viewport = ui.viewport();
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    draw->PushClipRect({viewport.x, viewport.y}, {viewport.x + viewport.w, viewport.y + viewport.h}, true);
+    constexpr ImU32 colors[3] = {IM_COL32(236, 82, 82, 255), IM_COL32(86, 214, 126, 255),
+                                 IM_COL32(84, 154, 250, 255)};
+    constexpr const char* labels[3] = {"X", "Y", "Z"};
+    for (size_t axis = 0; axis < geometry.axes.size(); ++axis) {
+        const auto& segment = geometry.axes[axis];
+        const float dx = segment.end.x - segment.start.x;
+        const float dy = segment.end.y - segment.start.y;
+        const float length = std::sqrt(dx * dx + dy * dy);
+        if (!std::isfinite(length) || length < 12.0f) continue;
+        const float ux = dx / length, uy = dy / length;
+        const float px = -uy, py = ux;
+        const float headLength = std::min(11.0f, length * 0.25f);
+        const float headWidth = std::min(5.0f, length * 0.12f);
+        const ImVec2 tip{segment.end.x, segment.end.y};
+        const ImVec2 headBase{segment.end.x - ux * headLength, segment.end.y - uy * headLength};
+        const ImU32 color = translationGizmoDragging && translationGizmoAxis == static_cast<int>(axis)
+            ? IM_COL32(255, 236, 128, 255) : colors[axis];
+        draw->AddLine({segment.start.x, segment.start.y}, tip, color, 3.0f);
+        draw->AddLine(tip, {headBase.x + px * headWidth, headBase.y + py * headWidth}, color, 3.0f);
+        draw->AddLine(tip, {headBase.x - px * headWidth, headBase.y - py * headWidth}, color, 3.0f);
+        draw->AddText({segment.end.x + 5.0f, segment.end.y - 7.0f}, color, labels[axis]);
+    }
+    draw->AddCircleFilled({geometry.center.x, geometry.center.y}, 5.0f, IM_COL32(28, 31, 38, 255));
+    draw->AddCircle({geometry.center.x, geometry.center.y}, 5.0f, IM_COL32(235, 235, 235, 255), 0, 2.0f);
+    draw->PopClipRect();
 }
 
 int Run(const Args& args) {
@@ -1987,11 +2163,13 @@ int Run(const Args& args) {
 
     UiBlocker blocker(ed);
     PlacementTool placementTool(ed);
+    AxisTranslateTool axisTranslateTool(ed);
     MoveTool move(ed);
     CameraTool cameraTool(ed);
     ui::InputRouter router;
     router.Add(&blocker);
     router.Add(&placementTool);
+    router.Add(&axisTranslateTool);
     router.Add(&move);
     router.Add(&cameraTool);
 

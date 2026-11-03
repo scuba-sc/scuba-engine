@@ -6,6 +6,7 @@
 #include "scuba/asset/model_loader.h"
 #include "scuba/core/job_system.h"
 #include "scuba/render/picking.h"
+#include "scuba/render/transform_gizmo.h"
 #include "scuba/scene/scene_document.h"
 #include "scuba/vfs/pack.h"
 #include "scuba/vfs/virtual_file_system.h"
@@ -540,6 +541,61 @@ void TestPicking() {
     CHECK(std::fabs(center.dir.x + eye.x / len) < 1e-4f && std::fabs(center.dir.z + eye.z / len) < 1e-4f);
 }
 
+void TestTransformGizmoMath() {
+    render::OrbitCamera camera;
+    camera.target = {0, 0, 0};
+    camera.distance = 10;
+    const render::Rect viewport{40, 20, 800, 600};
+    const auto view = camera.View();
+    const auto projection = camera.Projection(viewport.w / viewport.h);
+    render::ScreenPoint center;
+    CHECK(render::ProjectPoint(camera.target, view, projection, viewport, center));
+    CHECK(std::fabs(center.x - (viewport.x + viewport.w * 0.5f)) < 1e-3f);
+    CHECK(std::fabs(center.y - (viewport.y + viewport.h * 0.5f)) < 1e-3f);
+    const auto eye = camera.Eye();
+    const render::Float3 behind{eye.x + (eye.x - camera.target.x),
+                                eye.y + (eye.y - camera.target.y),
+                                eye.z + (eye.z - camera.target.z)};
+    render::ScreenPoint unchangedScreen{11, 12, 13};
+    CHECK(!render::ProjectPoint(behind, view, projection, viewport, unchangedScreen));
+    CHECK(unchangedScreen.x == 11 && unchangedScreen.y == 12 && unchangedScreen.depth == 13);
+
+    const std::array<render::ScreenSegment, 3> handles{{
+        {{10, 20, 0}, {100, 20, 0}},
+        {{20, 10, 0}, {20, 100, 0}},
+        {{50, 50, 0}, {53, 50, 0}},
+    }};
+    CHECK(render::HitTestScreenSegments(50, 23, handles, 5, 12) == 0);
+    CHECK(render::HitTestScreenSegments(23, 50, handles, 5, 12) == 1);
+    CHECK(render::HitTestScreenSegments(52, 51, handles, 5, 12) == -1);  // end-on handle
+    CHECK(render::HitTestScreenSegments(300, 300, handles, 5, 12) == -1);
+
+    float startParameter = -99;
+    const render::Ray startRay{{10, 2, 0}, {0, -1, 0}};
+    CHECK(render::ClosestRayAxisParameter(startRay, {0, 0, 0}, {1, 0, 0}, startParameter));
+    CHECK(std::fabs(startParameter - 10) < 1e-5f);
+    float currentParameter = 0;
+    CHECK(render::ClosestRayAxisParameter({{13, 2, 0}, {0, -1, 0}}, {0, 0, 0},
+                                          {1, 0, 0}, currentParameter));
+    CHECK(std::fabs(currentParameter - 13) < 1e-5f);
+    render::Float3 translated{99, 99, 99};
+    CHECK(render::AxisTranslationFromParameter({4, 5, 6}, {1, 0, 0}, startParameter,
+                                               currentParameter, translated));
+    CHECK(std::fabs(translated.x - 7) < 1e-5f && translated.y == 5 && translated.z == 6);
+    float unchangedParameter = 123;
+    CHECK(!render::ClosestRayAxisParameter({{0, 1, 0}, {1, 0, 0}}, {0, 0, 0},
+                                           {1, 0, 0}, unchangedParameter));
+    CHECK(unchangedParameter == 123);
+
+    const render::Float3 pointOnAxis{2.5f, 0, 0};
+    render::ScreenPoint projectedAxisPoint;
+    CHECK(render::ProjectPoint(pointOnAxis, view, projection, viewport, projectedAxisPoint));
+    const auto axisRay = camera.ScreenRay(projectedAxisPoint.x, projectedAxisPoint.y, viewport);
+    float recoveredAxisParameter = 0;
+    CHECK(render::ClosestRayAxisParameter(axisRay, {0, 0, 0}, {1, 0, 0}, recoveredAxisParameter));
+    CHECK(std::fabs(recoveredAxisParameter - pointOnAxis.x) < 1e-3f);
+}
+
 scene::Document SceneFixture() {
     scene::Document document;
     document.id = "hangar-test";
@@ -623,6 +679,59 @@ void TestSceneDocument(const fs::path& root) {
     std::vector<scene::ResolvedTransform> resolved;
     CHECK(scene::ResolveWorldTransforms(document, resolved).ok());
     CHECK(resolved.size() == document.nodes.size());
+    const auto parentWorld = std::find_if(resolved.begin(), resolved.end(), [](const auto& item) {
+        return item.nodeId == "bay-a";
+    });
+    const auto childWorld = std::find_if(resolved.begin(), resolved.end(), [](const auto& item) {
+        return item.nodeId == "ship-01";
+    });
+    CHECK(parentWorld != resolved.end() && childWorld != resolved.end());
+    if (parentWorld != resolved.end() && childWorld != resolved.end()) {
+        render::Float4x4 parentInverse;
+        CHECK(render::InvertAffine(parentWorld->world, parentInverse));
+        const auto startWorldOrigin = ApplyPoint({0, 0, 0}, childWorld->world);
+        const render::Float3 worldY{0, 1, 0};
+        const auto axisDocument = document;
+        auto draggedDocument = axisDocument;
+        scene::DocumentHistory gizmoHistory;
+        bool undoCaptured = false;
+        for (const float amount : {1.5f, 3.0f, 4.5f}) {
+            render::Float3 targetWorld;
+            CHECK(render::AxisTranslationFromParameter(startWorldOrigin, worldY, 0, amount, targetWorld));
+            const auto targetLocal = ApplyPoint(targetWorld, parentInverse);
+            auto candidate = draggedDocument;
+            const auto node = std::find_if(candidate.nodes.begin(), candidate.nodes.end(), [](const auto& item) {
+                return item.id == "ship-01";
+            });
+            CHECK(node != candidate.nodes.end());
+            if (node == candidate.nodes.end()) continue;
+            node->localTransform.translation = {targetLocal.x, targetLocal.y, targetLocal.z};
+            if (!undoCaptured) {
+                CHECK(gizmoHistory.RecordBefore(draggedDocument).ok());
+                undoCaptured = true;
+            }
+            draggedDocument = std::move(candidate);
+            std::vector<scene::ResolvedTransform> draggedWorld;
+            CHECK(scene::ResolveWorldTransforms(draggedDocument, draggedWorld).ok());
+            const auto draggedChild = std::find_if(draggedWorld.begin(), draggedWorld.end(), [](const auto& item) {
+                return item.nodeId == "ship-01";
+            });
+            CHECK(draggedChild != draggedWorld.end());
+            if (draggedChild != draggedWorld.end()) {
+                const auto actual = ApplyPoint({0, 0, 0}, draggedChild->world);
+                CHECK(std::fabs(actual.x - targetWorld.x) < 1e-4f &&
+                      std::fabs(actual.y - targetWorld.y) < 1e-4f &&
+                      std::fabs(actual.z - targetWorld.z) < 1e-4f);
+            }
+        }
+        CHECK(gizmoHistory.retainedEntries() == 1);
+        scene::Document restoredAxisDrag;
+        CHECK(gizmoHistory.Undo(draggedDocument, restoredAxisDrag).ok());
+        CHECK(restoredAxisDrag == axisDocument);
+        scene::Document redoneAxisDrag;
+        CHECK(gizmoHistory.Redo(restoredAxisDrag, redoneAxisDrag).ok());
+        CHECK(redoneAxisDrag == draggedDocument);
+    }
     scene::LocalTransform placedLocal;
     placedLocal.translation = {123, 456, 789};
     render::Float4x4 placedWorld;
@@ -1063,6 +1172,7 @@ int main() {
     TestFbx();
     TestLoader();
     TestPicking();
+    TestTransformGizmoMath();
     TestSceneDocument(root);
     std::error_code ec;
     fs::remove_all(root, ec);

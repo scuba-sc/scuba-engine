@@ -23,7 +23,8 @@ add_library(scuba_engine_core STATIC
   src/asset/model_loader.cpp
   src/product/export.cpp
   src/render/camera.cpp
-  src/render/picking.cpp)
+  src/render/picking.cpp
+  src/render/transform_gizmo.cpp)
 target_include_directories(scuba_engine_core
   PUBLIC "${SCUBA_ENGINE_INCLUDE}"
   PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
