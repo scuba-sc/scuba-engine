@@ -800,6 +800,50 @@ void TestTransformGizmoMath() {
     CHECK(render::AxisTranslationFromParameter({4, 5, 6}, {1, 0, 0}, startParameter,
                                                currentParameter, translated));
     CHECK(std::fabs(translated.x - 7) < 1e-5f && translated.y == 5 && translated.z == 6);
+    render::GizmoSnapSettings defaultSnapSettings;
+    CHECK(!defaultSnapSettings.translationEnabled && !defaultSnapSettings.rotationEnabled &&
+          !defaultSnapSettings.scaleEnabled && render::ValidateGizmoSnapSettings(defaultSnapSettings));
+    auto invalidSnapSettings = defaultSnapSettings;
+    invalidSnapSettings.translationStep = 0;
+    CHECK(!render::ValidateGizmoSnapSettings(invalidSnapSettings));
+    invalidSnapSettings = defaultSnapSettings;
+    invalidSnapSettings.rotationStepDegrees = 181;
+    CHECK(!render::ValidateGizmoSnapSettings(invalidSnapSettings));
+    invalidSnapSettings = defaultSnapSettings;
+    invalidSnapSettings.scaleStep = std::numeric_limits<float>::quiet_NaN();
+    CHECK(!render::ValidateGizmoSnapSettings(invalidSnapSettings));
+
+    float snappedDelta = 99;
+    CHECK(render::SnapTranslationDelta(0.49f, 1.0f, snappedDelta) && snappedDelta == 0);
+    CHECK(render::SnapTranslationDelta(0.51f, 1.0f, snappedDelta) && snappedDelta == 1);
+    CHECK(render::SnapTranslationDelta(-0.51f, 1.0f, snappedDelta) && snappedDelta == -1);
+    snappedDelta = 99;
+    CHECK(!render::SnapTranslationDelta(1.0f, 0.0f, snappedDelta) && snappedDelta == 99);
+    CHECK(!render::SnapTranslationDelta(std::numeric_limits<float>::infinity(), 1.0f, snappedDelta) &&
+          snappedDelta == 99);
+    constexpr float pi = 3.14159265358979323846f;
+    CHECK(render::SnapRotationDelta(8.0f * pi / 180.0f, 15.0f, snappedDelta));
+    CHECK(std::fabs(snappedDelta - 15.0f * pi / 180.0f) < 1e-6f);
+    CHECK(render::SnapRotationDelta(-8.0f * pi / 180.0f, 15.0f, snappedDelta));
+    CHECK(std::fabs(snappedDelta + 15.0f * pi / 180.0f) < 1e-6f);
+    snappedDelta = 99;
+    CHECK(!render::SnapRotationDelta(0.1f, 0.0f, snappedDelta) && snappedDelta == 99);
+    CHECK(render::SnapScaleDelta(0.06f, 0.1f, snappedDelta) && std::fabs(snappedDelta - 0.1f) < 1e-6f);
+    CHECK(render::SnapScaleDelta(-0.06f, 0.1f, snappedDelta) && std::fabs(snappedDelta + 0.1f) < 1e-6f);
+    snappedDelta = 99;
+    CHECK(!render::SnapScaleDelta(1.0f, 0.0f, snappedDelta) && snappedDelta == 99);
+    CHECK(!render::SnapScaleDelta(1.0f, render::kMaxScaleSnapStep + 1.0f, snappedDelta) &&
+          snappedDelta == 99);
+    CHECK(render::AxisTranslationFromParameter({4, 5, 6}, {1, 0, 0}, 10, 10.51f,
+                                               translated, 1.0f));
+    CHECK(translated.x == 5 && translated.y == 5 && translated.z == 6);
+    CHECK(render::AxisTranslationFromParameter({4, 5, 6}, {1, 0, 0}, 10, 9.49f,
+                                               translated, 1.0f));
+    CHECK(translated.x == 3 && translated.y == 5 && translated.z == 6);
+    translated = {77, 77, 77};
+    CHECK(!render::AxisTranslationFromParameter({4, 5, 6}, {1, 0, 0}, 10, 11,
+                                                translated, -1.0f));
+    CHECK(translated.x == 77 && translated.y == 77 && translated.z == 77);
     float unchangedParameter = 123;
     CHECK(!render::ClosestRayAxisParameter({{0, 1, 0}, {1, 0, 0}}, {0, 0, 0},
                                            {1, 0, 0}, unchangedParameter));
@@ -818,6 +862,22 @@ void TestTransformGizmoMath() {
     CHECK(std::fabs(scaledAxisValue - 2.25f) < 1e-5f);
     CHECK(render::AxisScaleFromParameter(1.25f, 3.0f, -87.0f, 90.0f, scaledAxisValue));
     CHECK(std::fabs(scaledAxisValue - 0.25f) < 1e-5f);
+    CHECK(render::AxisScaleFromParameter(1.25f, 0.0f, 0.26f, 1.0f, scaledAxisValue, 0.1f));
+    CHECK(std::fabs(scaledAxisValue - 1.55f) < 1e-5f);
+    scaledAxisValue = 17;
+    CHECK(!render::AxisScaleFromParameter(1.25f, 0.0f, 0.26f, 1.0f, scaledAxisValue, -0.1f));
+    CHECK(scaledAxisValue == 17);
+    CHECK(render::AxisScaleFromParameter(0.1f, 0.0f, -0.1f, 1.0f, scaledAxisValue, 0.1f));
+    CHECK(std::fabs(scaledAxisValue) < 1e-6f);
+    scene::LocalTransform positiveScale;
+    positiveScale.scale.x = 0.1f;
+    const auto positiveScaleBefore = positiveScale;
+    CHECK(!scene::SetLocalScaleAxis(positiveScale, 0, scaledAxisValue).ok());
+    CHECK(positiveScale == positiveScaleBefore);
+    CHECK(render::AxisScaleFromParameter(0.1f, 0.0f, -0.2f, 1.0f, scaledAxisValue, 0.1f));
+    CHECK(scaledAxisValue < 0);
+    CHECK(!scene::SetLocalScaleAxis(positiveScale, 0, scaledAxisValue).ok());
+    CHECK(positiveScale == positiveScaleBefore);
     scaledAxisValue = 17;
     CHECK(!render::AxisScaleFromParameter(1.25f, 3.0f, 93.0f, 0.0f, scaledAxisValue));
     CHECK(scaledAxisValue == 17);
@@ -2110,6 +2170,99 @@ void TestSceneDocument(const fs::path& root) {
     scene::Document rotationScaleRedone;
     CHECK(rotationScaleHistory.Redo(rotationScaleRestored, rotationScaleRedone).ok());
     CHECK(rotationScaleRedone == rotationScaleEdited);
+
+    auto parentedWorldSnap = SceneFixture();
+    std::vector<scene::ResolvedTransform> beforeWorldSnap;
+    CHECK(scene::ResolveWorldTransforms(parentedWorldSnap, beforeWorldSnap).ok());
+    const auto parentWorldBeforeSnap = std::find_if(beforeWorldSnap.begin(), beforeWorldSnap.end(),
+        [](const auto& item) { return item.nodeId == "bay-a"; });
+    const auto modelWorldBeforeSnap = std::find_if(beforeWorldSnap.begin(), beforeWorldSnap.end(),
+        [](const auto& item) { return item.nodeId == "ship-01"; });
+    CHECK(parentWorldBeforeSnap != beforeWorldSnap.end() && modelWorldBeforeSnap != beforeWorldSnap.end());
+    if (parentWorldBeforeSnap != beforeWorldSnap.end() && modelWorldBeforeSnap != beforeWorldSnap.end()) {
+        const render::Float3 startWorld{modelWorldBeforeSnap->world.m[3][0],
+                                        modelWorldBeforeSnap->world.m[3][1],
+                                        modelWorldBeforeSnap->world.m[3][2]};
+        render::Float3 snappedWorld;
+        CHECK(render::AxisTranslationFromParameter(startWorld, {0, 1, 0}, 0, 1.6f,
+                                                   snappedWorld, 1.0f));
+        render::Float4x4 parentInverse;
+        CHECK(render::InvertAffine(parentWorldBeforeSnap->world, parentInverse));
+        const auto applyPoint = [](render::Float3 point, const render::Float4x4& matrix) {
+            return render::Float3{
+                point.x * matrix.m[0][0] + point.y * matrix.m[1][0] + point.z * matrix.m[2][0] + matrix.m[3][0],
+                point.x * matrix.m[0][1] + point.y * matrix.m[1][1] + point.z * matrix.m[2][1] + matrix.m[3][1],
+                point.x * matrix.m[0][2] + point.y * matrix.m[1][2] + point.z * matrix.m[2][2] + matrix.m[3][2],
+            };
+        };
+        auto model = std::find_if(parentedWorldSnap.nodes.begin(), parentedWorldSnap.nodes.end(),
+                                  [](const auto& node) { return node.id == "ship-01"; });
+        CHECK(model != parentedWorldSnap.nodes.end());
+        if (model != parentedWorldSnap.nodes.end()) {
+            const auto local = applyPoint(snappedWorld, parentInverse);
+            model->localTransform.translation = {local.x, local.y, local.z};
+            std::vector<scene::ResolvedTransform> afterWorldSnap;
+            CHECK(scene::ResolveWorldTransforms(parentedWorldSnap, afterWorldSnap).ok());
+            const auto modelWorldAfterSnap = std::find_if(afterWorldSnap.begin(), afterWorldSnap.end(),
+                [](const auto& item) { return item.nodeId == "ship-01"; });
+            CHECK(modelWorldAfterSnap != afterWorldSnap.end());
+            if (modelWorldAfterSnap != afterWorldSnap.end()) {
+                CHECK(std::fabs(modelWorldAfterSnap->world.m[3][0] - snappedWorld.x) < 1e-4f);
+                CHECK(std::fabs(modelWorldAfterSnap->world.m[3][1] - snappedWorld.y) < 1e-4f);
+                CHECK(std::fabs(modelWorldAfterSnap->world.m[3][2] - snappedWorld.z) < 1e-4f);
+            }
+        }
+    }
+
+    auto parentedRotationSnap = SceneFixture();
+    float snappedRotationDelta = 0;
+    constexpr float snapPi = 3.14159265358979323846f;
+    CHECK(render::SnapRotationDelta(8.0f * snapPi / 180.0f, 15.0f, snappedRotationDelta));
+    scene::Quaternion parentedSnappedRotation;
+    CHECK(scene::RotateLocalAxis(parentedRotationSnap.nodes[2].localTransform.rotation, 2,
+                                 snappedRotationDelta, parentedSnappedRotation).ok());
+    parentedRotationSnap.nodes[2].localTransform.rotation = parentedSnappedRotation;
+    std::vector<scene::ResolvedTransform> parentedRotationWorld;
+    CHECK(scene::ResolveWorldTransforms(parentedRotationSnap, parentedRotationWorld).ok());
+
+    auto parentedScaleSnap = SceneFixture();
+    float parentedSnappedScale = 0;
+    CHECK(render::AxisScaleFromParameter(parentedScaleSnap.nodes[2].localTransform.scale.x,
+                                         0, 0.26f, 1.0f, parentedSnappedScale, 0.1f));
+    CHECK(scene::SetLocalScaleAxis(parentedScaleSnap.nodes[2].localTransform, 0,
+                                   parentedSnappedScale).ok());
+    CHECK(std::fabs(parentedScaleSnap.nodes[2].localTransform.scale.x - 1.55f) < 1e-5f);
+    std::vector<scene::ResolvedTransform> parentedScaleWorld;
+    CHECK(scene::ResolveWorldTransforms(parentedScaleSnap, parentedScaleWorld).ok());
+
+    auto snappedGestureBase = SceneFixture();
+    auto snappedGestureCurrent = snappedGestureBase;
+    scene::DocumentHistory snappedGestureHistory;
+    CHECK(snappedGestureHistory.RecordBefore(snappedGestureBase).ok());
+    for (const float pointerDelta : {0.06f, 0.26f, 0.44f}) {
+        float snappedScaleDelta = 0;
+        CHECK(render::SnapScaleDelta(pointerDelta, 0.1f, snappedScaleDelta));
+        auto model = std::find_if(snappedGestureCurrent.nodes.begin(), snappedGestureCurrent.nodes.end(),
+                                  [](const auto& node) { return node.id == "ship-01"; });
+        CHECK(model != snappedGestureCurrent.nodes.end());
+        if (model != snappedGestureCurrent.nodes.end())
+            CHECK(scene::SetLocalScaleAxis(model->localTransform, 0,
+                snappedGestureBase.nodes[2].localTransform.scale.x + snappedScaleDelta).ok());
+        CHECK(snappedGestureHistory.retainedEntries() == 1);
+    }
+    CHECK(std::fabs(snappedGestureCurrent.nodes[2].localTransform.scale.x - 1.65f) < 1e-5f);
+    scene::Document snappedGestureUndo;
+    CHECK(snappedGestureHistory.Undo(snappedGestureCurrent, snappedGestureUndo).ok());
+    CHECK(snappedGestureUndo == snappedGestureBase);
+    scene::Document snappedGestureRedo;
+    CHECK(snappedGestureHistory.Redo(snappedGestureUndo, snappedGestureRedo).ok());
+    CHECK(snappedGestureRedo == snappedGestureCurrent);
+    scene::DocumentHistory snappedGestureCancelHistory;
+    CHECK(snappedGestureCancelHistory.RecordBefore(snappedGestureBase).ok());
+    scene::Document snappedGestureCanceled;
+    CHECK(snappedGestureCurrent != snappedGestureBase);
+    CHECK(snappedGestureCancelHistory.CancelLatestChange(snappedGestureBase, snappedGestureCanceled).ok());
+    CHECK(snappedGestureCanceled == snappedGestureBase);
 
     history.Clear();
     const auto sentinelDocument = historyRestored;

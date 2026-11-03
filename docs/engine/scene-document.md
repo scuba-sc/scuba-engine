@@ -103,6 +103,14 @@ plane, so nonuniform parents can make the rings elliptical. The gesture accumula
 steps and records one undo action. If the ring plane is edge-on or ill-conditioned from the current
 view, the drag is refused. Rotation changes local TRS; it does not promise rotation around a world
 axis or a circular ring under a nonuniform parent.
+Optional editor-session snapping controls are off by default and are captured when a drag starts.
+They are not stored in scene documents. Move snapping
+quantizes the world-axis displacement from the drag start in world units (step 0.001 to 100,000).
+Rotate snapping quantizes the accumulated local-axis angle from the drag start in degrees (step 0.1
+to 180). Scale snapping quantizes an additive local-scale delta from the drag start (step 0.001 to
+1,000). A snapped scale that reaches zero or becomes negative is refused by the positive-scale
+validation; the last valid drag value remains in the document. Snapping does not alter the default
+continuous drag behavior, and each drag remains one undo action with the existing Escape rollback.
 The mode controls are disabled during a gesture. If the selected node, gizmo mode, asset-placement
 state, or scene history changes externally, the next pointer move stops the gesture; any accepted
 partial edit remains one undoable action. Escape rolls back the active gizmo gesture if no separate

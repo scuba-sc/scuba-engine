@@ -318,6 +318,7 @@ struct Editor {
     bool transformGizmoDragging = false;
     bool transformGizmoGestureActive = false;
     TransformGizmoMode gizmoMode = TransformGizmoMode::Move;
+    render::GizmoSnapSettings gizmoSnapSettings;
     int transformGizmoAxis = -1;
     char renameBuffer[129] = "";  // scene node names are capped at 128 UTF-8 bytes
     std::string renameTarget;
@@ -1471,6 +1472,11 @@ public:
             const scene::Node* selected = editor_.FindNode(editor_.selectedNode);
             const auto* world = selected ? editor_.World(selected->id) : nullptr;
             if (!selected || !world) return ui::Reply::Unhandled();
+            if (!render::ValidateGizmoSnapSettings(editor_.gizmoSnapSettings)) {
+                editor_.sceneStatus = "Transform snap settings are invalid; drag refused";
+                return ui::Reply::Handled();
+            }
+            snapSettings_ = editor_.gizmoSnapSettings;
             gestureCaptured_ = true;
             editor_.transformGizmoGestureActive = true;
             mode_ = gestureMode;
@@ -1560,8 +1566,14 @@ public:
                     return ui::Reply::Handled();
                 }
                 scene::Quaternion rotation;
+                float appliedAngle = static_cast<float>(nextAngle);
+                if (snapSettings_.rotationEnabled &&
+                    !render::SnapRotationDelta(appliedAngle, snapSettings_.rotationStepDegrees, appliedAngle)) {
+                    editor_.sceneStatus = "Rotation snap refused: step or angle is invalid";
+                    return ui::Reply::Handled();
+                }
                 if (auto status = scene::RotateLocalAxis(rotationStart_, static_cast<size_t>(axisIndex_),
-                                                         static_cast<float>(nextAngle), rotation); !status) {
+                                                         appliedAngle, rotation); !status) {
                     editor_.sceneStatus = "Rotation refused: " + status.error;
                     return ui::Reply::Handled();
                 }
@@ -1583,7 +1595,8 @@ public:
                 if (!std::isfinite(scaleHandleWorldLength_) || scaleHandleWorldLength_ <= 0) return ui::Reply::Handled();
                 float desiredScale = 0;
                 if (!render::AxisScaleFromParameter(startScale_, startParameter_, currentParameter,
-                                                    scaleHandleWorldLength_, desiredScale))
+                                                    scaleHandleWorldLength_, desiredScale,
+                                                    snapSettings_.scaleEnabled ? snapSettings_.scaleStep : 0.0f))
                     return ui::Reply::Handled();
                 if (auto status = scene::SetLocalScaleAxis(node->localTransform,
                                                            static_cast<size_t>(axisIndex_), desiredScale); !status) {
@@ -1593,7 +1606,9 @@ public:
             } else {
                 render::Float3 desiredWorld;
                 if (!render::AxisTranslationFromParameter(startWorldPosition_, axis_, startParameter_,
-                                                          currentParameter, desiredWorld))
+                                                          currentParameter, desiredWorld,
+                                                          snapSettings_.translationEnabled
+                                                              ? snapSettings_.translationStep : 0.0f))
                     return ui::Reply::Handled();
                 const auto localTranslation = TransformPoint(desiredWorld, parentInverse_);
                 if (!std::isfinite(localTranslation.x) || !std::isfinite(localTranslation.y) ||
@@ -1632,6 +1647,7 @@ private:
         rotationStart_ = {};
         rotationLastU_ = rotationLastV_ = 0;
         rotationAccumulated_ = 0;
+        snapSettings_ = {};
         editor_.transformGizmoDragging = false;
         editor_.transformGizmoGestureActive = false;
         editor_.transformGizmoAxis = -1;
@@ -1679,6 +1695,7 @@ private:
     float rotationLastU_ = 0;
     float rotationLastV_ = 0;
     double rotationAccumulated_ = 0;
+    render::GizmoSnapSettings snapSettings_;
     int axisIndex_ = -1;
     TransformGizmoMode mode_ = TransformGizmoMode::Move;
     bool gestureCaptured_ = false;
@@ -2145,6 +2162,38 @@ void Editor::DrawScene() {
     if (ImGui::RadioButton("Rotate rings", gizmoMode == TransformGizmoMode::Rotate))
         gizmoMode = TransformGizmoMode::Rotate;
     ImGui::EndDisabled();
+    ImGui::SeparatorText("Transform snapping");
+    const auto constrainStep = [](float& value, float fallback, float minimum, float maximum) {
+        if (!std::isfinite(value)) value = fallback;
+        value = std::clamp(value, minimum, maximum);
+    };
+    auto& snap = gizmoSnapSettings;
+    constrainStep(snap.translationStep, 1.0f, render::kMinTranslationSnapStep,
+                  render::kMaxTranslationSnapStep);
+    constrainStep(snap.rotationStepDegrees, 15.0f, render::kMinRotationSnapStepDegrees,
+                  render::kMaxRotationSnapStepDegrees);
+    constrainStep(snap.scaleStep, 0.1f, render::kMinScaleSnapStep, render::kMaxScaleSnapStep);
+    ImGui::BeginDisabled(transformGizmoGestureActive);
+    ImGui::Checkbox("Move snap (world units)", &snap.translationEnabled);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(110);
+    ImGui::DragFloat("##move-snap-step", &snap.translationStep, 0.05f,
+                     render::kMinTranslationSnapStep, render::kMaxTranslationSnapStep,
+                     "%.3f", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::Checkbox("Rotate snap (degrees)", &snap.rotationEnabled);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(110);
+    ImGui::DragFloat("##rotate-snap-step", &snap.rotationStepDegrees, 0.5f,
+                     render::kMinRotationSnapStepDegrees, render::kMaxRotationSnapStepDegrees,
+                     "%.1f", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::Checkbox("Scale snap (local delta)", &snap.scaleEnabled);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(110);
+    ImGui::DragFloat("##scale-snap-step", &snap.scaleStep, 0.01f,
+                     render::kMinScaleSnapStep, render::kMaxScaleSnapStep,
+                     "%.3f", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("Snapping quantizes each drag from its starting transform; all modes are off by default.");
     if (gizmoMode == TransformGizmoMode::Scale)
         ImGui::TextDisabled("Scale follows local axes through the parent transform; "
                             "only positive scale is supported.");

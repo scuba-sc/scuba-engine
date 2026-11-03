@@ -51,7 +51,61 @@ bool ValidPlaneBasis(Float3 basisU, Float3 basisV, double& uu, double& uv, doubl
            largestEigenvalue > 0 && smallestEigenvalue > 1e-12 * largestEigenvalue;
 }
 
+bool QuantizeDelta(double delta, double step, double minimumStep, double maximumStep,
+                   double& snappedDelta) {
+    if (!std::isfinite(delta) || !std::isfinite(step) || step < minimumStep || step > maximumStep)
+        return false;
+    const double increments = std::round(delta / step);
+    const double candidate = increments * step;
+    if (!std::isfinite(increments) || !std::isfinite(candidate) ||
+        std::fabs(candidate) > std::numeric_limits<float>::max())
+        return false;
+    snappedDelta = candidate;
+    return true;
+}
+
 }  // namespace
+
+bool ValidateGizmoSnapSettings(const GizmoSnapSettings& settings) {
+    const auto inRange = [](float value, float minimum, float maximum) {
+        return std::isfinite(value) && value >= minimum && value <= maximum;
+    };
+    return inRange(settings.translationStep, kMinTranslationSnapStep, kMaxTranslationSnapStep) &&
+           inRange(settings.rotationStepDegrees, kMinRotationSnapStepDegrees,
+                   kMaxRotationSnapStepDegrees) &&
+           inRange(settings.scaleStep, kMinScaleSnapStep, kMaxScaleSnapStep);
+}
+
+bool SnapTranslationDelta(float delta, float step, float& snappedDelta) {
+    double candidate = 0;
+    if (!QuantizeDelta(delta, step, kMinTranslationSnapStep, kMaxTranslationSnapStep, candidate))
+        return false;
+    snappedDelta = static_cast<float>(candidate);
+    return std::isfinite(snappedDelta);
+}
+
+bool SnapRotationDelta(float deltaRadians, float stepDegrees, float& snappedDeltaRadians) {
+    if (!std::isfinite(deltaRadians) || !std::isfinite(stepDegrees) ||
+        stepDegrees < kMinRotationSnapStepDegrees || stepDegrees > kMaxRotationSnapStepDegrees)
+        return false;
+    constexpr double kDegreesToRadians = 3.1415926535897932384626433832795 / 180.0;
+    double candidate = 0;
+    const double stepRadians = static_cast<double>(stepDegrees) * kDegreesToRadians;
+    if (!QuantizeDelta(deltaRadians, stepRadians,
+                       static_cast<double>(kMinRotationSnapStepDegrees) * kDegreesToRadians,
+                       static_cast<double>(kMaxRotationSnapStepDegrees) * kDegreesToRadians,
+                       candidate))
+        return false;
+    snappedDeltaRadians = static_cast<float>(candidate);
+    return std::isfinite(snappedDeltaRadians);
+}
+
+bool SnapScaleDelta(float delta, float step, float& snappedDelta) {
+    double candidate = 0;
+    if (!QuantizeDelta(delta, step, kMinScaleSnapStep, kMaxScaleSnapStep, candidate)) return false;
+    snappedDelta = static_cast<float>(candidate);
+    return std::isfinite(snappedDelta);
+}
 
 bool ProjectPoint(Float3 world, const Float4x4& view, const Float4x4& projection,
                   Rect viewport, ScreenPoint& screen) {
@@ -140,12 +194,16 @@ bool ClosestRayAxisParameter(const Ray& ray, Float3 axisOrigin, Float3 unitAxis,
 
 bool AxisTranslationFromParameter(Float3 startWorldPosition, Float3 unitAxis,
                                   float startParameter, float currentParameter,
-                                  Float3& worldPosition) {
+                                  Float3& worldPosition, float snapStep) {
     Float3 axisDirection;
     if (!Finite(startWorldPosition) || !Normalize(unitAxis, axisDirection) ||
-        !std::isfinite(startParameter) || !std::isfinite(currentParameter))
+        !std::isfinite(startParameter) || !std::isfinite(currentParameter) ||
+        !std::isfinite(snapStep) || snapStep < 0)
         return false;
-    const double delta = static_cast<double>(currentParameter) - startParameter;
+    double delta = static_cast<double>(currentParameter) - startParameter;
+    if (snapStep > 0 && !QuantizeDelta(delta, snapStep, kMinTranslationSnapStep,
+                                       kMaxTranslationSnapStep, delta))
+        return false;
     const Float3 candidate{static_cast<float>(startWorldPosition.x + axisDirection.x * delta),
                            static_cast<float>(startWorldPosition.y + axisDirection.y * delta),
                            static_cast<float>(startWorldPosition.z + axisDirection.z * delta)};
@@ -301,13 +359,16 @@ bool ProjectRotationRing(Float3 center, Float3 basisU, Float3 basisV, float radi
 }
 
 bool AxisScaleFromParameter(float startScale, float startParameter, float currentParameter,
-                            float handleWorldLength, float& localScale) {
+                            float handleWorldLength, float& localScale, float snapStep) {
     if (!std::isfinite(startScale) || !std::isfinite(startParameter) ||
         !std::isfinite(currentParameter) || !std::isfinite(handleWorldLength) ||
-        handleWorldLength <= 0)
+        handleWorldLength <= 0 || !std::isfinite(snapStep) || snapStep < 0)
         return false;
-    const double candidate = static_cast<double>(startScale) +
-                             (static_cast<double>(currentParameter) - startParameter) / handleWorldLength;
+    double scaleDelta = (static_cast<double>(currentParameter) - startParameter) / handleWorldLength;
+    if (snapStep > 0 && !QuantizeDelta(scaleDelta, snapStep, kMinScaleSnapStep, kMaxScaleSnapStep,
+                                       scaleDelta))
+        return false;
+    const double candidate = static_cast<double>(startScale) + scaleDelta;
     if (!std::isfinite(candidate) || std::fabs(candidate) > std::numeric_limits<float>::max()) return false;
     localScale = static_cast<float>(candidate);
     return std::isfinite(localScale);
