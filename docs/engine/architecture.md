@@ -180,6 +180,8 @@ and asset placement preview. It also has bounded undo/redo, with continuous insp
 and rotation edits coalesced into single steps. The renderer/picker matrix path represents resolved
 transforms, including parent-induced shear. Project-root browsing and Windows D3D12 visual
 validation remain outstanding.
+For the current implementation/gap summary and dependency order, see the
+[editor productization handoff](editor-productization-handoff.md).
 
 ## Provenance
 
