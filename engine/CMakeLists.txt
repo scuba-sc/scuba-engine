@@ -53,7 +53,11 @@ add_library(scuba_imgui_core STATIC
   "${SCUBA_IMGUI_DIR}/imgui.cpp" "${SCUBA_IMGUI_DIR}/imgui_draw.cpp"
   "${SCUBA_IMGUI_DIR}/imgui_tables.cpp" "${SCUBA_IMGUI_DIR}/imgui_widgets.cpp")
 target_include_directories(scuba_imgui_core SYSTEM PUBLIC "${SCUBA_IMGUI_DIR}")
-add_library(scuba_native_tools STATIC src/ui/designer.cpp src/ui/net_sandbox.cpp src/ui/plugin_surface.cpp)
+add_library(scuba_native_tools STATIC
+  src/ui/designer.cpp
+  src/ui/net_sandbox.cpp
+  src/ui/plugin_surface.cpp
+  src/ui/workspace_layout.cpp)
 target_compile_definitions(scuba_native_tools PRIVATE SCUBA_DESIGNER_IMGUI)
 target_include_directories(scuba_native_tools PUBLIC "${SCUBA_ENGINE_INCLUDE}" PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(scuba_native_tools PUBLIC scuba_imgui_core scuba_engine_sco scuba_net_sim sco_widgets_imgui)

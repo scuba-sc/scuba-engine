@@ -6,7 +6,9 @@
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_internal.h"
+#include "ui/workspace_layout.h"
 
+#include <filesystem>
 #include <windows.h>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -51,7 +53,8 @@ Status UiLayer::Init(platform::Window& window, render::Renderer& renderer) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
-    io.IniFilename = "scuba-engine-layout.ini";
+    io.IniFilename = workspace::kLayoutIniFilename;
+    defaultWorkspacePending_ = workspace::ShouldBuildDefaultWorkspace(std::filesystem::path(io.IniFilename));
     Style();
     if (!ImGui_ImplWin32_Init(window.native())) return Status::Fail("ImGui_ImplWin32_Init failed");
     window.SetMessageHook(&ImGuiHook);
@@ -67,12 +70,19 @@ void UiLayer::Shutdown() {
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
     ready_ = false;
+    defaultWorkspacePending_ = false;
 }
 
 void UiLayer::BeginFrame() {
     renderer_->BeginUiFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
+    if (defaultWorkspacePending_) {
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        const ImGuiID dock = workspace::MainDockSpaceId(vp->ID);
+        if (workspace::BuildDefaultWorkspace(dock, vp->WorkPos, vp->WorkSize).root != 0)
+            defaultWorkspacePending_ = false;
+    }
     const ImGuiID dock = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
     if (ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dock)) {
         const ImVec2 origin = ImGui::GetMainViewport()->Pos;

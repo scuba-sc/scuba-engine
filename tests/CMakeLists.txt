@@ -1,5 +1,5 @@
 if(SCUBA_BUILD_ENGINE)
-  foreach(name native_designer native_net_sandbox plugin_surface)
+  foreach(name native_designer native_net_sandbox plugin_surface workspace_layout)
     add_executable(test_${name} test_${name}.cpp)
     target_link_libraries(test_${name} PRIVATE scuba_native_tools)
     target_include_directories(test_${name} PRIVATE "${PROJECT_SOURCE_DIR}/engine/src")
@@ -9,7 +9,8 @@ if(SCUBA_BUILD_ENGINE)
   add_test(NAME native_designer COMMAND test_native_designer)
   add_test(NAME native_net_sandbox COMMAND test_native_net_sandbox $<TARGET_FILE:scuba-hostd>)
   add_test(NAME plugin_surface COMMAND test_plugin_surface "${PROJECT_BINARY_DIR}/plugins/runtime")
-  set_tests_properties(native_designer native_net_sandbox plugin_surface PROPERTIES TIMEOUT 120)
+  add_test(NAME workspace_layout COMMAND test_workspace_layout)
+  set_tests_properties(native_designer native_net_sandbox plugin_surface workspace_layout PROPERTIES TIMEOUT 120)
 endif()
 
 # Plugin-SDK-only builds intentionally do not provide sco_app or sco-host-sim. Keep the
