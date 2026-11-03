@@ -366,6 +366,7 @@ struct Editor {
     bool contentCatalogLoaded = false;
     bool contentCatalogRejected = false;
     bool contentBrowserViewValid = false;
+    bool contentTileView = true;
     uint64_t logSeen = 0;
     std::vector<log::Line> logLines;
 
@@ -1713,32 +1714,92 @@ void Editor::DrawContent() {
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##filter", "search files in this folder and below", contentFilter,
                              sizeof contentFilter);
+    if (ImGui::RadioButton("Tiles##asset-view", contentTileView)) contentTileView = true;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("List##asset-view", !contentTileView)) contentTileView = false;
+
+    auto drawList = [&](size_t count, auto drawItem) {
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(count));
+        while (clipper.Step()) {
+            for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; ++index)
+                drawItem(static_cast<size_t>(index));
+        }
+    };
+    auto drawTileBackdrop = [&](const ImVec2& position, float width, float height) {
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            position, ImVec2(position.x + width, position.y + height),
+            ImGui::GetColorU32(ImGuiCol_FrameBg), ImGui::GetStyle().FrameRounding);
+    };
+    auto drawTileBorder = [&](const ImVec2& position, float width, float height) {
+        ImGui::GetWindowDrawList()->AddRect(
+            position, ImVec2(position.x + width, position.y + height),
+            ImGui::GetColorU32(ImGuiCol_Border), ImGui::GetStyle().FrameRounding);
+    };
+    auto drawTiles = [&](size_t count, float tileHeight, auto drawTile) {
+        const float availableWidth = ImGui::GetContentRegionAvail().x;
+        const float spacingX = ImGui::GetStyle().ItemSpacing.x;
+        const float tileWidth = std::max(72.0f, std::min(156.0f, availableWidth));
+        const int columns = std::max(1, static_cast<int>((availableWidth + spacingX) / (tileWidth + spacingX)));
+        const int rows = static_cast<int>((count + static_cast<size_t>(columns) - 1) /
+                                          static_cast<size_t>(columns));
+        ImGuiListClipper clipper;
+        clipper.Begin(rows, tileHeight + ImGui::GetStyle().ItemSpacing.y);
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                for (int column = 0; column < columns; ++column) {
+                    const size_t index = static_cast<size_t>(row) * static_cast<size_t>(columns) +
+                                         static_cast<size_t>(column);
+                    if (index >= count) break;
+                    if (column != 0) ImGui::SameLine();
+                    drawTile(index, tileWidth, tileHeight);
+                }
+            }
+        }
+    };
+
     ImGui::TextDisabled("%s", contentFilter[0] ? "Matching folders" : "Folders");
-    if (ImGui::BeginChild("folders", ImVec2(0, 92), true)) {
-        for (const auto& folder : browser.directories) {
+    if (ImGui::BeginChild("folders", ImVec2(0, contentTileView ? 116.0f : 92.0f), true)) {
+        auto drawFolder = [&](size_t index, float width, float height) {
+            const auto& folder = browser.directories[index];
             ImGui::PushID(folder.path.c_str());
-            const std::string label = folder.name + "/";
-            if (ImGui::Selectable(label.c_str())) {
+            const std::string label = contentTileView ? "[FOLDER]\n" + folder.name + "/" : folder.name + "/";
+            const ImVec2 size = contentTileView ? ImVec2(width, height) : ImVec2(0, 0);
+            const ImVec2 tilePosition = ImGui::GetCursorScreenPos();
+            if (contentTileView) drawTileBackdrop(tilePosition, width, height);
+            if (ImGui::Selectable(label.c_str(), false, ImGuiSelectableFlags_None, size)) {
                 contentDirectory = folder.path;
                 contentFilter[0] = '\0';
                 selectedAssetPath.clear();
                 if (!contentCatalogRejected) contentBrowserStatus.clear();
             }
+            if (contentTileView) drawTileBorder(tilePosition, width, height);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Open folder\n%s", folder.path.c_str());
             ImGui::PopID();
-        }
+        };
+        if (contentTileView)
+            drawTiles(browser.directories.size(), 82.0f, drawFolder);
+        else
+            drawList(browser.directories.size(), [&](size_t index) { drawFolder(index, 0, 0); });
         if (browser.directories.empty() && !contentCatalogRejected) ImGui::TextDisabled("No child folders");
     }
     ImGui::EndChild();
 
     ImGui::TextDisabled("%s", contentFilter[0] ? "Matching files" : "Files");
     if (ImGui::BeginChild("assets", ImVec2(0, -82), true)) {
-        for (const auto& item : browser.files) {
+        auto drawAsset = [&](size_t index, float width, float height) {
+            const auto& item = browser.files[index];
             ImGui::PushID(item.path.c_str());
             const bool supported = item.supportedModelFormat();
-            const std::string label = item.name + "  [" +
-                (supported ? asset::FormatName(item.format) : "unsupported") + "]";
+            const std::string label = contentTileView
+                ? (supported ? "[3D MODEL]\n" : "[UNSUPPORTED]\n") + item.name
+                : item.name + "  [" + (supported ? asset::FormatName(item.format) : "unsupported") + "]";
+            const ImVec2 size = contentTileView ? ImVec2(width, height) : ImVec2(0, 0);
+            const ImVec2 tilePosition = ImGui::GetCursorScreenPos();
+            if (contentTileView) drawTileBackdrop(tilePosition, width, height);
             if (ImGui::Selectable(label.c_str(), selectedAssetPath == item.path,
-                                  ImGuiSelectableFlags_AllowDoubleClick)) {
+                                  ImGuiSelectableFlags_AllowDoubleClick, size)) {
                 selectedAssetPath = item.path;
                 contentBrowserStatus.clear();
                 if (ImGui::IsMouseDoubleClicked(0)) {
@@ -1760,8 +1821,13 @@ void Editor::DrawContent() {
                                       vfs.Resolve(item.path).c_str());
                 }
             }
+            if (contentTileView) drawTileBorder(tilePosition, width, height);
             ImGui::PopID();
-        }
+        };
+        if (contentTileView)
+            drawTiles(browser.files.size(), 82.0f, drawAsset);
+        else
+            drawList(browser.files.size(), [&](size_t index) { drawAsset(index, 0, 0); });
         if (browser.files.empty() && !contentCatalogRejected)
             ImGui::TextDisabled(contentFilter[0] ? "No files match this search in the current folder" :
                                                   "No files in the current folder");

@@ -118,6 +118,12 @@ the legacy `FileSystem::List` API produces an explicit browser listing error; th
 back to materializing its full listing. The legacy `List` API remains available and retains its
 previous behavior for existing callers.
 
+The Content panel can switch between list and tile views. Tiles use text type placeholders (`FOLDER`,
+`3D MODEL`, and `UNSUPPORTED`); the editor has no asset-thumbnail source and generates or loads no
+image previews. Tile and list rows are clipped to the visible range, while the browser model still
+limits each view to 4,096 folders and 4,096 files. Search, folder navigation, selection, unsupported
+file visibility, and supported-model placement are shared by both views.
+
 Page delivery is bounded, but backend indexing is still eager. Each built-in backend retains its
 full file index and a sorted vector of path references for paging, so that auxiliary vector also
 grows with the entire mounted catalogue. Directory mounts scan and index up to 1,048,576 files by
