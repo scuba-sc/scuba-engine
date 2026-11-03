@@ -25,6 +25,10 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <linux/fs.h>
+#include <sys/syscall.h>
+#endif
 #endif
 
 namespace scuba::scene {
@@ -327,6 +331,84 @@ Status AtomicWrite(const std::filesystem::path& root, const std::filesystem::pat
         return Status::Ok();
     }
     return Fail("could not allocate a unique temporary scene file name");
+}
+
+Status ResolveProjectCreateTarget(
+    const std::filesystem::path& requestedRoot,
+    std::span<const std::filesystem::path> mountedSources,
+    std::span<const std::filesystem::path> readOnlyDirectoryRoots,
+    std::filesystem::path& canonicalTarget,
+    std::vector<std::filesystem::path>& canonicalReadOnlyRoots) {
+    namespace fs = std::filesystem;
+    if (requestedRoot.empty()) return Fail("project path must name a new folder");
+    std::error_code ec;
+    fs::path absolute = fs::absolute(requestedRoot, ec);
+    if (ec) return Fail("project path cannot be made absolute: " + ec.message());
+    absolute = absolute.lexically_normal();
+    while (absolute != absolute.root_path() && absolute.filename().empty())
+        absolute = absolute.parent_path();
+    if (absolute == absolute.root_path() || absolute.filename().empty() || absolute.filename() == "." ||
+        absolute.filename() == "..")
+        return Fail("project path must name a new folder, not a filesystem root");
+
+    const fs::path canonicalParent = fs::canonical(absolute.parent_path(), ec);
+    if (ec) return Fail("project parent directory cannot be resolved: " + ec.message());
+    if (!fs::is_directory(canonicalParent, ec) || ec)
+        return Fail("project parent must be an existing directory");
+    const fs::path target = canonicalParent / absolute.filename();
+
+    ec.clear();
+    const fs::file_status targetStatus = fs::symlink_status(target, ec);
+    if (!ec && targetStatus.type() != fs::file_type::not_found)
+        return Fail("project path already exists; existing data will not be replaced");
+    if (ec && ec != std::errc::no_such_file_or_directory)
+        return Fail("cannot inspect project path: " + ec.message());
+
+    for (const auto& source : mountedSources) {
+        const fs::path canonicalSource = fs::canonical(source, ec);
+        if (ec) return Fail("mounted asset source cannot be resolved: " + ec.message());
+        if (RootsOverlap(target, canonicalSource))
+            return Fail("new project directory overlaps a mounted asset source");
+    }
+
+    std::vector<fs::path> readOnly;
+    readOnly.reserve(readOnlyDirectoryRoots.size());
+    for (const auto& root : readOnlyDirectoryRoots) {
+        const fs::path canonicalRoot = fs::canonical(root, ec);
+        if (ec) return Fail("read-only asset directory cannot be resolved: " + ec.message());
+        if (!fs::is_directory(canonicalRoot, ec) || ec)
+            return Fail("read-only asset root must be an existing directory");
+        if (RootsOverlap(target, canonicalRoot))
+            return Fail("new project directory overlaps a read-only asset directory");
+        readOnly.push_back(canonicalRoot);
+    }
+
+    canonicalTarget = target;
+    canonicalReadOnlyRoots = std::move(readOnly);
+    return Status::Ok();
+}
+
+Status PublishDirectoryNoReplace(const std::filesystem::path& staged,
+                                 const std::filesystem::path& target) {
+#ifdef _WIN32
+    if (MoveFileExW(staged.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH)) return Status::Ok();
+    const DWORD error = GetLastError();
+    if (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS)
+        return Fail("project path was created by another process; existing data was left untouched");
+    return Fail("cannot publish new project directory (Windows error " + std::to_string(error) + ")");
+#elif defined(__linux__) && defined(SYS_renameat2) && defined(RENAME_NOREPLACE)
+    if (::syscall(SYS_renameat2, AT_FDCWD, staged.c_str(), AT_FDCWD, target.c_str(), RENAME_NOREPLACE) == 0)
+        return Status::Ok();
+    const int error = errno;
+    if (error == EEXIST || error == ENOTEMPTY)
+        return Fail("project path was created by another process; existing data was left untouched");
+    return Fail("cannot atomically publish a new project directory: " +
+                std::error_code(error, std::generic_category()).message());
+#else
+    (void)staged;
+    (void)target;
+    return Fail("atomic no-replace project creation is unsupported on this platform");
+#endif
 }
 
 Status LocalTransformFromAffine(const render::Float4x4& matrix, LocalTransform& transform) {
@@ -1042,6 +1124,98 @@ Status ProjectStore::ValidateSourceSeparation(
             return Fail("project directory overlaps a mounted asset source");
     }
     return Status::Ok();
+}
+
+Status ProjectStore::ValidateProjectCreateTarget(
+    const std::filesystem::path& projectRoot,
+    std::span<const std::filesystem::path> mountedSources,
+    std::span<const std::filesystem::path> readOnlyDirectoryRoots) {
+    std::filesystem::path canonicalTarget;
+    std::vector<std::filesystem::path> canonicalReadOnlyRoots;
+    return ResolveProjectCreateTarget(projectRoot, mountedSources, readOnlyDirectoryRoots,
+                                      canonicalTarget, canonicalReadOnlyRoots);
+}
+
+std::optional<ProjectStore> ProjectStore::CreateProject(
+    const std::filesystem::path& projectRoot,
+    std::span<const std::filesystem::path> mountedSources,
+    std::span<const std::filesystem::path> readOnlyDirectoryRoots,
+    Status* status) {
+    namespace fs = std::filesystem;
+    fs::path canonicalTarget;
+    std::vector<fs::path> canonicalReadOnlyRoots;
+    if (auto validation = ResolveProjectCreateTarget(projectRoot, mountedSources, readOnlyDirectoryRoots,
+                                                      canonicalTarget, canonicalReadOnlyRoots); !validation) {
+        if (status) *status = std::move(validation);
+        return std::nullopt;
+    }
+
+    static std::atomic<uint64_t> sequence{0};
+#ifdef _WIN32
+    const uint64_t processId = static_cast<uint64_t>(GetCurrentProcessId());
+#else
+    const uint64_t processId = static_cast<uint64_t>(getpid());
+#endif
+    fs::path staged;
+    bool stageCreated = false;
+    for (unsigned attempt = 0; attempt < 64; ++attempt) {
+        const uint64_t serial = sequence.fetch_add(1, std::memory_order_relaxed);
+        staged = canonicalTarget.parent_path() /
+                 (".scuba-project-staging-" + std::to_string(processId) + "-" + std::to_string(serial));
+        std::error_code ec;
+        stageCreated = fs::create_directory(staged, ec);
+        if (stageCreated) break;
+        if (ec && ec != std::errc::file_exists) {
+            if (status) *status = Fail("cannot create project staging directory: " + ec.message());
+            return std::nullopt;
+        }
+    }
+    if (!stageCreated) {
+        if (status) *status = Fail("could not allocate a unique project staging directory");
+        return std::nullopt;
+    }
+
+    const auto failAndCleanStage = [&](Status failure) -> std::optional<ProjectStore> {
+        std::error_code cleanupError;
+        fs::remove_all(staged, cleanupError);
+        if (cleanupError) failure.error += "; staging cleanup failed: " + cleanupError.message();
+        if (status) *status = std::move(failure);
+        return std::nullopt;
+    };
+
+    Document mainScene;
+    mainScene.id = "main";
+    mainScene.name = "Untitled";
+    Status stageStatus;
+    auto stageStore = Open(staged, canonicalReadOnlyRoots, &stageStatus);
+    if (!stageStore) return failAndCleanStage(std::move(stageStatus));
+    if (auto createStatus = stageStore->Create(mainScene, mountedSources); !createStatus)
+        return failAndCleanStage(std::move(createStatus));
+
+    fs::path publishTarget;
+    std::vector<fs::path> publishReadOnlyRoots;
+    if (auto validation = ResolveProjectCreateTarget(projectRoot, mountedSources, readOnlyDirectoryRoots,
+                                                      publishTarget, publishReadOnlyRoots); !validation)
+        return failAndCleanStage(std::move(validation));
+    if (publishTarget != canonicalTarget || publishReadOnlyRoots != canonicalReadOnlyRoots)
+        return failAndCleanStage(Fail("project parent or mounted asset roots changed during initialization"));
+
+    if (auto publishStatus = PublishDirectoryNoReplace(staged, canonicalTarget); !publishStatus)
+        return failAndCleanStage(std::move(publishStatus));
+
+    if (auto separation = ValidateSourceSeparation(canonicalTarget, mountedSources); !separation) {
+        if (status) *status = Fail("project was fully initialized, but its final source-separation check failed: " +
+                                   separation.error);
+        return std::nullopt;
+    }
+    Status openStatus;
+    auto createdStore = Open(canonicalTarget, canonicalReadOnlyRoots, &openStatus);
+    if (!createdStore) {
+        if (status) *status = Fail("project was fully initialized, but could not be opened: " + openStatus.error);
+        return std::nullopt;
+    }
+    if (status) *status = Status::Ok();
+    return createdStore;
 }
 
 std::optional<ProjectStore> ProjectStore::Open(

@@ -332,6 +332,7 @@ struct Editor {
     std::string sceneBrowserStatus;
     bool pendingSceneConfirmation = false;
     bool showProjectOpenDialog = false;
+    bool createProjectDialog = false;
     char projectPathBuffer[1024] = "";
     std::string projectOpenStatus;
     bool frameOnLoad = true;
@@ -352,6 +353,16 @@ struct Editor {
         for (const auto& [id, source] : mountedSources) {
             (void)id;
             paths.push_back(source.path);
+        }
+        return paths;
+    }
+
+    std::vector<fs::path> MountedDirectoryPaths() const {
+        std::vector<fs::path> paths;
+        paths.reserve(mountedSources.size());
+        for (const auto& [id, source] : mountedSources) {
+            (void)id;
+            if (source.directory) paths.push_back(source.path);
         }
         return paths;
     }
@@ -826,6 +837,13 @@ struct Editor {
 
     void OpenProjectDialog() {
         projectOpenStatus.clear();
+        createProjectDialog = false;
+        showProjectOpenDialog = true;
+    }
+
+    void CreateProjectDialog() {
+        projectOpenStatus.clear();
+        createProjectDialog = true;
         showProjectOpenDialog = true;
     }
 
@@ -848,6 +866,30 @@ struct Editor {
         }
         auto action = sceneActionGate.Request(
             {scene::SceneActionKind::OpenProject, pathText}, documentDirty.dirty());
+        if (action) CompletePendingSceneAction(*action);
+        else pendingSceneConfirmation = true;
+    }
+
+    void RequestCreateProject() {
+        const std::string pathText(projectPathBuffer);
+        if (pathText.empty()) {
+            projectOpenStatus = "Enter a path for a new project folder.";
+            return;
+        }
+        try {
+            const auto sources = MountedSourcePaths();
+            const auto readOnlyRoots = MountedDirectoryPaths();
+            if (auto status = scene::ProjectStore::ValidateProjectCreateTarget(
+                    PathFromUtf8(pathText), sources, readOnlyRoots); !status) {
+                projectOpenStatus = "Cannot create project: " + status.error;
+                return;
+            }
+        } catch (const std::exception& error) {
+            projectOpenStatus = std::string("Invalid project path: ") + error.what();
+            return;
+        }
+        auto action = sceneActionGate.Request(
+            {scene::SceneActionKind::CreateProject, pathText}, documentDirty.dirty());
         if (action) CompletePendingSceneAction(*action);
         else pendingSceneConfirmation = true;
     }
@@ -893,17 +935,37 @@ struct Editor {
             if (quit) *quit = true;
             return;
         }
-        if (action.kind == scene::SceneActionKind::OpenProject) {
+        if (action.kind == scene::SceneActionKind::OpenProject ||
+            action.kind == scene::SceneActionKind::CreateProject) {
+            const bool creatingProject = action.kind == scene::SceneActionKind::CreateProject;
             try {
+                const fs::path projectPath = PathFromUtf8(action.target);
+                if (creatingProject) {
+                    const auto sources = MountedSourcePaths();
+                    const auto readOnlyRoots = MountedDirectoryPaths();
+                    Status createStatus;
+                    if (!scene::ProjectStore::CreateProject(projectPath, sources, readOnlyRoots,
+                                                            &createStatus)) {
+                        projectOpenStatus = createStatus.error.starts_with("project was fully initialized")
+                            ? createStatus.error
+                            : "Cannot create project: " + createStatus.error;
+                        return;
+                    }
+                }
                 PreparedProject prepared;
-                if (auto status = PrepareProject(PathFromUtf8(action.target), "main", prepared); !status) {
-                    projectOpenStatus = "Cannot open project: " + status.error;
+                if (auto status = PrepareProject(projectPath, "main", prepared); !status) {
+                    projectOpenStatus = creatingProject
+                        ? "Project folder was initialized, but cannot be opened: " + status.error
+                        : "Cannot open project: " + status.error;
                     return;
                 }
                 if (auto status = InstallPreparedProject(std::move(prepared), true); !status) {
-                    projectOpenStatus = "Cannot open project: " + status.error;
+                    projectOpenStatus = creatingProject
+                        ? "Project folder was initialized, but cannot be opened: " + status.error
+                        : "Cannot open project: " + status.error;
                     return;
                 }
+                if (creatingProject) sceneStatus = "Created project · loaded main scene";
                 projectOpenStatus.clear();
                 showProjectOpenDialog = false;
             } catch (const std::exception& error) {
@@ -1103,12 +1165,7 @@ struct Editor {
         if (auto status = scene::ProjectStore::ValidateSourceSeparation(canonicalRoot, sourcePaths); !status)
             return status;
 
-        std::vector<fs::path> readOnlyRoots;
-        readOnlyRoots.reserve(mountedSources.size());
-        for (const auto& [id, source] : mountedSources) {
-            (void)id;
-            if (source.directory) readOnlyRoots.push_back(source.path);
-        }
+        const auto readOnlyRoots = MountedDirectoryPaths();
 
         Status status;
         auto store = scene::ProjectStore::Open(canonicalRoot, readOnlyRoots, &status);
@@ -1755,6 +1812,7 @@ void Editor::DrawMenu(bool& quit) {
         if (ImGui::MenuItem("Redo", "Ctrl+Y", false, sceneHistory.CanRedo())) RedoScene();
         ImGui::Separator();
         if (ImGui::MenuItem("Open project...")) OpenProjectDialog();
+        if (ImGui::MenuItem("Create project...")) CreateProjectDialog();
         if (ImGui::MenuItem("Project scenes...", nullptr, false, projectStore.has_value())) OpenSceneBrowser();
         if (ImGui::MenuItem("Save scene", "Ctrl+S", false, projectStore.has_value())) SaveScene();
         if (ImGui::MenuItem("Clear scene")) ClearScene();
@@ -2260,13 +2318,24 @@ void Editor::DrawSceneBrowser() {
 
 void Editor::DrawProjectOpenDialog() {
     if (!showProjectOpenDialog) return;
-    if (!ImGui::Begin("Open project", &showProjectOpenDialog)) { ImGui::End(); return; }
-    ImGui::TextWrapped("Enter the path to an existing project folder. The editor opens its main scene, or starts a new unsaved main scene if none exists.");
+    const char* title = createProjectDialog ? "Create project" : "Open project";
+    if (!ImGui::Begin(title, &showProjectOpenDialog)) { ImGui::End(); return; }
+    if (createProjectDialog) {
+        ImGui::TextWrapped("Choose a new folder inside an existing parent directory. The editor creates an empty main scene; existing folders and files are never replaced. Mounted asset roots are read-only and cannot contain the project.");
+    } else {
+        ImGui::TextWrapped("Enter the path to an existing project folder. The editor opens its main scene, or starts a new unsaved main scene if none exists.");
+    }
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##project-path", "C:\\Users\\you\\Documents\\MyProject",
+    ImGui::InputTextWithHint("##project-path", createProjectDialog
+                                 ? "C:\\Users\\you\\Documents\\NewProject"
+                                 : "C:\\Users\\you\\Documents\\MyProject",
                              projectPathBuffer, sizeof(projectPathBuffer));
     ImGui::BeginDisabled(projectPathBuffer[0] == '\0');
-    if (ImGui::Button("Open project")) RequestOpenProject();
+    if (createProjectDialog) {
+        if (ImGui::Button("Create project")) RequestCreateProject();
+    } else if (ImGui::Button("Open project")) {
+        RequestOpenProject();
+    }
     ImGui::EndDisabled();
     if (!projectOpenStatus.empty()) ImGui::TextWrapped("%s", projectOpenStatus.c_str());
     if (!projectRoot.empty()) ImGui::TextDisabled("Current project: %s", projectRoot.generic_string().c_str());
@@ -2295,10 +2364,14 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
         return;
     }
     const bool quitting = pending->kind == scene::SceneActionKind::Quit;
-    const bool openingProject = pending->kind == scene::SceneActionKind::OpenProject;
+    const bool projectChange = pending->kind == scene::SceneActionKind::OpenProject ||
+                               pending->kind == scene::SceneActionKind::CreateProject;
+    const bool creatingProject = pending->kind == scene::SceneActionKind::CreateProject;
     if (quitting)
         ImGui::TextWrapped("Scene %s has unsaved changes. Save them before quitting?", document.id.c_str());
-    else if (openingProject)
+    else if (projectChange && creatingProject)
+        ImGui::TextWrapped("Scene %s has unsaved changes. Save them before creating a new project?", document.id.c_str());
+    else if (projectChange)
         ImGui::TextWrapped("Scene %s has unsaved changes. Save them before opening another project?", document.id.c_str());
     else
         ImGui::TextWrapped("Scene %s has unsaved changes. Save them before switching?", document.id.c_str());
@@ -2326,7 +2399,7 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
         pendingSceneConfirmation = false;
         ImGui::CloseCurrentPopup();
     }
-    if (!projectStore && (quitting || openingProject))
+    if (!projectStore && (quitting || projectChange))
         ImGui::TextWrapped("This in-memory scene has no project file; Save is unavailable. Choose Discard or Cancel.");
     else if (!documentDirty.dirty() && sceneActionGate.pending())
         ImGui::TextWrapped("Save completed; the scene switch is waiting to finish.");

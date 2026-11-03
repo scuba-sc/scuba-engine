@@ -61,10 +61,16 @@ read-only inputs. The native editor can open one scene by stable ID with
 `scuba-engine.exe --project <existing-project-directory> --scene <scene-id>`; `--scene` defaults to
 `main`. The File menu also offers **Open project...**, where the editor accepts a path to an existing
 project directory and opens its `main` scene, or starts a new unsaved `main` scene if that file is
-absent. This path-entry flow does not require a scene ID and reports invalid paths or project files
-in the dialog. It is not a native folder picker and does not create project directories. The File
-menu and Scene panel also open a project-scene browser where saved scenes can be listed, opened, and
-created without restarting the editor or supplying a scene ID on the command line. Switching away
+absent. **Create project...** accepts a new folder path whose parent directory already exists. It
+creates an empty, saved `main.scene.json`; it does not create parent folders, replace an existing
+file or folder, or copy or modify mounted assets. Creation builds the scene in a uniquely named
+sibling staging directory and publishes that directory with an atomic no-replace operation, so a
+failed initialization does not expose a partial project. The editor checks mounted source overlap
+before asking about unsaved edits and repeats the path/source checks immediately before publishing.
+The exclusive directory publish is implemented for Windows and Linux; other platforms fail closed.
+Both project dialogs use path entry rather than a native folder picker. The File menu and Scene panel
+also open a project-scene browser where saved scenes can be listed, opened, and created without
+restarting the editor or supplying a scene ID on the command line. Switching away
 from unsaved edits asks whether to save, discard the in-memory changes, or cancel; a failed save
 keeps the switch pending, and a failed project open leaves the current session in place. Creating a
 scene refuses to replace an existing file. If the default scene file does not exist, the editor
@@ -75,7 +81,10 @@ scene and its dirty state untouched; when a requested switch had a pending unsav
 failed target open does not install the target document. Directory symlink aliases and archive
 files inside a project root are covered by portable tests. Junction behavior, case-only path
 spellings, and Windows reparse-point retargeting still require the Windows checklist; Linux tests do
-not establish those Windows semantics.
+not establish those Windows semantics. Project creation's final no-replace publish prevents an
+existing target from being overwritten, but path checks are not a filesystem lock: a concurrent
+reparse-point or mount change between the final check and publish is not eliminated. Windows
+junction and reparse-point behavior remains pending native validation.
 
 The Scene panel is a document-backed outliner. Stable node IDs are used for selection and the
 Inspector edits local translation, local XYZ Euler rotation in degrees, and nonuniform scale. Euler

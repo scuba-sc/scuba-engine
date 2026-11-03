@@ -133,6 +133,20 @@ public:
     // be files (archives) or directories. All paths are canonicalized before component comparison.
     static Status ValidateSourceSeparation(const std::filesystem::path& projectRoot,
                                            std::span<const std::filesystem::path> mountedSources);
+    // Validates a new project path without creating it. The target must not exist and its parent
+    // must be an existing directory. mountedSources may include archive files; directoryRoots are
+    // retained for later checks by the returned store.
+    static Status ValidateProjectCreateTarget(
+        const std::filesystem::path& projectRoot,
+        std::span<const std::filesystem::path> mountedSources,
+        std::span<const std::filesystem::path> readOnlyDirectoryRoots);
+    // Creates a new directory project with an empty, saved main scene. Staging and publication are
+    // same-parent and no-replace; existing targets are never opened or modified.
+    static std::optional<ProjectStore> CreateProject(
+        const std::filesystem::path& projectRoot,
+        std::span<const std::filesystem::path> mountedSources,
+        std::span<const std::filesystem::path> readOnlyDirectoryRoots,
+        Status* status = nullptr);
     // Retains and rechecks these read-only directory roots. Callers with archive mounts should
     // also pass the complete current source set to each later store operation below.
     static std::optional<ProjectStore> Open(const std::filesystem::path& projectRoot,
@@ -174,12 +188,12 @@ private:
     bool dirty_ = false;
 };
 
-enum class SceneActionKind : uint8_t { Open, Create, OpenProject, Quit };
+enum class SceneActionKind : uint8_t { Open, Create, OpenProject, CreateProject, Quit };
 enum class SceneActionChoice : uint8_t { Save, Discard, Cancel };
 
 struct SceneAction {
     SceneActionKind kind = SceneActionKind::Open;
-    // A scene ID for Open/Create, a UTF-8 project path for OpenProject, and empty for Quit.
+    // A scene ID for Open/Create, a UTF-8 path for project actions, and empty for Quit.
     std::string target;
 
     friend bool operator==(const SceneAction&, const SceneAction&) = default;

@@ -1342,6 +1342,18 @@ void TestSceneDocument(const fs::path& root) {
     CHECK(actionGate.Resolve(scene::SceneActionChoice::Discard) ==
           std::optional<scene::SceneAction>(openProjectAction));
     CHECK(!actionGate.pending());
+    const scene::SceneAction createProjectAction{
+        scene::SceneActionKind::CreateProject, "C:/workspace/new-project"};
+    CHECK(!actionGate.Request(createProjectAction, true));
+    CHECK(actionGate.pending() == std::optional<scene::SceneAction>(createProjectAction));
+    CHECK(!actionGate.Resolve(scene::SceneActionChoice::Save, false));
+    CHECK(actionGate.pending() == std::optional<scene::SceneAction>(createProjectAction));
+    CHECK(!actionGate.Resolve(scene::SceneActionChoice::Cancel));
+    CHECK(!actionGate.pending());
+    CHECK(!actionGate.Request(createProjectAction, true));
+    CHECK(actionGate.Resolve(scene::SceneActionChoice::Discard) ==
+          std::optional<scene::SceneAction>(createProjectAction));
+    CHECK(!actionGate.pending());
     const scene::SceneAction quitAction{scene::SceneActionKind::Quit, {}};
     CHECK(!actionGate.Request(quitAction, true));
     CHECK(!actionGate.Resolve(scene::SceneActionChoice::Cancel));
@@ -1354,6 +1366,109 @@ void TestSceneDocument(const fs::path& root) {
     WriteFile(assetRoot / "source.txt", "read-only asset bytes");
     Status openStatus;
     const std::array<fs::path, 1> readOnlyRoots{assetRoot};
+    const std::array<fs::path, 1> mountedSources{assetRoot};
+
+    const fs::path createParent = root / "project-creation-parent";
+    fs::create_directories(createParent);
+    const fs::path newProjectRoot = createParent / "fresh-project";
+    CHECK(scene::ProjectStore::ValidateProjectCreateTarget(newProjectRoot, mountedSources,
+                                                           readOnlyRoots).ok());
+    Status createProjectStatus;
+    auto createdProject = scene::ProjectStore::CreateProject(newProjectRoot, mountedSources,
+                                                             readOnlyRoots, &createProjectStatus);
+    CHECK(createdProject.has_value() && createProjectStatus.ok());
+    CHECK(fs::is_directory(newProjectRoot));
+    CHECK(fs::is_regular_file(newProjectRoot / "main.scene.json"));
+    if (createdProject) {
+        scene::Document createdMain;
+        CHECK(createdProject->Load("main", createdMain, mountedSources).ok());
+        CHECK(createdMain.id == "main" && createdMain.name == "Untitled" && createdMain.nodes.empty());
+        std::vector<std::string> createdProjectScenes;
+        CHECK(createdProject->ListScenes(createdProjectScenes, mountedSources).ok());
+        CHECK(createdProjectScenes == std::vector<std::string>{"main"});
+    }
+
+    const fs::path existingProjectRoot = createParent / "existing-project";
+    fs::create_directories(existingProjectRoot);
+    WriteFile(existingProjectRoot / "keep.txt", "existing user data");
+    CHECK(!scene::ProjectStore::ValidateProjectCreateTarget(existingProjectRoot, mountedSources,
+                                                            readOnlyRoots).ok());
+    CHECK(!scene::ProjectStore::CreateProject(existingProjectRoot, mountedSources,
+                                              readOnlyRoots, &createProjectStatus).has_value());
+    std::ifstream existingProjectFile(existingProjectRoot / "keep.txt", std::ios::binary);
+    std::string existingProjectBytes((std::istreambuf_iterator<char>(existingProjectFile)),
+                                     std::istreambuf_iterator<char>());
+    CHECK(existingProjectBytes == "existing user data");
+    CHECK(!fs::exists(existingProjectRoot / "main.scene.json"));
+
+    const fs::path existingProjectFilePath = createParent / "existing-project-file";
+    WriteFile(existingProjectFilePath, "keep this file");
+    CHECK(!scene::ProjectStore::ValidateProjectCreateTarget(existingProjectFilePath, mountedSources,
+                                                            readOnlyRoots).ok());
+    CHECK(!scene::ProjectStore::CreateProject(existingProjectFilePath, mountedSources,
+                                              readOnlyRoots, &createProjectStatus).has_value());
+    std::ifstream existingProjectFileInput(existingProjectFilePath, std::ios::binary);
+    std::string existingProjectFileBytes((std::istreambuf_iterator<char>(existingProjectFileInput)),
+                                         std::istreambuf_iterator<char>());
+    CHECK(existingProjectFileBytes == "keep this file");
+    CHECK(!scene::ProjectStore::ValidateProjectCreateTarget(fs::path{}, mountedSources,
+                                                            readOnlyRoots).ok());
+
+    // A path that was available during UI preflight may be claimed before the user confirms. The
+    // create operation repeats the checks and leaves the newly-created contents alone.
+    const fs::path racedProjectRoot = createParent / "claimed-after-preflight";
+    CHECK(scene::ProjectStore::ValidateProjectCreateTarget(racedProjectRoot, mountedSources,
+                                                           readOnlyRoots).ok());
+    fs::create_directories(racedProjectRoot);
+    WriteFile(racedProjectRoot / "keep.txt", "claimed by another process");
+    CHECK(!scene::ProjectStore::CreateProject(racedProjectRoot, mountedSources,
+                                              readOnlyRoots, &createProjectStatus).has_value());
+    std::ifstream racedProjectFile(racedProjectRoot / "keep.txt", std::ios::binary);
+    std::string racedProjectBytes((std::istreambuf_iterator<char>(racedProjectFile)),
+                                  std::istreambuf_iterator<char>());
+    CHECK(racedProjectBytes == "claimed by another process");
+    CHECK(!fs::exists(racedProjectRoot / "main.scene.json"));
+
+    const fs::path missingParentProject = root / "missing-project-parent" / "new-project";
+    CHECK(!scene::ProjectStore::ValidateProjectCreateTarget(missingParentProject, mountedSources,
+                                                            readOnlyRoots).ok());
+    CHECK(!scene::ProjectStore::CreateProject(missingParentProject, mountedSources,
+                                              readOnlyRoots, &createProjectStatus).has_value());
+    CHECK(!fs::exists(missingParentProject.parent_path()));
+
+    const fs::path projectInsideAssets = assetRoot / "must-not-create-project";
+    CHECK(!scene::ProjectStore::ValidateProjectCreateTarget(projectInsideAssets, mountedSources,
+                                                            readOnlyRoots).ok());
+    CHECK(!scene::ProjectStore::CreateProject(projectInsideAssets, mountedSources,
+                                              readOnlyRoots, &createProjectStatus).has_value());
+    CHECK(!fs::exists(projectInsideAssets));
+
+    std::error_code creationAliasError;
+    const fs::path assetCreateAlias = root / "asset-root-create-alias";
+    fs::create_directory_symlink(assetRoot, assetCreateAlias, creationAliasError);
+    if (!creationAliasError) {
+        const fs::path aliasProject = assetCreateAlias / "must-not-create-project";
+        CHECK(!scene::ProjectStore::ValidateProjectCreateTarget(aliasProject, mountedSources,
+                                                                readOnlyRoots).ok());
+        CHECK(!scene::ProjectStore::CreateProject(aliasProject, mountedSources,
+                                                  readOnlyRoots, &createProjectStatus).has_value());
+        CHECK(!fs::exists(assetRoot / "must-not-create-project"));
+        fs::remove(assetCreateAlias, creationAliasError);
+    }
+    std::error_code targetSymlinkError;
+    const fs::path existingProjectSymlink = createParent / "existing-project-symlink";
+    fs::create_directory_symlink(assetRoot, existingProjectSymlink, targetSymlinkError);
+    if (!targetSymlinkError) {
+        CHECK(!scene::ProjectStore::ValidateProjectCreateTarget(existingProjectSymlink, mountedSources,
+                                                                readOnlyRoots).ok());
+        CHECK(!scene::ProjectStore::CreateProject(existingProjectSymlink, mountedSources,
+                                                  readOnlyRoots, &createProjectStatus).has_value());
+        CHECK(fs::is_regular_file(assetRoot / "source.txt"));
+        fs::remove(existingProjectSymlink, targetSymlinkError);
+    }
+    for (const auto& entry : fs::directory_iterator(createParent))
+        CHECK(!entry.path().filename().string().starts_with(".scuba-project-staging-"));
+
     auto project = scene::ProjectStore::Open(projectRoot, readOnlyRoots, &openStatus);
     CHECK(project && openStatus.ok());
     if (!project) return;
