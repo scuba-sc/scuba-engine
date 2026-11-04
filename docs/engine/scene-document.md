@@ -233,6 +233,39 @@ share one failed asset share one new request, while already loaded models are le
 nodes and their saved references remain in the document if the retry also fails; the row and loader
 diagnostics then show the new result. Replacing files inside a ZIP or `.scpak` requires unmounting
 and remounting the archive before retrying, because archive backends use their opened index.
+
+### Repairing or replacing a model reference
+
+Select a model node, then choose a supported model in Content and click **Replace selected model...**,
+or enter a normalized VFS path in the Inspector's **Model asset** section and click **Load replacement**.
+The editor stages one candidate outside the document. The current node and asset reference remain
+active while the loader reads and decodes the candidate; load errors are displayed alongside it.
+**Apply replacement** is available after decoding succeeds. It rechecks the selected node, unchanged
+scene revision, expected original reference, VFS availability, and transformed candidate bounds
+before committing. An invalid path, unsupported format, missing file, failed decode, or invalid
+transformed bounds leaves the original reference in place. Loading or canceling a candidate does not
+dirty the scene or add an undo entry. **Load replacement** can be used again after a failed request.
+
+Apply changes only the selected node's asset path. Its stable ID, display name, parent, and local
+transform are retained, including for a node whose old asset never loaded. Automatic grounding from
+an unfinished old spawn is disabled for the replacement so it cannot later move the authored node.
+The reference change is one undo action, uses the normal dirty/save state, and is stored in the
+existing scene schema. Undo and redo restore the reference through the same instance refresh path.
+Source model files are never written. Groups have no model reference and do not offer this action.
+
+Any scene edit, scene/project switch, undo/redo, selection change, or editor mount change discards a
+pending candidate. Active placement, transform-gizmo gestures and pending scene switches block
+staging/applying. Canceling discards only the editor's intent; it does not cancel a shared loader job
+that another node may be using. Candidate data remains subject to the existing session model cache.
+Already loaded paths reuse that cache; this workflow does not reload changed source bytes or
+invalidate ready models after a remount. Restart the editor to refresh an already loaded path.
+Failed paths can be retried using the existing loader behavior. A decoded candidate is not proof of
+GPU residency: rendering still goes through the existing asynchronous upload path on Apply.
+
+This reference-replacement slice has source and diff review only. Builds, tests, lint, Windows UI,
+renderer timing, save/reopen, and failure-path execution are deferred; see the added cases in
+[Windows editor verification](windows-editor-verification.md).
+
 Selection is editor-session state: opening a scene clears the previous selection; nodes can be
 selected from the outliner, and loaded models can also be selected in the viewport. The project
 scene browser is available from the File menu and Scene panel. Windows D3D12 compilation and visual

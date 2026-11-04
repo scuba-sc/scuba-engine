@@ -14,6 +14,27 @@ This handoff describes the current native editor scaffold and the next dependenc
 | Rendering and picking | Loaded model instances render in the central viewport; CPU picking and document-backed transforms use resolved world matrices. | D3D12 visuals, input feel, DPI behavior and the new default docking layout remain unverified on Windows. No thumbnail render path or bounded GPU thumbnail cache exists. |
 | Game connection | The editor uses the repository's mock game services. | No live-game execution, native provider integration or gameplay acceptance is established. |
 
+## Latest local authoring slice: model reference replacement
+
+The Inspector accepts a normalized VFS replacement path, and Content can stage its selected model
+for the selected scene node. A candidate is loaded separately and applied explicitly after decoding;
+failure or cancellation preserves the old reference. Apply retains stable ID, name, hierarchy and
+transform and uses one existing history/dirty-state transaction. Scene, selection and mount changes
+discard the pending intent. The portable scene mutation also checks the expected old asset path.
+The instance refresh clears pending spawn grounding when a reference changes, and the loader's
+completion pump reuses an existing GPU upload for that handle.
+
+**Status as of 2026-11-04:** implementation and manual source/diff review only. No configure, build,
+test, lint or validation script was run for this slice, per the requested testing deferral. No public
+SDK table, plugin ABI, renderer interface, game provider, or asset format changed. The
+[Windows checklist](windows-editor-verification.md) records the deferred portable and native cases.
+
+Ready models still use the existing session cache. Reference replacement does not implement source
+hot reload, mount-generation cache invalidation, or a bounded loader/GPU cache. An already loaded
+path may retain its old decoded bytes after a source edit/remount; the Inspector explains that an
+editor restart is required to refresh those bytes. Geometry thumbnails and object-container parsing
+remain unimplemented.
+
 ## Outliner search
 
 The scene panel searches node names, stable IDs, and model asset paths with a bounded 256-byte UTF-8
@@ -27,9 +48,15 @@ More scene schema, storage, validation and failure behavior is in [Scene documen
 
 ## Recommended order
 
-1. **Complete project entry acceptance.** Opening and creating projects use validated path entry, and the project scene browser opens saved non-`main` scenes after project selection. Keep creation separate from mounted source trees and preserve the CLI path. Validate the path/reparse behavior and dialogs on Windows before deciding whether a native folder picker is useful.
+1. **Extend explicit asset recovery.** Reference replacement is implemented locally; ready-model reload still needs the loader-generation and GPU-retirement design below. Preserve existing scene nodes and source files, and keep the current reference active until a replacement is explicitly accepted. Defer execution checks to the final testing stage.
 2. **Specify object-container support before implementing it.** Identify the exact container format(s), intended hierarchy/metadata, representative redistributable fixtures and error/size limits. Then select a bounded read-only VFS backend or model-decoder adapter. Preserve mount precedence, normalized paths, cancellation, and explicit unsupported/malformed results. Until this input exists, container support is blocked on format definition; no game-specific parser should be guessed.
 3. **Design geometry thumbnails on the validated renderer.** Reuse decoded model data, but keep GPU creation and destruction on the render thread. Define a bounded cache, cancellation and invalidation on VFS mount changes, fallback placeholders, and fence-safe texture retirement before adding UI previews. Add synthetic fixtures and verify resource lifetime/memory behavior; the current text tiles must remain an honest fallback.
-4. **Run broad acceptance last.** After the remaining scaffold work is complete, use the [Windows editor verification runbook](windows-editor-verification.md) for the full Windows build and interactive acceptance, including project path validation, save/discard/cancel, failed-open preservation, source-directory protection, scene round trip, outliner search/selection, browser, placement and gizmos. Any live-game validation remains a separate owner-run gate with an exact game build, approved provider binary/hash and capability scope; use [Plugin integration](plugin-integration.md) to keep mock, host and live-provider evidence distinct. Focused portable checks during implementation do not substitute for this final acceptance.
+4. **Run broad acceptance last.** After the remaining scaffold work is complete, use the [Windows editor verification runbook](windows-editor-verification.md) for the full Windows build and interactive acceptance, including project create/open path and reparse behavior, save/discard/cancel, failed-open preservation, source-directory protection, scene round trip, model-reference replacement, outliner search/selection, browser, placement and gizmos. Keep project creation separate from mounted source trees and preserve the CLI path. Any live-game validation remains a separate owner-run gate with an exact game build, approved provider binary/hash and capability scope; use [Plugin integration](plugin-integration.md) to keep mock, host and live-provider evidence distinct. Earlier portable checks do not establish acceptance of this new slice.
 
-**Top next action:** identify the exact object-container formats the editor is expected to support and obtain representative, redistributable fixtures. Keep unsupported formats visible and read-only until their structure, metadata and size limits are known; do not infer a parser from the reference video. The Windows runbook remains the final acceptance stage after the scaffold is complete.
+**Next local development slice:** inspect a mount-aware explicit reload for ready scene assets. It
+needs loader cache generations, shared-request ownership, and fence-safe retirement of superseded
+GPU models before it can safely replace the current restart requirement; a path-only cache purge is
+insufficient. Keep this within native editor ownership and leave SDK/provider contracts coordinated
+with their owners. Separately, object-container work still needs exact format definitions and
+representative redistributable fixtures. The Windows runbook remains the final acceptance stage
+after the scaffold is complete.

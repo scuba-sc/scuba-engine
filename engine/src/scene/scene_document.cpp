@@ -38,7 +38,7 @@ using hostd::Json;
 
 constexpr size_t kMaxSceneIdBytes = 64;
 constexpr size_t kMaxNameBytes = 128;
-constexpr size_t kMaxAssetPathBytes = 512;
+constexpr size_t kMaxAssetPathBytes = kMaxSceneAssetPathBytes;
 constexpr float kMaxTranslation = 10000000.0f;
 constexpr float kMinScale = 0.000001f;
 constexpr float kMaxScale = 1000000.0f;
@@ -1090,6 +1090,23 @@ Status AddModelInstance(Document& document, std::string id, std::string name, st
     node.localTransform = transform;
     candidate.nodes.push_back(std::move(node));
     if (auto status = Validate(candidate); !status) return status;
+    document = std::move(candidate);
+    return Status::Ok();
+}
+
+Status ReplaceModelAsset(Document& document, std::string_view nodeId,
+                         std::string_view expectedAssetPath, std::string replacementAssetPath) {
+    if (auto status = Validate(document); !status) return status;
+    Document candidate = document;
+    const auto node = std::find_if(candidate.nodes.begin(), candidate.nodes.end(),
+                                   [&](const Node& item) { return item.id == nodeId; });
+    if (node == candidate.nodes.end()) return Fail("scene node does not exist");
+    if (node->kind != NodeKind::ModelInstance) return Fail("only model nodes have asset references");
+    if (node->assetPath != expectedAssetPath) return Fail("model asset reference changed since the edit began");
+    node->assetPath = std::move(replacementAssetPath);
+    // A longer reference must not turn an otherwise saveable document into an oversized one.
+    std::string encoded;
+    if (auto status = Serialize(candidate, encoded); !status) return status;
     document = std::move(candidate);
     return Status::Ok();
 }

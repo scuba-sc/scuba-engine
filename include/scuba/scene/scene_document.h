@@ -21,6 +21,7 @@ namespace scuba::scene {
 inline constexpr uint32_t kSceneSchemaVersion = 1;
 inline constexpr size_t kMaxSceneNodes = 8192;
 inline constexpr size_t kMaxSceneFileBytes = 8u * 1024u * 1024u;
+inline constexpr size_t kMaxSceneAssetPathBytes = 512;
 inline constexpr size_t kMaxHierarchyDepth = 256;
 inline constexpr float kMaxRotationDegrees = 36000.0f;
 
@@ -152,6 +153,12 @@ Status AddGroup(Document& document, std::string id, std::string name,
 Status AddModelInstance(Document& document, std::string id, std::string name, std::string assetPath,
                         std::optional<std::string> parentId = std::nullopt,
                         LocalTransform transform = {});
+// Changes only a model node's VFS reference. The expected path guards a stale edit; IDs, names,
+// hierarchy and transforms are preserved. Invalid/missing/group nodes or invalid replacement paths
+// leave the document unchanged. The result must also fit the serialized scene size limit. Asset
+// existence/decoding is the editor caller's responsibility.
+Status ReplaceModelAsset(Document& document, std::string_view nodeId,
+                         std::string_view expectedAssetPath, std::string replacementAssetPath);
 Status RemoveSubtree(Document& document, std::string_view rootId);
 // Duplicates a node and its descendants atomically. The callback must supply a fresh persistent ID
 // for each cloned node; the duplicated root is shifted by localOffset and descendants retain their

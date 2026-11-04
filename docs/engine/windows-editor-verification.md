@@ -57,6 +57,8 @@ Check each item and record **Pass**, **Fail**, or **Blocked**, plus the evidence
 | Viewport tools, snapping and history | Select the model. Confirm all snap toggles are off by default. Try Move, Scale and Rotate with snapping off and with bounded steps enabled, then Undo and Redo each drag once. Escape cancels a valid active drag. Scale values reaching zero or below are refused without losing the last valid value. A near-edge-on rotation ring may be refused with a status message; positive scale limits and unsupported mirrored scale must be enforced. Snap controls are editor-session settings and reset on restart. |
 | Browser and placement | Browse `models`, search for `cube`, switch Tiles/List, and confirm `README.md` remains visible but unsupported. Tiles show text type placeholders, not image thumbnails. Check double-click placement, Place with click preview, Escape cancellation and viewport selection. |
 | Failure and recovery | Use the isolated missing-asset fixture below. The failed node remains in the outliner with a diagnostic; after repairing and remounting the asset source, Retry failed assets loads it without replacing the scene node. |
+| Replace a model reference | Select a loaded model or the missing-asset node below. Choose a different supported model in Content, click Replace selected model..., and inspect the candidate in Inspector. The original reference stays active during loading and after a failed load or Cancel. Apply only after decoding succeeds; verify the node ID, name, hierarchy and TRS are unchanged, one Undo restores the old reference, one Redo restores the replacement, and save/reopen preserves the new path. Repeat with a nested nonuniformly scaled parent. |
+| Stale or invalid replacement | Enter a missing, unsupported, malformed, overlong, absolute, or traversal path. The scene/history/dirty state must be preserved on refusal. Stage a valid candidate, then edit the scene, change selection, undo, open another scene/project, or change mounts; the candidate must be discarded. Active placement/gizmo gestures block application. Replacing a node whose old spawn is still loading must retain its authored transform when either load completes. |
 | Source-root aliases and case | In the temporary parent, create a junction alias to a test project (`New-Item -ItemType Junction -Path (Join-Path $case 'project-alias') -Target $project`). Mount that alias as a source, then attempt to open `$project`; the editor must report overlap and create no scene file. On a normal case-insensitive volume, repeat by mounting a case-varied spelling of `$project` and opening its original spelling. If the parent permits distinct case-sensitive siblings, verify those distinct roots are allowed and record the filesystem behavior. |
 | Mount retarget while a switch is pending | Open a project and mount a separate temporary asset directory. Edit the current scene, request File > Open project... for another valid project and leave the Save/Discard/Cancel prompt open. From a second PowerShell, rename the mounted source directory to a sibling backup and create a junction at its original path targeting the selected target project. Choose Discard. The second open-time check must reject the overlap; the original document remains installed and dirty. Remove the test junction and restore the directory after recording results. Separately, retarget a mounted path to the active project's root; Refresh in the scene browser must show the source-overlap error and clear the stale list, then Ctrl+S must fail with the existing scene-file checksum unchanged and the scene still dirty. |
 | Source-directory and archive protection | Record a checksum for a mounted asset file before and after project open/save attempts. The editor refuses a project root that is equal to, inside, or contains a mounted directory or archive, and the source file remains byte-identical. Also verify a mounted archive file stored under the selected project is rejected before creating or replacing any scene. |
@@ -70,6 +72,23 @@ In a second temporary project, create a valid scene file referencing an asset pa
 ```
 
 Open that project and confirm the node remains with a missing-asset error. Create a separate temporary asset directory containing `verification\recover.obj` with invalid OBJ text, mount it at `/` with priority `10`, and click **Retry failed assets**; the node should remain failed and report the decode problem. Replace that file with a copy of `engine\content\models\cube.obj`, unmount and remount the directory (directory mounts use an indexed snapshot), then retry again. The model should load while the scene file still references `verification/recover.obj`. Keep the project and fixture until the test receipt is saved.
+
+### Deferred reference-replacement coverage
+
+The 2026-11-04 model-reference replacement implementation has not been built or executed. At the
+final testing stage, add portable regression cases for `ReplaceModelAsset`: missing node, group
+node, stale expected path, invalid/overlong/UTF-8/traversal replacement, serialized size-limit
+overflow, no-op, preservation of every other field under nested transforms, and undo/redo plus
+dirty/save round trips. Refusal must preserve
+the complete original document and history.
+
+On Windows, exercise the two replacement rows above and both asynchronous completion orders: a
+candidate becoming ready before the loader pump and between the pump and Apply. Verify one GPU
+upload per handle, unchanged authored transform, correct retained selection, and visible diagnostics
+on decode failure. Canceling a staged candidate shared by another instance must not cancel that
+instance's load. Ready-model reload after source edits/remounts is not implemented: document the
+session-cache behavior and restart before asserting changed source bytes were loaded. GPU residency,
+resource lifetime, and visual behavior still require their own observations.
 
 ## Record the result
 

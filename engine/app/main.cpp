@@ -239,6 +239,16 @@ struct Placement {
     std::string status;
 };
 
+// A decoded replacement is staged separately from the document. The loader owns its shared
+// cache entry; discarding this intent must not cancel a load used by another scene instance.
+struct ModelAssetReplacement {
+    std::string nodeId;
+    std::string originalPath;
+    std::string replacementPath;
+    asset::ModelHandle handle = 0;
+    uint64_t documentRevision = 0;
+};
+
 render::Float3 TransformPoint(render::Float3 point, const render::Float4x4& matrix) {
     return {point.x * matrix.m[0][0] + point.y * matrix.m[1][0] + point.z * matrix.m[2][0] + matrix.m[3][0],
             point.x * matrix.m[0][1] + point.y * matrix.m[1][1] + point.z * matrix.m[2][1] + matrix.m[3][1],
@@ -308,6 +318,13 @@ struct Editor {
     std::map<asset::ModelHandle, render::GpuModel> uploaded;   // one GPU copy per loaded model
     std::vector<asset::ModelHandle> requested;
     Placement placement;
+    std::optional<ModelAssetReplacement> modelAssetReplacement;
+    // Keep room beyond the schema limit so an oversized paste is rejected rather than silently
+    // truncated to a potentially valid maximum-length asset path.
+    char replacementAssetPath[scene::kMaxSceneAssetPathBytes * 2 + 1] = "";
+    std::string replacementInputNode;
+    std::string replacementInputSource;
+    std::string modelAssetReplacementStatus;
     std::string selectedAssetPath;
     std::string sceneStatus;
     bool inspectorUndoCaptured = false;
@@ -467,6 +484,89 @@ struct Editor {
         const asset::ModelHandle h = loader->Request(path, JobPriority::High);
         TrackRequestedModel(h);
         return h;
+    }
+
+    void CancelModelAssetReplacement(std::string reason) {
+        modelAssetReplacement.reset();
+        modelAssetReplacementStatus = std::move(reason);
+    }
+
+    void DiscardStaleModelAssetReplacement() {
+        if (!modelAssetReplacement) return;
+        const auto& edit = *modelAssetReplacement;
+        const auto* node = FindNode(edit.nodeId);
+        if (edit.documentRevision != documentRevision || selectedNode != edit.nodeId || !node ||
+            node->kind != scene::NodeKind::ModelInstance || node->assetPath != edit.originalPath)
+            CancelModelAssetReplacement("Scene or selection changed; load a replacement again.");
+    }
+
+    void StageModelAssetReplacement(std::string path) {
+        const auto* node = FindNode(selectedNode);
+        if (!node || node->kind != scene::NodeKind::ModelInstance) {
+            modelAssetReplacementStatus = "Select a model node to replace its asset.";
+            return;
+        }
+        if (transformGizmoGestureActive || placement.active || sceneActionGate.pending()) {
+            modelAssetReplacementStatus = "Finish the active edit, placement, or scene switch first.";
+            return;
+        }
+        if (path == node->assetPath) {
+            modelAssetReplacementStatus = "Choose a different asset path. Use Retry failed assets for the current path.";
+            return;
+        }
+        scene::Document candidate = document;
+        if (auto status = scene::ReplaceModelAsset(candidate, node->id, node->assetPath, path); !status) {
+            modelAssetReplacementStatus = "Replacement refused: " + status.error;
+            return;
+        }
+        if (asset::FormatOf(path) == asset::ModelFormat::Unknown || !vfs.Exists(path)) {
+            modelAssetReplacementStatus = "Replacement must be an available supported model in the mounted VFS.";
+            return;
+        }
+        const auto handle = RequestModel(path);
+        if (handle == 0) {
+            modelAssetReplacementStatus = "Could not request the replacement model; the current node is unchanged.";
+            return;
+        }
+        modelAssetReplacement = ModelAssetReplacement{node->id, node->assetPath, path, handle, documentRevision};
+        replacementInputNode = node->id;
+        replacementInputSource = node->assetPath;
+        std::snprintf(replacementAssetPath, sizeof(replacementAssetPath), "%s", path.c_str());
+        modelAssetReplacementStatus = "Replacement staged; Apply changes the reference only after decoding succeeds.";
+        showInspector = true;
+    }
+
+    void ApplyModelAssetReplacement() {
+        DiscardStaleModelAssetReplacement();
+        if (!modelAssetReplacement) return;
+        if (transformGizmoGestureActive || placement.active || sceneActionGate.pending()) {
+            modelAssetReplacementStatus = "Finish the active edit, placement, or scene switch first.";
+            return;
+        }
+        const ModelAssetReplacement edit = *modelAssetReplacement;
+        const auto model = loader->Get(edit.handle);
+        if (!model || !vfs.Exists(edit.replacementPath)) {
+            modelAssetReplacementStatus = "Replacement is not ready or is no longer mounted; the current node is unchanged.";
+            return;
+        }
+        const auto* world = World(edit.nodeId);
+        std::array<float, 3> boundsMin{}, boundsMax{};
+        if (!world || !render::TransformBounds(model->boundsMin, model->boundsMax, *world, boundsMin, boundsMax)) {
+            modelAssetReplacementStatus = "Replacement bounds cannot use the current transform; the current node is unchanged.";
+            return;
+        }
+        scene::Document candidate = document;
+        if (auto status = scene::ReplaceModelAsset(candidate, edit.nodeId, edit.originalPath,
+                                                   edit.replacementPath); !status) {
+            modelAssetReplacementStatus = "Replacement refused: " + status.error;
+            return;
+        }
+        if (auto status = CommitDocument(std::move(candidate)); !status) {
+            modelAssetReplacementStatus = "Replacement refused: " + status.error;
+            return;
+        }
+        CancelModelAssetReplacement("Model asset replaced. Undo restores the previous reference.");
+        SetHistoryStatus("Replaced model asset");
     }
 
     std::vector<asset::ModelHandle> FailedSceneAssetHandles() const {
@@ -657,6 +757,10 @@ struct Editor {
                 inst->handle = RequestModel(node.assetPath);
                 inst->gpu = 0;
                 inst->model.reset();
+                // Reference edits retain the authored transform, even if the old spawn was
+                // still waiting for its first load/automatic grounding.
+                inst->autoPlaceOnLoad = false;
+                inst->autoPlaceHistoryRevision = 0;
                 AttachCachedModel(*inst);
             }
             if (const auto it = worldByNode.find(node.id); it != worldByNode.end()) inst->world = it->second;
@@ -690,6 +794,8 @@ struct Editor {
             if (auto status = sceneHistory.RecordBefore(document); !status) return status;
         document = std::move(candidate);
         ++documentRevision;
+        if (modelAssetReplacement)
+            CancelModelAssetReplacement("Scene changed; load a replacement again.");
         worldByNode = std::move(worlds);
         RefreshInstances();
         sceneStatus = "Scene loaded";
@@ -1133,6 +1239,8 @@ struct Editor {
         contentDirectory.clear();
         contentFilter[0] = '\0';
         selectedAssetPath.clear();
+        if (modelAssetReplacement)
+            CancelModelAssetReplacement("Mounted assets changed; the staged replacement was discarded.");
         if (placement.active) CancelPlacement("Mounted assets changed; placement preview canceled");
         contentBrowserStatus = "Mounted assets changed; asset selection and placement preview were cleared.";
     }
@@ -1327,8 +1435,14 @@ struct Editor {
                                 std::any_of(instances.begin(), instances.end(),
                                             [&](const Instance& inst) { return inst.handle == h; });
             if (!needed) continue;
-            const render::GpuModel gpu = renderer->Upload(model);
-            uploaded[h] = gpu;
+            // A staged reference can attach a ready model before its completion is consumed.
+            // Reuse that upload instead of allocating a second GPU copy for the same handle.
+            render::GpuModel gpu = 0;
+            if (const auto it = uploaded.find(h); it != uploaded.end()) gpu = it->second;
+            if (!gpu) {
+                gpu = renderer->Upload(model);
+                if (gpu) uploaded[h] = gpu;
+            }
             std::vector<std::string> autoPlace;
             std::string firstLoadedNode;
             for (auto& inst : instances)
@@ -1457,6 +1571,7 @@ struct Editor {
     void DrawProjectOpenDialog();
     void DrawSceneChangeConfirmation(bool& quit);
     void DrawInspector();
+    void DrawModelAssetEditor();
     void DrawPlugins();
     void DrawLoader();
     void DrawStats();
@@ -2176,6 +2291,13 @@ void Editor::DrawContent() {
         ImGui::BeginDisabled(!canPlace);
         if (ImGui::Button("Place with click")) StartPlacement(selectedAssetPath);
         ImGui::EndDisabled();
+        ImGui::SameLine();
+        const auto* selectedModel = FindNode(selectedNode);
+        ImGui::BeginDisabled(!canPlace || !selectedModel ||
+            selectedModel->kind != scene::NodeKind::ModelInstance ||
+            transformGizmoGestureActive || placement.active || sceneActionGate.pending().has_value());
+        if (ImGui::Button("Replace selected model...")) StageModelAssetReplacement(selectedAssetPath);
+        ImGui::EndDisabled();
     }
     if (placement.active) {
         ImGui::SameLine();
@@ -2601,6 +2723,51 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
     ImGui::End();
 }
 
+void Editor::DrawModelAssetEditor() {
+    DiscardStaleModelAssetReplacement();
+    const auto* node = FindNode(selectedNode);
+    if (!node || node->kind != scene::NodeKind::ModelInstance) return;
+    if (replacementInputNode != node->id || replacementInputSource != node->assetPath) {
+        if (replacementInputNode != node->id) modelAssetReplacementStatus.clear();
+        replacementInputNode = node->id;
+        replacementInputSource = node->assetPath;
+        std::snprintf(replacementAssetPath, sizeof(replacementAssetPath), "%s", node->assetPath.c_str());
+    }
+    ImGui::SeparatorText("Model asset");
+    ImGui::TextWrapped("Current VFS path: %s", node->assetPath.c_str());
+    if (ImGui::InputText("Replacement VFS path", replacementAssetPath, sizeof(replacementAssetPath))) {
+        if (modelAssetReplacement)
+            CancelModelAssetReplacement("Replacement path edited; load it before applying.");
+        else
+            modelAssetReplacementStatus.clear();
+    }
+    const bool busy = transformGizmoGestureActive || placement.active || sceneActionGate.pending().has_value();
+    ImGui::BeginDisabled(busy || replacementAssetPath[0] == '\0');
+    if (ImGui::Button("Load replacement")) StageModelAssetReplacement(replacementAssetPath);
+    ImGui::EndDisabled();
+    if (modelAssetReplacement) {
+        // Copy intent before any button can replace/reset it or commit a new document.
+        const ModelAssetReplacement edit = *modelAssetReplacement;
+        const auto info = loader->Info(edit.handle);
+        const auto model = loader->Get(edit.handle);
+        ImGui::TextWrapped("Candidate: %s (%s)", edit.replacementPath.c_str(), asset::LoadStateName(info.state));
+        if (model)
+            ImGui::Text("Decoded: %zu mesh(es), %zu triangles", model->meshes.size(), model->triangleCount());
+        if (!info.error.empty()) ImGui::TextWrapped("Load error: %s", info.error.c_str());
+        ImGui::BeginDisabled(busy || !model);
+        if (ImGui::Button("Apply replacement")) ApplyModelAssetReplacement();
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel replacement"))
+            CancelModelAssetReplacement("Replacement canceled; the current reference is unchanged.");
+    }
+    if (!modelAssetReplacementStatus.empty()) ImGui::TextWrapped("%s", modelAssetReplacementStatus.c_str());
+    ImGui::TextWrapped("Choose a model in Content and use Replace selected model, or enter a normalized VFS path here. "
+                       "Apply preserves the node's name, hierarchy and transform and records one undo action. "
+                       "Ready model data is cached for this session; restart to reload an already loaded path after source edits. "
+                       "Asset files are read-only.");
+}
+
 void Editor::DrawInspector() {
     if (!ImGui::Begin("Inspector", &showInspector)) {
         inspectorUndoCaptured = false;
@@ -2700,6 +2867,7 @@ void Editor::DrawInspector() {
         ImGui::SliderFloat("metallic", &inst->material.metallic, 0, 1);
         ImGui::SliderFloat("roughness", &inst->material.roughness, 0.04f, 1);
     }
+    DrawModelAssetEditor();
     if (FindNode(selectedNode)) {
         if (ImGui::Button("Frame selection (F)")) FrameSelection();
         ImGui::SameLine();
@@ -2896,6 +3064,7 @@ void Editor::DrawSurface() {
 }
 
 void Editor::DrawUi(bool& quit) {
+    DiscardStaleModelAssetReplacement();
     if (showContent) DrawContent();
     if (showMounts) DrawMounts();
     if (showScene) DrawScene();
