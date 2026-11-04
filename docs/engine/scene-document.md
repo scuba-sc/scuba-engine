@@ -104,7 +104,11 @@ characters, and oversized queries are rejected and the full tree remains visible
 are used for selection and the Inspector edits local translation, local XYZ Euler rotation in degrees, and nonuniform scale. Euler
 angles are converted to normalized quaternions for the version 1 document format. Uniform scale
 step buttons multiply all local axes together and preserve their ratios. These edits participate in
-the same bounded undo history as other scene changes. The viewport shows screen-space hit handles
+the same bounded undo history as other scene changes. **Reset local transform** restores zero local
+translation, identity rotation, and unit scale as one reversible edit; it does not reset the parent
+node. World-space placement follows the reset local transform, so a nested node can move with its
+parent and a group's children can move with the group. The reset follows the usual dirty/save path
+and remains available for groups and models. The viewport shows screen-space hit handles
 for the selected node's world X, Y, and Z translation axes. Dragging an arrow moves the node only
 along that world axis; the result is transformed through the parent inverse before writing local
 translation, and the drag is one undo action. Ctrl+left-drag retains its ground-plane move behavior.

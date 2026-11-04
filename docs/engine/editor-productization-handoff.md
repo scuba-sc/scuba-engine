@@ -35,6 +35,11 @@ outliner, where selecting one clears isolation. Project/scene switches clear the
 session-only and has not received UI or Windows verification. Placement under a visible group keeps
 the filter; a root placement clears it so the new preview remains visible.
 
+The Inspector also has a **Reset local transform** action. It resets translation, rotation and scale
+together to their local identity values through one normal undo/dirty-state commit; nested parent
+transforms remain in effect, while the node's world placement and a group's children's placement may
+change. It is editor-source reviewed only and awaits the final UI and history checks.
+
 Ready models still use the existing session cache. Reference replacement does not implement source
 hot reload, mount-generation cache invalidation, or a bounded loader/GPU cache. An already loaded
 path may retain its old decoded bytes after a source edit/remount; the Inspector explains that an

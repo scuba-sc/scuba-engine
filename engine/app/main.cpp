@@ -494,6 +494,32 @@ struct Editor {
         sceneStatus = "Isolating the selected subtree in the viewport.";
     }
 
+    void ResetSelectedLocalTransform() {
+        if (sceneActionGate.pending() || transformGizmoGestureActive) {
+            sceneStatus = "Finish the active edit or scene switch before resetting the transform.";
+            return;
+        }
+        scene::Document candidate = document;
+        auto node = std::find_if(candidate.nodes.begin(), candidate.nodes.end(),
+                                 [&](const scene::Node& item) { return item.id == selectedNode; });
+        if (node == candidate.nodes.end()) {
+            sceneStatus = "Select a scene node before resetting its transform.";
+            return;
+        }
+        const scene::LocalTransform identity{};
+        if (node->localTransform == identity) {
+            sceneStatus = "The selected node already has an identity local transform.";
+            return;
+        }
+        node->localTransform = identity;
+        if (!CommitDocument(std::move(candidate))) return;
+        inspectorRotationDegrees = {};
+        inspectorRotationNode = selectedNode;
+        inspectorRotationInitialized = true;
+        inspectorRotationActive = false;
+        SetHistoryStatus("Reset local transform");
+    }
+
     Instance* FindNodeInstance(std::string_view id) {
         for (auto& inst : instances) if (inst.nodeId == id) return &inst;
         return nullptr;
@@ -2923,6 +2949,12 @@ void Editor::DrawInspector() {
         inspectorUndoCaptured = false;
         inspectorUndoNode.clear();
     }
+    ImGui::BeginDisabled(anyActive || transformGizmoGestureActive || sceneActionGate.pending().has_value());
+    if (ImGui::Button("Reset local transform")) ResetSelectedLocalTransform();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Resets this node's local translation, rotation and scale. Undo restores them.");
+    ImGui::EndDisabled();
+    inst = FindNodeInstance(selectedNode);
     if (inst) {
         ImGui::SeparatorText("Material (session only)");
         ImGui::ColorEdit3("base color", &inst->material.baseColor.x);
