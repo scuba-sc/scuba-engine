@@ -108,6 +108,13 @@ the same bounded undo history as other scene changes. The viewport shows screen-
 for the selected node's world X, Y, and Z translation axes. Dragging an arrow moves the node only
 along that world axis; the result is transformed through the parent inverse before writing local
 translation, and the drag is one undo action. Ctrl+left-drag retains its ground-plane move behavior.
+The Scene panel can **Isolate selected subtree** in the viewport for closer editing. Scene-node
+rendering, model picking, framing and transform gizmos apply the selected node's subtree filter; the scene
+document, project file, undo history and asset sources do not change. Hidden nodes remain visible in
+the outliner with an explanation, and selecting one clears the filter. Project and scene switches
+clear isolation. Placement under a visible group keeps the filter; a root placement clears it so the
+preview remains visible. This session-only UI has not been built or visually validated on Windows.
+
 The Scene panel switches the viewport gizmo between Move, Scale, and Rotate. Scale mode changes one
 positive local scale component per drag; handles follow the node's local rotation and full parent transform.
 Under a nonuniform parent those handles may not be perpendicular. Values outside the scene's

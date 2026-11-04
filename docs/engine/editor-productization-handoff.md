@@ -29,6 +29,12 @@ test, lint or validation script was run for this slice, per the requested testin
 SDK table, plugin ABI, renderer interface, game provider, or asset format changed. The
 [Windows checklist](windows-editor-verification.md) records the deferred portable and native cases.
 
+The Scene panel also offers **Isolate selected subtree**. The filter applies to viewport rendering,
+model picking, framing and gizmos; it does not edit or save the scene. Hidden nodes remain in the
+outliner, where selecting one clears isolation. Project/scene switches clear the filter. This is
+session-only and has not received UI or Windows verification. Placement under a visible group keeps
+the filter; a root placement clears it so the new preview remains visible.
+
 Ready models still use the existing session cache. Reference replacement does not implement source
 hot reload, mount-generation cache invalidation, or a bounded loader/GPU cache. An already loaded
 path may retain its old decoded bytes after a source edit/remount; the Inspector explains that an
@@ -53,7 +59,8 @@ More scene schema, storage, validation and failure behavior is in [Scene documen
 3. **Design geometry thumbnails on the validated renderer.** Reuse decoded model data, but keep GPU creation and destruction on the render thread. Define a bounded cache, cancellation and invalidation on VFS mount changes, fallback placeholders, and fence-safe texture retirement before adding UI previews. Add synthetic fixtures and verify resource lifetime/memory behavior; the current text tiles must remain an honest fallback.
 4. **Run broad acceptance last.** After the remaining scaffold work is complete, use the [Windows editor verification runbook](windows-editor-verification.md) for the full Windows build and interactive acceptance, including project create/open path and reparse behavior, save/discard/cancel, failed-open preservation, source-directory protection, scene round trip, model-reference replacement, outliner search/selection, browser, placement and gizmos. Keep project creation separate from mounted source trees and preserve the CLI path. Any live-game validation remains a separate owner-run gate with an exact game build, approved provider binary/hash and capability scope; use [Plugin integration](plugin-integration.md) to keep mock, host and live-provider evidence distinct. Earlier portable checks do not establish acceptance of this new slice.
 
-**Next local development slice:** inspect a mount-aware explicit reload for ready scene assets. It
+**Next local development slice:** review and test the viewport isolation paths, then inspect a
+mount-aware explicit reload for ready scene assets. It
 needs loader cache generations, shared-request ownership, and fence-safe retirement of superseded
 GPU models before it can safely replace the current restart requirement; a path-only cache purge is
 insufficient. Keep this within native editor ownership and leave SDK/provider contracts coordinated

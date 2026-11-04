@@ -315,6 +315,7 @@ struct Editor {
     uint32_t nextInstance = 1;
     uint64_t historyRevision = 0;
     std::string selectedNode;
+    std::optional<std::string> viewportIsolationRoot;
     std::map<asset::ModelHandle, render::GpuModel> uploaded;   // one GPU copy per loaded model
     std::vector<asset::ModelHandle> requested;
     Placement placement;
@@ -463,6 +464,34 @@ struct Editor {
             cursor = cursor->parentId ? FindNode(*cursor->parentId) : nullptr;
         }
         return false;
+    }
+
+    bool VisibleInViewport(std::string_view nodeId) const {
+        return !viewportIsolationRoot || IsDescendantOrSelf(nodeId, *viewportIsolationRoot);
+    }
+
+    void SelectSceneNode(std::string id) {
+        selectedNode = std::move(id);
+        if (viewportIsolationRoot && !selectedNode.empty() && !VisibleInViewport(selectedNode)) {
+            viewportIsolationRoot.reset();
+            sceneStatus = "Viewport isolation cleared to reveal the selected node.";
+        }
+    }
+
+    void ClearViewportIsolation() { viewportIsolationRoot.reset(); }
+
+    void ToggleViewportIsolation() {
+        if (viewportIsolationRoot) {
+            ClearViewportIsolation();
+            sceneStatus = "All viewport objects are visible.";
+            return;
+        }
+        if (!FindNode(selectedNode)) {
+            sceneStatus = "Select a scene node before isolating its subtree.";
+            return;
+        }
+        viewportIsolationRoot = selectedNode;
+        sceneStatus = "Isolating the selected subtree in the viewport.";
     }
 
     Instance* FindNodeInstance(std::string_view id) {
@@ -769,6 +798,7 @@ struct Editor {
             return !keep.contains(inst.nodeId);
         }), instances.end());
         if (!selectedNode.empty() && !FindNode(selectedNode)) selectedNode.clear();
+        if (viewportIsolationRoot && !FindNode(*viewportIsolationRoot)) ClearViewportIsolation();
     }
 
     Status UpdateDirtyState() {
@@ -794,6 +824,7 @@ struct Editor {
             if (auto status = sceneHistory.RecordBefore(document); !status) return status;
         document = std::move(candidate);
         ++documentRevision;
+        if (viewportIsolationRoot && !FindNode(*viewportIsolationRoot)) ClearViewportIsolation();
         if (modelAssetReplacement)
             CancelModelAssetReplacement("Scene changed; load a replacement again.");
         worldByNode = std::move(worlds);
@@ -875,7 +906,7 @@ struct Editor {
             sceneStatus = "Group creation refused: " + status.error;
             return;
         }
-        if (CommitDocument(std::move(candidate))) selectedNode = id;
+        if (CommitDocument(std::move(candidate))) SelectSceneNode(id);
     }
 
     void DuplicateSelected() {
@@ -895,7 +926,7 @@ struct Editor {
             return;
         }
         if (CommitDocument(std::move(candidate))) {
-            selectedNode = std::move(duplicateRootId);
+            SelectSceneNode(std::move(duplicateRootId));
             sceneStatus = "Subtree duplicated · unsaved";
         }
     }
@@ -1157,6 +1188,7 @@ struct Editor {
             sceneBrowserStatus = "Scene is open but its saved baseline could not be recorded: " + status.error;
             return;
         }
+        ClearViewportIsolation();
         selectedNode.clear();
         inspectorUndoCaptured = false;
         inspectorUndoNode.clear();
@@ -1191,7 +1223,7 @@ struct Editor {
             return;
         }
         if (!CommitDocument(std::move(candidate))) return;
-        selectedNode = id;
+        SelectSceneNode(id);
         if (Instance* inst = FindNodeInstance(id)) {
             inst->autoPlaceOnLoad = true;
             inst->autoPlaceHistoryRevision = historyRevision;
@@ -1220,7 +1252,12 @@ struct Editor {
         }
         if (const scene::Node* selected = FindNode(selectedNode); selected && selected->kind == scene::NodeKind::Group)
             placement.parentId = selected->id;
+        const bool clearedIsolation = viewportIsolationRoot &&
+            (!placement.parentId || !VisibleInViewport(*placement.parentId));
+        if (clearedIsolation) ClearViewportIsolation();
         placement.status = placement.model ? "Click the viewport to place · Esc cancels" : "Loading preview · Esc cancels";
+        if (clearedIsolation)
+            sceneStatus = "Viewport isolation cleared so the root placement preview remains visible.";
     }
 
     void CancelPlacement(std::string reason = "Placement canceled") {
@@ -1281,7 +1318,7 @@ struct Editor {
             return;
         }
         if (!CommitDocument(std::move(candidate))) return;
-        selectedNode = id;
+        SelectSceneNode(id);
         placement = {};
         sceneStatus = "Model placed · unsaved";
     }
@@ -1359,6 +1396,7 @@ struct Editor {
         projectRoot = std::move(prepared.root);
         documentDirty = std::move(prepared.dirty);
         sceneHistory.Clear();
+        ClearViewportIsolation();
         selectedNode.clear();
         inspectorUndoCaptured = false;
         inspectorUndoNode.clear();
@@ -1515,6 +1553,10 @@ struct Editor {
             sceneStatus = "Select a scene node before framing the viewport.";
             return;
         }
+        if (!VisibleInViewport(selected->id)) {
+            sceneStatus = "Select a node inside the isolated subtree before framing.";
+            return;
+        }
 
         std::vector<scene::ModelLocalBounds> loadedBounds;
         loadedBounds.reserve(instances.size());
@@ -1557,7 +1599,8 @@ struct Editor {
     std::vector<render::PickTarget> PickTargets() const {
         std::vector<render::PickTarget> targets;
         for (const auto& inst : instances)
-            if (inst.model) targets.push_back({inst.id, inst.model.get(), inst.world});
+            if (inst.model && VisibleInViewport(inst.nodeId))
+                targets.push_back({inst.id, inst.model.get(), inst.world});
         return targets;
     }
 
@@ -1999,7 +2042,7 @@ public:
                 const auto targets = e_.PickTargets();
                 const auto hit = render::Pick(e_.camera.ScreenRay(ev.x, ev.y, e_.ui.viewport()), targets);
                 const Instance* instance = hit ? e_.Find(hit->id) : nullptr;
-                e_.selectedNode = instance ? instance->nodeId : std::string{};
+                e_.SelectSceneNode(instance ? instance->nodeId : std::string{});
             }
             return ui::Reply::Release();
         case ui::InputKind::PointerCancel:
@@ -2377,6 +2420,17 @@ void Editor::DrawScene() {
     if (ImGui::RadioButton("Rotate rings", gizmoMode == TransformGizmoMode::Rotate))
         gizmoMode = TransformGizmoMode::Rotate;
     ImGui::EndDisabled();
+    ImGui::BeginDisabled(transformGizmoGestureActive || placement.active ||
+                         (!viewportIsolationRoot && !FindNode(selectedNode)));
+    const char* isolationLabel = viewportIsolationRoot ? "Show all viewport objects" : "Isolate selected subtree";
+    if (ImGui::Button(isolationLabel)) ToggleViewportIsolation();
+    ImGui::EndDisabled();
+    if (viewportIsolationRoot) {
+        const scene::Node* isolated = FindNode(*viewportIsolationRoot);
+        if (isolated) ImGui::TextDisabled("Viewport isolated to: %s", isolated->name.c_str());
+    } else {
+    ImGui::TextDisabled("Viewport shows the full scene.");
+    }
     ImGui::SeparatorText("Transform snapping");
     const auto constrainStep = [](float& value, float fallback, float minimum, float maximum) {
         if (!std::isfinite(value)) value = fallback;
@@ -2559,8 +2613,12 @@ void Editor::DrawScene() {
             if (selectedNode == node.id) flags |= ImGuiTreeNodeFlags_Selected;
             if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
             if (filteringOutliner && hasChildren) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-            const bool open = ImGui::TreeNodeEx("node", flags, "%s", node.name.c_str());
-            if (ImGui::IsItemClicked()) selectedNode = node.id;
+            const bool hiddenByIsolation = !VisibleInViewport(node.id);
+            const bool open = ImGui::TreeNodeEx("node", flags, "%s%s", node.name.c_str(),
+                                                 hiddenByIsolation ? "  [outside viewport isolate]" : "");
+            if (ImGui::IsItemClicked()) SelectSceneNode(node.id);
+            if (hiddenByIsolation && ImGui::IsItemHovered())
+                ImGui::SetTooltip("Select this node to reveal it and clear viewport isolation.");
             if (open && hasChildren) {
                 for (const auto* child : foundChildren->second)
                     if (isVisible(*child)) self(self, *child);
@@ -2578,8 +2636,12 @@ void Editor::DrawScene() {
                 label += failed ? "  (failed)" : "  (loading)";
                 loadError = info.error;
             } else if (!inst) label += "  (unavailable)";
+            const bool hiddenByIsolation = !VisibleInViewport(node.id);
+            if (hiddenByIsolation) label += "  [outside viewport isolate]";
             if (ImGui::Selectable(label.c_str(), selectedNode == node.id, ImGuiSelectableFlags_SpanAvailWidth))
-                selectedNode = node.id;
+                SelectSceneNode(node.id);
+            if (hiddenByIsolation && ImGui::IsItemHovered())
+                ImGui::SetTooltip("Select this node to reveal it and clear viewport isolation.");
             if (failed && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", loadError.c_str());
         }
         ImGui::PopID();
@@ -3100,6 +3162,7 @@ void Editor::DrawUi(bool& quit) {
 
 void Editor::DrawTransformGizmo() const {
     if (placement.active) return;  // PlacementTool has pointer precedence over every gizmo mode.
+    if (!VisibleInViewport(selectedNode)) return;
     TransformGizmoGeometry geometry;
     if (!BuildGizmoGeometry(geometry)) return;
     const auto viewport = ui.viewport();
@@ -3405,7 +3468,7 @@ int Run(const Args& args) {
         packet.view.projection = ed.camera.Projection(vp.w / std::max(vp.h, 1.0f));
         packet.view.eye = ed.camera.Eye();
         for (const auto& inst : ed.instances) {
-            if (!inst.gpu) continue;
+            if (!inst.gpu || !ed.VisibleInViewport(inst.nodeId)) continue;
             packet.items.push_back({inst.gpu, inst.world, inst.material, inst.nodeId == ed.selectedNode});
         }
         if (ed.placement.active && ed.placement.hasPreview && ed.placement.gpu) {
