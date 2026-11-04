@@ -37,7 +37,6 @@ namespace {
 using hostd::Json;
 
 constexpr size_t kMaxSceneIdBytes = 64;
-constexpr size_t kMaxNameBytes = 128;
 constexpr size_t kMaxAssetPathBytes = kMaxSceneAssetPathBytes;
 constexpr float kMaxTranslation = 10000000.0f;
 constexpr float kMinScale = 0.000001f;
@@ -94,7 +93,7 @@ bool ValidLabel(std::string_view value, size_t maxBytes) {
 
 std::string DuplicateNodeName(std::string_view name) {
     constexpr std::string_view suffix = " Copy";
-    if (name.size() + suffix.size() > kMaxNameBytes) return std::string(name);
+    if (name.size() + suffix.size() > kMaxSceneNameBytes) return std::string(name);
     return std::string(name) + std::string(suffix);
 }
 
@@ -233,7 +232,7 @@ bool ReadTransform(const Json* value, LocalTransform& out) {
 bool ReadNode(const Json& value, Node& out) {
     if (!ExactKeys(value, {"id", "name", "kind", "parent", "asset", "transform"})) return false;
     if (!ReadString(value.find("id"), kMaxSceneIdBytes, out.id) ||
-        !ReadString(value.find("name"), kMaxNameBytes, out.name)) return false;
+        !ReadString(value.find("name"), kMaxSceneNameBytes, out.name)) return false;
 
     const Json* kind = value.find("kind");
     if (!kind || !kind->is_string()) return false;
@@ -540,7 +539,7 @@ Status LocalTransformFromAffine(const render::Float4x4& matrix, LocalTransform& 
 Status Validate(const Document& document) {
     if (document.schemaVersion != kSceneSchemaVersion) return Fail("unsupported scene schema version");
     if (!ValidIdentifier(document.id)) return Fail("scene id must be a safe identifier of at most 64 ASCII characters");
-    if (!ValidLabel(document.name, kMaxNameBytes))
+    if (!ValidLabel(document.name, kMaxSceneNameBytes))
         return Fail("scene name is empty, too long, or contains a control character");
     if (document.nodes.size() > kMaxSceneNodes) return Fail("scene exceeds the node limit");
 
@@ -548,7 +547,7 @@ Status Validate(const Document& document) {
     byId.reserve(document.nodes.size());
     for (const auto& node : document.nodes) {
         if (!ValidIdentifier(node.id)) return Fail("node id must be a safe identifier of at most 64 ASCII characters");
-        if (!ValidLabel(node.name, kMaxNameBytes))
+        if (!ValidLabel(node.name, kMaxSceneNameBytes))
             return Fail("node name is empty, too long, or contains a control character");
         if (!byId.emplace(node.id, &node).second) return Fail("duplicate node id: " + node.id);
 
@@ -874,7 +873,7 @@ Status Deserialize(std::string_view json, Document& document) {
     Document decoded;
     decoded.schemaVersion = kSceneSchemaVersion;
     if (!ReadString(root.find("scene_id"), kMaxSceneIdBytes, decoded.id) ||
-        !ReadString(root.find("name"), kMaxNameBytes, decoded.name))
+        !ReadString(root.find("name"), kMaxSceneNameBytes, decoded.name))
         return Fail("scene id or name is missing or invalid");
     const Json* nodes = root.find("nodes");
     if (!nodes || !nodes->is_array() || nodes->size() > kMaxSceneNodes)

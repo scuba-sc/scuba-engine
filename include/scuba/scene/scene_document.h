@@ -22,6 +22,8 @@ inline constexpr uint32_t kSceneSchemaVersion = 1;
 inline constexpr size_t kMaxSceneNodes = 8192;
 inline constexpr size_t kMaxSceneFileBytes = 8u * 1024u * 1024u;
 inline constexpr size_t kMaxSceneAssetPathBytes = 512;
+// Shared UTF-8 byte limit for the document display name and node labels.
+inline constexpr size_t kMaxSceneNameBytes = 128;
 inline constexpr size_t kMaxHierarchyDepth = 256;
 inline constexpr float kMaxRotationDegrees = 36000.0f;
 

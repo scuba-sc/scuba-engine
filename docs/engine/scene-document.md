@@ -28,7 +28,8 @@ or model instances; model instances cannot contain children. IDs are lowercase A
 are not array positions, so reordering nodes does not change identity. The restricted alphabet
 avoids path separators, case-collision behavior, and reserved Windows device filenames.
 
-Names and paths must be valid UTF-8. Validation rejects duplicate IDs, missing or non-group parents,
+Scene and node names are limited to 128 UTF-8 bytes; names and paths must be valid UTF-8. Validation
+rejects duplicate IDs, missing or non-group parents,
 hierarchy cycles, nesting deeper than 256, invalid transforms, path traversal in asset references,
 more than 8,192 nodes, and files larger than 8 MiB. Rotations must be normalized quaternions; scale
 components must be finite and positive. Unknown fields and schema versions are rejected so a future
@@ -94,7 +95,16 @@ source separation. If the ID is invalid, already exists, the source root changed
 fails, the existing scene file and active document remain unchanged. A successful copy does not
 switch scenes, mark the active scene saved, change node selection/undo history, or clear its dirty
 state; the new scene appears in the browser and can be opened explicitly. Windows UI behavior remains
-pending.
+pending. Apply or cancel an unapplied scene display-name draft before creating a copy; this keeps the
+copy operation from changing the active document or obscuring that draft.
+
+The Scene panel can edit a saved scene's display name independently of its stable scene ID. Apply
+records one normal document-history edit and marks the scene unsaved; the project filename remains
+`<scene-id>.scene.json`. An unapplied name draft is included in the Save/Discard/Cancel scene-switch
+guard. Save applies the draft before writing; Discard drops it, and Cancel preserves it for further
+editing. Invalid names, serialized-size overflow, or a history refusal leave the current document
+unchanged. The name limit is 128 UTF-8 bytes, shared with node names. This UI path is source-reviewed
+only and still needs the Windows checklist.
 
 The Scene panel is a document-backed outliner. Its bounded search accepts up to 256 UTF-8 bytes and
 matches names, stable IDs, and model asset paths. It shows each match with its ancestor groups,

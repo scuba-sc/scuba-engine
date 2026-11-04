@@ -345,12 +345,18 @@ struct Editor {
     scene::OutlinerSearchResult outlinerFilterResults;
     Status outlinerFilterStatus;
     std::unordered_set<std::string> outlinerVisibleNodeIds;
-    char renameBuffer[129] = "";  // scene node names are capped at 128 UTF-8 bytes
+    char renameBuffer[scene::kMaxSceneNameBytes + 1] = "";
     std::string renameTarget;
     std::string renameSourceName;
     std::string reparentTarget;
     std::string reparentTargetNode;
     bool renameBufferDirty = false;
+    // Keep extra room so an over-limit paste is rejected by schema validation instead of silently truncated.
+    char sceneNameBuffer[scene::kMaxSceneNameBytes * 2 + 1] = "";
+    fs::path sceneNameBufferProjectRoot;
+    std::string sceneNameBufferSceneId;
+    std::string sceneNameBufferSource;
+    bool sceneNameBufferDirty = false;
     bool showSceneBrowser = false;
     char newSceneId[65] = "";
     char copiedSceneId[65] = "";
@@ -843,6 +849,39 @@ struct Editor {
         sceneStatus = std::string(action) + (documentDirty.dirty() ? " · unsaved changes" : " · matches saved scene");
     }
 
+    bool HasUnsavedSceneEdits() const {
+        return documentDirty.dirty() || sceneNameBufferDirty;
+    }
+
+    void ResetSceneNameDraft() {
+        sceneNameBuffer[0] = '\0';
+        sceneNameBufferProjectRoot.clear();
+        sceneNameBufferSceneId.clear();
+        sceneNameBufferSource.clear();
+        sceneNameBufferDirty = false;
+        if (sceneStatus.starts_with("Scene name refused"))
+            sceneStatus = "Scene name edit canceled";
+    }
+
+    Status ApplySceneNameDraft() {
+        if (!sceneNameBufferDirty) return Status::Ok();
+        if (!projectStore) return Status::Fail("open a project before changing a saved scene name");
+
+        scene::Document candidate = document;
+        candidate.name = sceneNameBuffer;
+        std::string encoded;
+        if (auto status = scene::Serialize(candidate, encoded); !status) {
+            sceneStatus = "Scene name refused: " + status.error;
+            return status;
+        }
+        if (auto status = CommitDocument(std::move(candidate)); !status) return status;
+
+        sceneNameBufferSource = document.name;
+        sceneNameBufferDirty = false;
+        SetHistoryStatus("Scene name changed");
+        return Status::Ok();
+    }
+
     Status InstallDocument(scene::Document candidate, bool recordUndo = false) {
         std::unordered_map<std::string, render::Float4x4> worlds;
         if (auto status = ResolveDocument(candidate, worlds); !status) return status;
@@ -962,6 +1001,7 @@ struct Editor {
             sceneStatus = "No project session. Open a project from File or launch with --project DIR to save.";
             return;
         }
+        if (auto status = ApplySceneNameDraft(); !status) return;
         const auto sources = MountedSourcePaths();
         if (auto status = projectStore->SaveIfUnchanged(
                 document, documentDirty.baselineJson(), sources); !status) {
@@ -1039,7 +1079,7 @@ struct Editor {
             return;
         }
         auto action = sceneActionGate.Request(
-            {scene::SceneActionKind::OpenProject, pathText}, documentDirty.dirty());
+            {scene::SceneActionKind::OpenProject, pathText}, HasUnsavedSceneEdits());
         if (action) CompletePendingSceneAction(*action);
         else pendingSceneConfirmation = true;
     }
@@ -1063,7 +1103,7 @@ struct Editor {
             return;
         }
         auto action = sceneActionGate.Request(
-            {scene::SceneActionKind::CreateProject, pathText}, documentDirty.dirty());
+            {scene::SceneActionKind::CreateProject, pathText}, HasUnsavedSceneEdits());
         if (action) CompletePendingSceneAction(*action);
         else pendingSceneConfirmation = true;
     }
@@ -1072,13 +1112,13 @@ struct Editor {
         if (!projectStore) return;
         if (sceneId.empty() || sceneId == document.id) return;
         auto action = sceneActionGate.Request({scene::SceneActionKind::Open, std::move(sceneId)},
-                                              documentDirty.dirty());
+                                              HasUnsavedSceneEdits());
         if (action) CompletePendingSceneAction(*action);
         else pendingSceneConfirmation = true;
     }
 
     void RequestQuit(bool& quit) {
-        auto action = sceneActionGate.Request({scene::SceneActionKind::Quit, {}}, documentDirty.dirty());
+        auto action = sceneActionGate.Request({scene::SceneActionKind::Quit, {}}, HasUnsavedSceneEdits());
         if (action) CompletePendingSceneAction(*action, &quit);
         else pendingSceneConfirmation = true;
     }
@@ -1099,7 +1139,7 @@ struct Editor {
             return;
         }
         auto action = sceneActionGate.Request({scene::SceneActionKind::Create, std::move(candidate.id)},
-                                              documentDirty.dirty());
+                                              HasUnsavedSceneEdits());
         if (action) CompletePendingSceneAction(*action);
         else pendingSceneConfirmation = true;
     }
@@ -1107,6 +1147,10 @@ struct Editor {
     void RequestSaveSceneCopy(std::string sceneId) {
         if (!projectStore) {
             sceneBrowserStatus = "Open a project before saving a scene copy.";
+            return;
+        }
+        if (sceneNameBufferDirty) {
+            sceneBrowserStatus = "Apply or cancel the scene-name edit before saving a copy.";
             return;
         }
         scene::Document copy;
@@ -1221,6 +1265,7 @@ struct Editor {
         renameTarget.clear();
         renameSourceName.clear();
         renameBufferDirty = false;
+        ResetSceneNameDraft();
         reparentTarget.clear();
         reparentTargetNode.clear();
         CancelPlacement("Scene changed");
@@ -1432,6 +1477,7 @@ struct Editor {
         renameTarget.clear();
         renameSourceName.clear();
         renameBufferDirty = false;
+        ResetSceneNameDraft();
         reparentTarget.clear();
         reparentTargetNode.clear();
         CancelPlacement("Project changed");
@@ -2433,8 +2479,47 @@ void Editor::DrawMounts() {
 
 void Editor::DrawScene() {
     if (!ImGui::Begin("Scene", &showScene)) { ImGui::End(); return; }
-    if (projectStore) ImGui::TextWrapped("Project: %s  ·  scene: %s", projectRoot.generic_string().c_str(), document.id.c_str());
-    else ImGui::TextDisabled("In-memory scene · use File > Open project to save in a project");
+    if (projectStore) {
+        ImGui::TextWrapped("Project: %s  ·  scene: %s (%s)", projectRoot.generic_string().c_str(),
+                           document.name.c_str(), document.id.c_str());
+        if (sceneNameBufferProjectRoot != projectRoot || sceneNameBufferSceneId != document.id) {
+            std::snprintf(sceneNameBuffer, sizeof(sceneNameBuffer), "%s", document.name.c_str());
+            sceneNameBufferProjectRoot = projectRoot;
+            sceneNameBufferSceneId = document.id;
+            sceneNameBufferSource = document.name;
+            sceneNameBufferDirty = false;
+        } else if (sceneNameBufferSource != document.name) {
+            if (sceneNameBufferDirty) {
+                // Preserve the user's draft across Undo/Redo of an earlier name edit. Cancel
+                // should restore the newly current document name, and Apply targets that version.
+                sceneNameBufferSource = document.name;
+                sceneNameBufferDirty = std::string_view(sceneNameBuffer) !=
+                                       std::string_view(sceneNameBufferSource);
+            } else {
+                std::snprintf(sceneNameBuffer, sizeof(sceneNameBuffer), "%s", document.name.c_str());
+                sceneNameBufferSource = document.name;
+            }
+        }
+        ImGui::SeparatorText("Scene identity");
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputTextWithHint("##scene-display-name", "Scene display name",
+                                     sceneNameBuffer, sizeof(sceneNameBuffer)))
+            sceneNameBufferDirty = std::string_view(sceneNameBuffer) != std::string_view(sceneNameBufferSource);
+        ImGui::BeginDisabled(!sceneNameBufferDirty);
+        if (ImGui::Button("Apply scene name")) ApplySceneNameDraft();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel name edit")) {
+            std::snprintf(sceneNameBuffer, sizeof(sceneNameBuffer), "%s", sceneNameBufferSource.c_str());
+            sceneNameBufferDirty = false;
+            if (sceneStatus.starts_with("Scene name refused"))
+                sceneStatus = "Scene name edit canceled";
+        }
+        ImGui::EndDisabled();
+        if (sceneNameBufferDirty)
+            ImGui::TextDisabled("Unapplied name edit · Save or switch will ask how to handle it.");
+    } else {
+        ImGui::TextDisabled("In-memory scene · use File > Open project to save in a project");
+    }
     ImGui::SeparatorText("Viewport gizmo");
     ImGui::BeginDisabled(transformGizmoGestureActive);
     if (ImGui::RadioButton("Move axes", gizmoMode == TransformGizmoMode::Move))
@@ -2505,7 +2590,7 @@ void Editor::DrawScene() {
     if (projectStore) {
         if (ImGui::Button("Save scene")) SaveScene();
         ImGui::SameLine();
-        ImGui::TextUnformatted(documentDirty.dirty() ? "Unsaved" : "Saved");
+        ImGui::TextUnformatted(HasUnsavedSceneEdits() ? "Unsaved" : "Saved");
     }
     if (ImGui::Button("Browse scenes")) OpenSceneBrowser();
     if (ImGui::Button("Add group")) AddGroup();
@@ -2690,7 +2775,8 @@ void Editor::DrawSceneBrowser() {
     ImGui::BeginChild("project-scenes", {0, 180}, ImGuiChildFlags_Borders);
     if (projectScenes.empty()) ImGui::TextDisabled("No saved scenes in this project.");
     for (const auto& id : projectScenes) {
-        const std::string label = id == document.id ? id + "  (current)" : id;
+        const std::string label = id == document.id
+            ? document.name + "  (" + id + ", current)" : id;
         if (ImGui::Selectable(label.c_str(), selectedProjectScene == id)) selectedProjectScene = id;
     }
     ImGui::EndChild();
@@ -2711,7 +2797,9 @@ void Editor::DrawSceneBrowser() {
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##copy-scene-id", "new scene ID (for example, hangar-variant)",
                              copiedSceneId, sizeof(copiedSceneId));
-    ImGui::BeginDisabled(copiedSceneId[0] == '\0');
+    if (sceneNameBufferDirty)
+        ImGui::TextDisabled("Apply or cancel the scene-name edit before saving a copy.");
+    ImGui::BeginDisabled(copiedSceneId[0] == '\0' || sceneNameBufferDirty);
     if (ImGui::Button("Save scene copy")) RequestSaveSceneCopy(copiedSceneId);
     ImGui::EndDisabled();
     if (!sceneBrowserStatus.empty()) ImGui::TextWrapped("%s", sceneBrowserStatus.c_str());
@@ -2770,19 +2858,19 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
                                pending->kind == scene::SceneActionKind::CreateProject;
     const bool creatingProject = pending->kind == scene::SceneActionKind::CreateProject;
     if (quitting)
-        ImGui::TextWrapped("Scene %s has unsaved changes. Save them before quitting?", document.id.c_str());
+        ImGui::TextWrapped("Scene %s has unsaved edits. Save them before quitting?", document.id.c_str());
     else if (projectChange && creatingProject)
-        ImGui::TextWrapped("Scene %s has unsaved changes. Save them before creating a new project?", document.id.c_str());
+        ImGui::TextWrapped("Scene %s has unsaved edits. Save them before creating a new project?", document.id.c_str());
     else if (projectChange)
-        ImGui::TextWrapped("Scene %s has unsaved changes. Save them before opening another project?", document.id.c_str());
+        ImGui::TextWrapped("Scene %s has unsaved edits. Save them before opening another project?", document.id.c_str());
     else
-        ImGui::TextWrapped("Scene %s has unsaved changes. Save them before switching?", document.id.c_str());
+        ImGui::TextWrapped("Scene %s has unsaved edits. Save them before switching?", document.id.c_str());
     ImGui::Separator();
     const char* saveLabel = quitting ? "Save and quit" : "Save and continue";
     ImGui::BeginDisabled(!projectStore.has_value());
     if (ImGui::Button(saveLabel)) {
         SaveScene();
-        auto action = sceneActionGate.Resolve(scene::SceneActionChoice::Save, !documentDirty.dirty());
+        auto action = sceneActionGate.Resolve(scene::SceneActionChoice::Save, !HasUnsavedSceneEdits());
         if (action) {
             CompletePendingSceneAction(*action, &quit);
             ImGui::CloseCurrentPopup();
@@ -2790,8 +2878,9 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    const char* discardLabel = quitting ? "Discard changes and quit" : "Discard changes and continue";
+    const char* discardLabel = quitting ? "Discard edits and quit" : "Discard edits and continue";
     if (ImGui::Button(discardLabel)) {
+        ResetSceneNameDraft();
         auto action = sceneActionGate.Resolve(scene::SceneActionChoice::Discard);
         if (action) CompletePendingSceneAction(*action, &quit);
         ImGui::CloseCurrentPopup();
@@ -2803,9 +2892,10 @@ void Editor::DrawSceneChangeConfirmation(bool& quit) {
     }
     if (!projectStore && (quitting || projectChange))
         ImGui::TextWrapped("This in-memory scene has no project file; Save is unavailable. Choose Discard or Cancel.");
-    else if (!documentDirty.dirty() && sceneActionGate.pending())
+    else if (!HasUnsavedSceneEdits() && sceneActionGate.pending())
         ImGui::TextWrapped("Save completed; the scene switch is waiting to finish.");
-    else if (sceneStatus.starts_with("Save failed") || sceneStatus.starts_with("Saved, but"))
+    else if (sceneStatus.starts_with("Save failed") || sceneStatus.starts_with("Saved, but") ||
+             sceneStatus.starts_with("Scene name refused") || sceneStatus.starts_with("Edit refused"))
         ImGui::TextWrapped("%s", sceneStatus.c_str());
     ImGui::EndPopup();
     ImGui::End();
@@ -3566,7 +3656,7 @@ int Run(const Args& args) {
         std::fprintf(stderr, "scuba-engine: %d frame(s), %zu instance(s), %d error(s) -> exit %d\n", frame, ed.instances.size(), gErrors.load(), code);
     }
 
-    if (ed.documentDirty.dirty())
+    if (ed.HasUnsavedSceneEdits())
         log::Warn("scene", std::string(ed.projectStore ? "unsaved scene changes were not saved: "
                                                       : "in-memory scene changes were discarded: ") + ed.document.id);
     if (ed.netSandbox && !ed.netSandbox->Shutdown())
