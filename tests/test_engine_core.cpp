@@ -1029,6 +1029,56 @@ scene::Document SceneFixture() {
     return document;
 }
 
+void TestSceneDisplayName() {
+    const auto original = SceneFixture();
+    CHECK(original.name == "Synthetic Hangar");
+    std::string encoded;
+    CHECK(scene::Serialize(original, encoded).ok());
+    scene::Document decoded;
+    CHECK(scene::Deserialize(encoded, decoded).ok());
+    CHECK(decoded.name == original.name);
+    CHECK(decoded == original);
+
+    auto maximumLength = original;
+    maximumLength.name.assign(scene::kMaxSceneNameBytes, 'n');
+    CHECK(scene::Validate(maximumLength).ok());
+    std::string maximumLengthJson;
+    CHECK(scene::Serialize(maximumLength, maximumLengthJson).ok());
+    scene::Document maximumLengthDecoded;
+    CHECK(scene::Deserialize(maximumLengthJson, maximumLengthDecoded).ok());
+    CHECK(maximumLengthDecoded.name == maximumLength.name);
+
+    auto overLimit = original;
+    overLimit.name.assign(scene::kMaxSceneNameBytes + 1, 'n');
+    CHECK(!scene::Validate(overLimit).ok());
+    std::string preservedOutput = "caller output stays intact";
+    CHECK(!scene::Serialize(overLimit, preservedOutput).ok());
+    CHECK(preservedOutput == "caller output stays intact");
+    const std::string overLimitJson =
+        "{\"format\":\"scuba.scene\",\"schema_version\":1,\"scene_id\":\"name-limit\",\"name\":\"" +
+        std::string(scene::kMaxSceneNameBytes + 1, 'n') + "\",\"nodes\":[]}";
+    auto preservedDocument = original;
+    CHECK(!scene::Deserialize(overLimitJson, preservedDocument).ok());
+    CHECK(preservedDocument == original);
+
+    auto renamed = original;
+    renamed.name = "Renamed Hangar";
+    scene::DocumentHistory history;
+    CHECK(history.RecordBefore(original).ok());
+    scene::Document undoResult;
+    CHECK(history.Undo(renamed, undoResult).ok());
+    CHECK(undoResult == original && undoResult.name == original.name);
+    scene::Document redoResult;
+    CHECK(history.Redo(undoResult, redoResult).ok());
+    CHECK(redoResult == renamed && redoResult.name == renamed.name);
+
+    scene::DocumentDirtyState dirty;
+    CHECK(dirty.SetBaseline(original, true).ok());
+    CHECK(dirty.Update(renamed).ok() && dirty.dirty());
+    CHECK(dirty.Update(undoResult).ok() && !dirty.dirty());
+    CHECK(dirty.Update(redoResult).ok() && dirty.dirty());
+}
+
 void TestSceneDocument(const fs::path& root) {
     auto document = SceneFixture();
     CHECK(scene::Validate(document).ok());
@@ -2558,6 +2608,7 @@ int main() {
     TestPicking();
     TestTransformGizmoMath();
     TestSceneDocument(root);
+    TestSceneDisplayName();
     std::error_code ec;
     fs::remove_all(root, ec);
     return CheckExit("test_engine_core");
