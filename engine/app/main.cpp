@@ -884,6 +884,11 @@ struct Editor {
     }
 
     Status InstallDocument(scene::Document candidate, bool recordUndo = false) {
+        // Keep every accepted in-memory document serializable. Otherwise a locally edited label
+        // can pass structural validation yet expand past the scene-file limit when JSON-escaped,
+        // leaving both Save and the history snapshots unable to represent the current state.
+        std::string persistenceCheck;
+        if (auto status = scene::Serialize(candidate, persistenceCheck); !status) return status;
         std::unordered_map<std::string, render::Float4x4> worlds;
         if (auto status = ResolveDocument(candidate, worlds); !status) return status;
         if (recordUndo)
@@ -2045,6 +2050,20 @@ public:
             undoCaptured_ = false;
             draggedNode_.clear();
             return wasDragging ? ui::Reply::Release() : ui::Reply::Unhandled();
+        }
+        if (ev.kind == ui::InputKind::KeyDown && dragging_) {
+            if (ev.key == ImGuiKey_Escape) {
+                const bool keptPartialEdit = undoCaptured_;
+                dragging_ = false;
+                undoCaptured_ = false;
+                draggedNode_.clear();
+                e_.sceneStatus = keptPartialEdit
+                    ? "Move drag interrupted; last valid position kept · undo available"
+                    : "Move drag canceled · no edit applied";
+                return ui::Reply::Release();
+            }
+            e_.sceneStatus = "Finish or cancel the active move drag before using editor shortcuts";
+            return ui::Reply::Handled();
         }
         if (ev.kind == ui::InputKind::PointerDown && ev.button == ui::PointerButton::Left && ev.ctrl) {
             const scene::Node* selected = e_.FindNode(e_.selectedNode);

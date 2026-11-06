@@ -1170,8 +1170,7 @@ void TestSceneAssetReplacement() {
     }
     std::string initialLargeJson;
     CHECK(scene::Serialize(nearFileLimit, initialLargeJson).ok());
-    constexpr size_t kReplacementGrowth = scene::kMaxSceneAssetPathBytes - 1;
-    constexpr size_t kTargetJsonSize = scene::kMaxSceneFileBytes - (kReplacementGrowth - 1);
+    constexpr size_t kTargetJsonSize = scene::kMaxSceneFileBytes - 64;
     CHECK(initialLargeJson.size() < kTargetJsonSize);
     if (initialLargeJson.size() < kTargetJsonSize) {
         size_t remainingGrowth = kTargetJsonSize - initialLargeJson.size();
@@ -1196,6 +1195,17 @@ void TestSceneAssetReplacement() {
         CHECK(!scene::ReplaceModelAsset(nearFileLimit, replacementNodeId, "a",
                                         std::string(scene::kMaxSceneAssetPathBytes, 'b')).ok());
         CHECK(nearFileLimit == nearLimitBefore);
+
+        // A bounded raw label can still make a document unpersistable after JSON escaping.
+        // InstallDocument must reject this candidate before it replaces the live document.
+        auto escapedLabelCandidate = nearFileLimit;
+        escapedLabelCandidate.name.assign(scene::kMaxSceneNameBytes, '\\');
+        CHECK(scene::Validate(escapedLabelCandidate).ok());
+        std::string escapedLabelJson;
+        CHECK(!scene::Serialize(escapedLabelCandidate, escapedLabelJson).ok());
+        scene::DocumentHistory oversizedHistory;
+        CHECK(!oversizedHistory.RecordBefore(escapedLabelCandidate).ok());
+        CHECK(oversizedHistory.retainedEntries() == 0 && oversizedHistory.retainedBytes() == 0);
     }
 }
 
