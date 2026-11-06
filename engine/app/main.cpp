@@ -59,6 +59,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -400,7 +401,7 @@ struct Editor {
         return paths;
     }
 
-    Status MountAssetSource(const fs::path& path, const std::string& mountPoint, int priority) {
+    Status MountAssetSource(const fs::path& path, const std::string& targetMountPoint, int priority) {
         std::error_code ec;
         const fs::path canonical = fs::canonical(path, ec);
         if (ec) return Status::Fail("asset source cannot be resolved: " + ec.message());
@@ -414,7 +415,7 @@ struct Editor {
         }
 
         vfs::MountId id = 0;
-        if (auto status = MountPath(vfs, canonical, mountPoint, priority, &id); !status) return status;
+        if (auto status = MountPath(vfs, canonical, targetMountPoint, priority, &id); !status) return status;
         mountedSources.emplace(id, MountedSource{canonical, directory});
         return Status::Ok();
     }
@@ -2749,7 +2750,8 @@ void Editor::DrawScene() {
             } else if (!inst) label += "  (unavailable)";
             const bool hiddenByIsolation = !VisibleInViewport(node.id);
             if (hiddenByIsolation) label += "  [outside viewport isolate]";
-            if (ImGui::Selectable(label.c_str(), selectedNode == node.id, ImGuiSelectableFlags_SpanAvailWidth))
+            if (ImGui::Selectable(label.c_str(), selectedNode == node.id, ImGuiSelectableFlags_None,
+                                  ImVec2(-FLT_MIN, 0.0f)))
                 SelectSceneNode(node.id);
             if (hiddenByIsolation && ImGui::IsItemHovered())
                 ImGui::SetTooltip("Select this node to reveal it and clear viewport isolation.");

@@ -160,7 +160,7 @@ std::vector<InputEvent> UiLayer::Events() {
         }
         mousePositionWasValid_ = false;
     }
-    for (ImGuiKey key : {ImGuiKey_F, ImGuiKey_Delete, ImGuiKey_Escape, ImGuiKey_G, ImGuiKey_S,
+    for (ImGuiKey key : {ImGuiKey_D, ImGuiKey_F, ImGuiKey_Delete, ImGuiKey_Escape, ImGuiKey_G, ImGuiKey_S,
                          ImGuiKey_Z, ImGuiKey_Y})
         if (ImGui::IsKeyPressed(key, false)) {
             InputEvent e = base;
