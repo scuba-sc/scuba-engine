@@ -103,8 +103,9 @@ records one normal document-history edit and marks the scene unsaved; the projec
 `<scene-id>.scene.json`. An unapplied name draft is included in the Save/Discard/Cancel scene-switch
 guard. Save applies the draft before writing; Discard drops it, and Cancel preserves it for further
 editing. Invalid names, serialized-size overflow, or a history refusal leave the current document
-unchanged. The name limit is 128 UTF-8 bytes, shared with node names. This UI path is source-reviewed
-only and still needs the Windows checklist.
+unchanged. The name limit is 128 UTF-8 bytes, shared with node names. Portable tests cover the
+schema limit, serialization round trip, failure atomicity and history/dirty-state behavior. The UI
+path remains source-reviewed and still needs the Windows checklist.
 
 The Scene panel is a document-backed outliner. Its bounded search accepts up to 256 UTF-8 bytes and
 matches names, stable IDs, and model asset paths. It shows each match with its ancestor groups,
@@ -283,9 +284,12 @@ invalidate ready models after a remount. Restart the editor to refresh an alread
 Failed paths can be retried using the existing loader behavior. A decoded candidate is not proof of
 GPU residency: rendering still goes through the existing asynchronous upload path on Apply.
 
-This reference-replacement slice has source and diff review only. Builds, tests, lint, Windows UI,
-renderer timing, save/reopen, and failure-path execution are deferred; see the added cases in
-[Windows editor verification](windows-editor-verification.md).
+The Linux Debug `engine_core` test covers this scene mutation's successful replacement, no-op,
+missing/group node, stale-reference and invalid-path refusals, the 8 MiB serialized-size boundary,
+preservation of other document fields, serialization round trip, and undo/redo plus dirty-state
+behavior. The full Linux CTest suite passed 97/97 on 2026-11-06. These portable checks do not
+exercise the asynchronous Inspector/Content UI, D3D12 uploads, save/reopen through the editor, or
+Windows behavior; those remain in [Windows editor verification](windows-editor-verification.md).
 
 Selection is editor-session state: opening a scene clears the previous selection; nodes can be
 selected from the outliner, and loaded models can also be selected in the viewport. The project

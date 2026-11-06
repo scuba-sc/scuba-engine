@@ -75,14 +75,14 @@ In a second temporary project, create a valid scene file referencing an asset pa
 
 Open that project and confirm the node remains with a missing-asset error. Create a separate temporary asset directory containing `verification\recover.obj` with invalid OBJ text, mount it at `/` with priority `10`, and click **Retry failed assets**; the node should remain failed and report the decode problem. Replace that file with a copy of `engine\content\models\cube.obj`, unmount and remount the directory (directory mounts use an indexed snapshot), then retry again. The model should load while the scene file still references `verification/recover.obj`. Keep the project and fixture until the test receipt is saved.
 
-### Deferred reference-replacement coverage
+### Portable reference-replacement coverage completed
 
-The 2026-11-04 model-reference replacement implementation has not been built or executed. At the
-final testing stage, add portable regression cases for `ReplaceModelAsset`: missing node, group
-node, stale expected path, invalid/overlong/UTF-8/traversal replacement, serialized size-limit
-overflow, no-op, preservation of every other field under nested transforms, and undo/redo plus
-dirty/save round trips. Refusal must preserve
-the complete original document and history.
+On 2026-11-06, Linux Debug `engine_core` covered `ReplaceModelAsset` success, no-op, missing and
+group nodes, stale expected path, empty/absolute/traversal/backslash/invalid-UTF-8/overlong paths,
+the 8 MiB serialized-size boundary, preservation of all other document fields under nested
+transforms, serialization round trip, undo/redo, and dirty-baseline behavior. The exact source
+branch's full registered Linux CTest suite passed 97/97. This is portable model coverage only; it
+does not validate the Windows editor or asynchronous renderer path.
 
 On Windows, exercise the two replacement rows above and both asynchronous completion orders: a
 candidate becoming ready before the loader pump and between the pump and Apply. Verify one GPU

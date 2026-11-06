@@ -1079,6 +1079,126 @@ void TestSceneDisplayName() {
     CHECK(dirty.Update(redoResult).ok() && dirty.dirty());
 }
 
+void TestSceneAssetReplacement() {
+    const auto original = SceneFixture();
+    auto replaced = original;
+    const std::string replacementPath = "content/models/replacement_ship.glb";
+    CHECK(scene::ReplaceModelAsset(replaced, "ship-01", "content/models/test_ship.glb",
+                                   replacementPath).ok());
+    CHECK(replaced.nodes.size() == original.nodes.size());
+    CHECK(replaced.nodes[0] == original.nodes[0]);
+    CHECK(replaced.nodes[1] == original.nodes[1]);
+    auto expected = original;
+    expected.nodes[2].assetPath = replacementPath;
+    CHECK(replaced == expected);
+
+    auto unchangedReference = original;
+    CHECK(scene::ReplaceModelAsset(unchangedReference, "ship-01", "content/models/test_ship.glb",
+                                   "content/models/test_ship.glb").ok());
+    CHECK(unchangedReference == original);
+
+    std::string encoded;
+    CHECK(scene::Serialize(replaced, encoded).ok());
+    scene::Document reopened;
+    CHECK(scene::Deserialize(encoded, reopened).ok());
+    CHECK(reopened == replaced);
+
+    scene::DocumentHistory history;
+    CHECK(history.RecordBefore(original).ok());
+    scene::Document undoResult;
+    CHECK(history.Undo(replaced, undoResult).ok());
+    CHECK(undoResult == original);
+    scene::Document redoResult;
+    CHECK(history.Redo(undoResult, redoResult).ok());
+    CHECK(redoResult == replaced);
+
+    scene::DocumentDirtyState dirty;
+    CHECK(dirty.SetBaseline(original, true).ok());
+    CHECK(dirty.Update(replaced).ok() && dirty.dirty());
+    CHECK(dirty.Update(undoResult).ok() && !dirty.dirty());
+    CHECK(dirty.Update(redoResult).ok() && dirty.dirty());
+
+    const auto checkAtomicFailure = [&](std::string_view nodeId, std::string_view expectedPath,
+                                        std::string candidatePath) {
+        auto unchanged = original;
+        const auto before = unchanged;
+        CHECK(!scene::ReplaceModelAsset(unchanged, nodeId, expectedPath,
+                                        std::move(candidatePath)).ok());
+        CHECK(unchanged == before);
+    };
+    checkAtomicFailure("missing-node", "content/models/test_ship.glb",
+                       "content/models/replacement_ship.glb");
+    checkAtomicFailure("bay-a", "", "content/models/replacement_ship.glb");
+    checkAtomicFailure("ship-01", "content/models/stale.glb",
+                       "content/models/replacement_ship.glb");
+    checkAtomicFailure("ship-01", "content/models/test_ship.glb", "");
+    checkAtomicFailure("ship-01", "content/models/test_ship.glb", "../outside.glb");
+    checkAtomicFailure("ship-01", "content/models/test_ship.glb", "/content/models/absolute.glb");
+    checkAtomicFailure("ship-01", "content/models/test_ship.glb", "content\\models\\backslash.glb");
+    checkAtomicFailure("ship-01", "content/models/test_ship.glb",
+                       std::string(scene::kMaxSceneAssetPathBytes + 1, 'a'));
+    checkAtomicFailure("ship-01", "content/models/test_ship.glb",
+                       std::string("content/models/invalid-") + static_cast<char>(0xff) + ".glb");
+
+    auto malformed = original;
+    malformed.nodes[2].localTransform.scale.x = 0.0f;
+    const auto malformedBefore = malformed;
+    CHECK(!scene::ReplaceModelAsset(malformed, "ship-01", "content/models/test_ship.glb",
+                                    "content/models/replacement_ship.glb").ok());
+    CHECK(malformed == malformedBefore);
+
+    scene::Document nearFileLimit;
+    nearFileLimit.id = "replacement-limit";
+    nearFileLimit.name.assign(scene::kMaxSceneNameBytes, 'n');
+    scene::Node root;
+    root.id = "g" + std::string(63, 'x');
+    root.name.assign(scene::kMaxSceneNameBytes, 'n');
+    root.kind = scene::NodeKind::Group;
+    nearFileLimit.nodes.push_back(root);
+    nearFileLimit.nodes.reserve(scene::kMaxSceneNodes);
+    std::string replacementNodeId;
+    for (size_t i = 0; i < scene::kMaxSceneNodes - 1; ++i) {
+        scene::Node node;
+        node.id = "n" + std::to_string(i);
+        node.id.resize(64, 'x');
+        node.name.assign(scene::kMaxSceneNameBytes, 'n');
+        node.kind = scene::NodeKind::ModelInstance;
+        node.parentId = root.id;
+        node.assetPath = "a";
+        if (i == scene::kMaxSceneNodes - 2) replacementNodeId = node.id;
+        nearFileLimit.nodes.push_back(std::move(node));
+    }
+    std::string initialLargeJson;
+    CHECK(scene::Serialize(nearFileLimit, initialLargeJson).ok());
+    constexpr size_t kReplacementGrowth = scene::kMaxSceneAssetPathBytes - 1;
+    constexpr size_t kTargetJsonSize = scene::kMaxSceneFileBytes - (kReplacementGrowth - 1);
+    CHECK(initialLargeJson.size() < kTargetJsonSize);
+    if (initialLargeJson.size() < kTargetJsonSize) {
+        size_t remainingGrowth = kTargetJsonSize - initialLargeJson.size();
+        for (size_t i = 1; i + 1 < nearFileLimit.nodes.size() && remainingGrowth > 0; ++i) {
+            auto& node = nearFileLimit.nodes[i];
+            const size_t growth = std::min(remainingGrowth, scene::kMaxSceneAssetPathBytes - 1);
+            node.assetPath.assign(growth + 1, 'a');
+            remainingGrowth -= growth;
+        }
+        for (auto& node : nearFileLimit.nodes) {
+            if (remainingGrowth == 0) break;
+            const size_t growth = std::min(remainingGrowth, scene::kMaxSceneNameBytes);
+            node.name.assign(growth, '\\');
+            node.name.append(scene::kMaxSceneNameBytes - growth, 'n');
+            remainingGrowth -= growth;
+        }
+        CHECK(remainingGrowth == 0);
+        std::string nearLimitJson;
+        CHECK(scene::Serialize(nearFileLimit, nearLimitJson).ok());
+        CHECK(nearLimitJson.size() == kTargetJsonSize);
+        const auto nearLimitBefore = nearFileLimit;
+        CHECK(!scene::ReplaceModelAsset(nearFileLimit, replacementNodeId, "a",
+                                        std::string(scene::kMaxSceneAssetPathBytes, 'b')).ok());
+        CHECK(nearFileLimit == nearLimitBefore);
+    }
+}
+
 void TestSceneDocument(const fs::path& root) {
     auto document = SceneFixture();
     CHECK(scene::Validate(document).ok());
@@ -2609,6 +2729,7 @@ int main() {
     TestTransformGizmoMath();
     TestSceneDocument(root);
     TestSceneDisplayName();
+    TestSceneAssetReplacement();
     std::error_code ec;
     fs::remove_all(root, ec);
     return CheckExit("test_engine_core");

@@ -24,16 +24,20 @@ discard the pending intent. The portable scene mutation also checks the expected
 The instance refresh clears pending spawn grounding when a reference changes, and the loader's
 completion pump reuses an existing GPU upload for that handle.
 
-**Status as of 2026-11-04:** implementation and manual source/diff review only. No configure, build,
-test, lint or validation script was run for this slice, per the requested testing deferral. No public
-SDK table, plugin ABI, renderer interface, game provider, or asset format changed. The
-[Windows checklist](windows-editor-verification.md) records the deferred portable and native cases.
+**Status as of 2026-11-06:** a Linux Debug configure/build completed with GCC 14.2 and CMake
+3.31.10, using checksum-verified local SDK/dependency archives. The `engine_core` CTest includes
+portable replacement-mutation checks for success, no-op, missing/group nodes, stale references,
+invalid and overlong paths, file-size refusal, unchanged metadata, serialization round trip, and
+undo/redo plus dirty-state behavior. The full registered Linux CTest suite passed 97/97. This does
+not compile the Win32/D3D12 editor UI or establish interactive, Windows, or game behavior. No public
+SDK table, plugin ABI, renderer interface, game provider, or asset format changed. See the
+[Windows checklist](windows-editor-verification.md) for the remaining native cases.
 
 The Scene panel now edits the document display name without changing the stable scene ID or file
 name. Applying it uses the normal history and dirty-state path; an unapplied draft participates in
-the scene-switch guard and is preserved on Cancel. This source-only slice has not been built or
-tested. The Windows checklist includes apply, undo/redo, save/reopen, invalid input and switch-prompt
-coverage.
+the scene-switch guard and is preserved on Cancel. Portable tests cover schema serialization,
+128-byte limits, refusal without output/document mutation, and undo/redo plus dirty-state behavior.
+The Windows checklist still needs apply, save/reopen, invalid UI input and switch-prompt coverage.
 
 The Scene panel also offers **Isolate selected subtree**. The filter applies to viewport rendering,
 model picking, framing and gizmos; it does not edit or save the scene. Hidden nodes remain in the
