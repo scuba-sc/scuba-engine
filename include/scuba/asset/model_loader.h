@@ -46,6 +46,9 @@ public:
 
     // A path already requested and not failed or cancelled returns the same handle.
     ModelHandle Request(std::string_view path, JobPriority priority = JobPriority::Normal);
+    // Retries a failed handle's path, reusing an in-flight or ready request for that path if one
+    // already exists. Non-failed valid handles are returned unchanged; unknown handles return 0.
+    ModelHandle Retry(ModelHandle failedHandle, JobPriority priority = JobPriority::Normal);
     void Cancel(ModelHandle handle);
 
     LoadInfo Info(ModelHandle handle) const;

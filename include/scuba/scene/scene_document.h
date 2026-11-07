@@ -1,0 +1,304 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#pragma once
+
+#include "scuba/core/status.h"
+#include "scuba/render/camera.h"
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace scuba::scene {
+
+inline constexpr uint32_t kSceneSchemaVersion = 1;
+inline constexpr size_t kMaxSceneNodes = 8192;
+inline constexpr size_t kMaxSceneFileBytes = 8u * 1024u * 1024u;
+inline constexpr size_t kMaxSceneAssetPathBytes = 512;
+// Shared UTF-8 byte limit for the document display name and node labels.
+inline constexpr size_t kMaxSceneNameBytes = 128;
+inline constexpr size_t kMaxHierarchyDepth = 256;
+inline constexpr float kMaxRotationDegrees = 36000.0f;
+
+struct Vec3 {
+    float x = 0;
+    float y = 0;
+    float z = 0;
+
+    friend bool operator==(const Vec3&, const Vec3&) = default;
+};
+
+struct Quaternion {
+    float x = 0;
+    float y = 0;
+    float z = 0;
+    float w = 1;
+
+    friend bool operator==(const Quaternion&, const Quaternion&) = default;
+};
+
+struct LocalTransform {
+    Vec3 translation;
+    Quaternion rotation;
+    Vec3 scale{1, 1, 1};
+
+    friend bool operator==(const LocalTransform&, const LocalTransform&) = default;
+};
+
+enum class NodeKind : uint8_t { Group, ModelInstance };
+
+struct Node {
+    std::string id;  // Persistent lowercase ID, never an array index.
+    std::string name;
+    NodeKind kind = NodeKind::Group;
+    std::optional<std::string> parentId;
+    std::string assetPath;  // Normalized VFS-relative path for ModelInstance; empty for Group.
+    LocalTransform localTransform;
+
+    friend bool operator==(const Node&, const Node&) = default;
+};
+
+struct Document {
+    uint32_t schemaVersion = kSceneSchemaVersion;
+    std::string id;  // Persistent lowercase filename-safe ID.
+    std::string name = "Untitled";
+    std::vector<Node> nodes;
+
+    friend bool operator==(const Document&, const Document&) = default;
+};
+
+struct ResolvedTransform {
+    std::string nodeId;
+    render::Float4x4 world;
+};
+
+struct ModelLocalBounds {
+    std::string nodeId;
+    std::array<float, 3> boundsMin{};
+    std::array<float, 3> boundsMax{};
+};
+
+struct ResolvedSubtreeBounds {
+    std::array<float, 3> boundsMin{};
+    std::array<float, 3> boundsMax{};
+    size_t loadedModelCount = 0;
+    size_t unavailableModelCount = 0;
+
+    bool hasBounds() const noexcept { return loadedModelCount != 0; }
+};
+
+// Scene asset paths use the engine VFS namespace. Project files are separate and are never
+// written through the read-only VFS.
+Status Validate(const Document& document);
+// Copies the in-memory scene to a distinct filename-safe ID. All scene content, including stable
+// node IDs, hierarchy, transforms, and asset references, is preserved; output is unchanged on error.
+Status MakeSceneCopy(const Document& source, std::string_view newSceneId, Document& copy);
+Status Serialize(const Document& document, std::string& json);
+// Confirms that the document can be installed as live editor state and later serialized within
+// the scene-file size limit, including expansion caused by JSON string escaping.
+Status ValidateForInstallation(const Document& document);
+Status Deserialize(std::string_view json, Document& document);
+inline constexpr size_t kMaxOutlinerSearchQueryBytes = 256;
+struct OutlinerSearchResult {
+    // IDs are copied from the document and remain stable across node-vector reordering.
+    // Both lists preserve document order; visibleNodeIds also contains matched nodes' ancestors.
+    std::vector<std::string> visibleNodeIds;
+    std::vector<std::string> matchingNodeIds;
+
+    friend bool operator==(const OutlinerSearchResult&, const OutlinerSearchResult&) = default;
+};
+// Empty query returns every node. A nonempty query searches names, stable IDs, and model asset
+// paths, returning the matches plus their ancestor groups so callers can retain hierarchy context.
+// ASCII letters match case-insensitively; non-ASCII UTF-8 bytes match exactly. Queries over the
+// byte limit, malformed UTF-8, or control characters fail safely without changing result.
+Status SearchOutliner(const Document& document, std::string_view query, OutlinerSearchResult& result);
+// Resolves row-vector local transforms in document order, composing child-local * parent-world.
+// Returns failure without changing the output if composition overflows or becomes singular.
+Status ResolveWorldTransforms(const Document& document, std::vector<ResolvedTransform>& transforms);
+// Computes the world-space union of loaded model bounds under the selected node, including its
+// own model bounds if it is an instance. Models without supplied bounds are counted unavailable.
+// Flat/point bounds are valid. Only supplied bounds for descendant models are used. Invalid nodes,
+// duplicate/invalid relevant bounds, or transform failures leave output unchanged; an empty/unloaded
+// subtree succeeds with hasBounds()==false.
+Status ComputeSubtreeBounds(const Document& document, std::string_view nodeId,
+                            std::span<const ModelLocalBounds> loadedBounds,
+                            ResolvedSubtreeBounds& bounds);
+// Intrinsic local XYZ Euler angles in degrees, applied X then Y then Z. Conversion is
+// transactional and rejects non-finite input; quaternion-to-Euler returns the canonical range.
+Status EulerXYZDegreesToQuaternion(Vec3 degrees, Quaternion& rotation);
+Status QuaternionToEulerXYZDegrees(Quaternion rotation, Vec3& degrees);
+// Applies a delta about one canonical local axis to a starting rotation. The row-vector TRS
+// convention composes the delta before the starting local rotation. Output is transactional.
+Status RotateLocalAxis(Quaternion startingRotation, size_t axis, float deltaRadians,
+                       Quaternion& rotation);
+// Multiplies all local scale axes by one positive factor, preserving their ratios. Refuses invalid
+// or out-of-range results without changing the transform.
+Status ScaleUniform(LocalTransform& transform, float factor);
+// Sets one positive, bounded local scale component. Other components are left unchanged.
+Status SetLocalScaleAxis(LocalTransform& transform, size_t axis, float value);
+// Places a unit-rotation/unit-scale model so its transformed bounds rest on world Z=0 at the
+// requested world XY. An optional resolved parent transform is respected; outputs remain unchanged
+// on failure. The caller validates that the parent is an allowed group node.
+Status ComputeGroundPlacement(std::optional<render::Float4x4> parentWorld, render::Float3 worldPoint,
+                              const std::array<float, 3>& modelBoundsMin,
+                              const std::array<float, 3>& modelBoundsMax, LocalTransform& local,
+                              render::Float4x4& world);
+// Transactional editor mutations. Appending requires a unique stable ID and a group parent (if any);
+// removing a group removes its descendants. The document is unchanged on failure.
+Status AddGroup(Document& document, std::string id, std::string name,
+                std::optional<std::string> parentId = std::nullopt,
+                LocalTransform transform = {});
+Status AddModelInstance(Document& document, std::string id, std::string name, std::string assetPath,
+                        std::optional<std::string> parentId = std::nullopt,
+                        LocalTransform transform = {});
+// Changes only a model node's VFS reference. The expected path guards a stale edit; IDs, names,
+// hierarchy and transforms are preserved. Invalid/missing/group nodes or invalid replacement paths
+// leave the document unchanged. The result must also fit the serialized scene size limit. Asset
+// existence/decoding is the editor caller's responsibility.
+Status ReplaceModelAsset(Document& document, std::string_view nodeId,
+                         std::string_view expectedAssetPath, std::string replacementAssetPath);
+Status RemoveSubtree(Document& document, std::string_view rootId);
+// Duplicates a node and its descendants atomically. The callback must supply a fresh persistent ID
+// for each cloned node; the duplicated root is shifted by localOffset and descendants retain their
+// local transforms. The output root ID and document are unchanged on failure.
+Status DuplicateSubtree(Document& document, std::string_view rootId,
+                        const std::function<std::string()>& generateId,
+                        std::string& duplicatedRootId, Vec3 localOffset = {1, 0, 0});
+Status RenameNode(Document& document, std::string_view nodeId, std::string name);
+// Reparents a node only under another group (or to the root). With preserveWorldTransform=true,
+// the operation refuses a result that cannot be represented by a non-sheared local TRS.
+Status ReparentNode(Document& document, std::string_view nodeId,
+                    std::optional<std::string> parentId, bool preserveWorldTransform = true);
+
+// Opens an existing, explicitly selected project directory. Scene files are direct children named
+// <scene-id>.scene.json; IDs are restricted to safe filename characters. Save replaces a scene
+// atomically, while Load rejects symlinked scene files and leaves its output unchanged on failure.
+class ProjectStore {
+public:
+    // Validates an existing project directory against the current mounted source paths, which may
+    // be files (archives) or directories. All paths are canonicalized before component comparison.
+    static Status ValidateSourceSeparation(const std::filesystem::path& projectRoot,
+                                           std::span<const std::filesystem::path> mountedSources);
+    // Validates a new project path without creating it. The target must not exist and its parent
+    // must be an existing directory. mountedSources may include archive files; directoryRoots are
+    // retained for later checks by the returned store.
+    static Status ValidateProjectCreateTarget(
+        const std::filesystem::path& projectRoot,
+        std::span<const std::filesystem::path> mountedSources,
+        std::span<const std::filesystem::path> readOnlyDirectoryRoots);
+    // Creates a new directory project with an empty, saved main scene. Staging and publication are
+    // same-parent and no-replace; existing targets are never opened or modified.
+    static std::optional<ProjectStore> CreateProject(
+        const std::filesystem::path& projectRoot,
+        std::span<const std::filesystem::path> mountedSources,
+        std::span<const std::filesystem::path> readOnlyDirectoryRoots,
+        Status* status = nullptr);
+    // Retains and rechecks these read-only directory roots. Callers with archive mounts should
+    // also pass the complete current source set to each later store operation below.
+    static std::optional<ProjectStore> Open(const std::filesystem::path& projectRoot,
+                                            std::span<const std::filesystem::path> readOnlyDirectoryRoots,
+                                            Status* status = nullptr);
+
+    // mountedSources may include directory and archive paths added after Open. The default keeps
+    // source compatibility; callers that manage mounts should pass their current complete set.
+    Status ListScenes(std::vector<std::string>& sceneIds,
+                      std::span<const std::filesystem::path> mountedSources = {}) const;
+    // Creates a new file atomically and refuses to replace an existing scene.
+    Status Create(const Document& document,
+                  std::span<const std::filesystem::path> mountedSources = {}) const;
+    Status Save(const Document& document,
+                std::span<const std::filesystem::path> mountedSources = {}) const;
+    // Saves only if the current file still matches the baseline captured when the scene was
+    // loaded/saved. With no baseline, this is a first-save create and refuses an existing file.
+    // This check protects against ordinary external edits; it is not a cross-process compare-and-
+    // swap, so concurrent writers can still race between the read and atomic replacement.
+    Status SaveIfUnchanged(const Document& document,
+                          const std::optional<std::string>& expectedBaselineJson,
+                          std::span<const std::filesystem::path> mountedSources = {}) const;
+    Status Load(std::string_view sceneId, Document& document,
+                std::span<const std::filesystem::path> mountedSources = {}) const;
+
+private:
+    ProjectStore(std::filesystem::path canonicalRoot, std::vector<std::filesystem::path> readOnlyRoots)
+        : root_(std::move(canonicalRoot)), readOnlyRoots_(std::move(readOnlyRoots)) {}
+    std::filesystem::path ScenePath(std::string_view sceneId) const;
+    Status CheckRootSeparation() const;
+
+    std::filesystem::path root_;
+    std::vector<std::filesystem::path> readOnlyRoots_;
+};
+
+// Platform-neutral state for the editor's saved/unsaved indicator. A failed update remains dirty;
+// a failed baseline encoding clears the old baseline and remains dirty, matching editor behavior.
+class DocumentDirtyState {
+public:
+    Status SetBaseline(const Document& document, bool exists);
+    Status Update(const Document& document);
+    bool dirty() const noexcept { return dirty_; }
+    const std::optional<std::string>& baselineJson() const noexcept { return baseline_; }
+
+private:
+    std::optional<std::string> baseline_;
+    bool dirty_ = false;
+};
+
+enum class SceneActionKind : uint8_t { Open, Create, OpenProject, CreateProject, Quit };
+enum class SceneActionChoice : uint8_t { Save, Discard, Cancel };
+
+struct SceneAction {
+    SceneActionKind kind = SceneActionKind::Open;
+    // A scene ID for Open/Create, a UTF-8 path for project actions, and empty for Quit.
+    std::string target;
+
+    friend bool operator==(const SceneAction&, const SceneAction&) = default;
+};
+
+// A small decision gate used by the editor before switching scenes/projects or quitting. Failed
+// saves leave the action pending; discard commits it; cancel clears it.
+class SceneActionGate {
+public:
+    std::optional<SceneAction> Request(SceneAction action, bool dirty);
+    std::optional<SceneAction> Resolve(SceneActionChoice choice, bool saveSucceeded = false);
+    const std::optional<SceneAction>& pending() const noexcept { return pending_; }
+
+private:
+    std::optional<SceneAction> pending_;
+};
+
+// Bounded snapshot history for editor scene mutations. Snapshots use the validated on-disk
+// representation so a history entry cannot exceed the scene file limit.
+class DocumentHistory {
+public:
+    static constexpr size_t kMaxEntries = 64;
+    static constexpr size_t kMaxBytes = 32u * 1024u * 1024u;
+
+    Status RecordBefore(const Document& document);
+    Status Undo(const Document& current, Document& restored);
+    Status Redo(const Document& current, Document& restored);
+    // Removes the most recent captured edit only when its before-snapshot matches the expected
+    // document. Used to roll back an explicitly canceled interactive transaction.
+    Status CancelLatestChange(const Document& expectedBefore, Document& restored);
+    void Clear() noexcept;
+
+    bool CanUndo() const noexcept { return !undo_.empty(); }
+    bool CanRedo() const noexcept { return !redo_.empty(); }
+    size_t retainedEntries() const noexcept { return undo_.size() + redo_.size(); }
+    size_t retainedBytes() const noexcept { return retainedBytes_; }
+
+private:
+    void Trim() noexcept;
+    void DropOldest(std::vector<std::string>& stack) noexcept;
+
+    std::vector<std::string> undo_;
+    std::vector<std::string> redo_;
+    size_t retainedBytes_ = 0;
+};
+
+}  // namespace scuba::scene

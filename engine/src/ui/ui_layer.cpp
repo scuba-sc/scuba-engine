@@ -6,7 +6,9 @@
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_internal.h"
+#include "ui/workspace_layout.h"
 
+#include <filesystem>
 #include <windows.h>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -51,7 +53,8 @@ Status UiLayer::Init(platform::Window& window, render::Renderer& renderer) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
-    io.IniFilename = "scuba-engine-layout.ini";
+    io.IniFilename = workspace::kLayoutIniFilename;
+    defaultWorkspacePending_ = workspace::ShouldBuildDefaultWorkspace(std::filesystem::path(io.IniFilename));
     Style();
     if (!ImGui_ImplWin32_Init(window.native())) return Status::Fail("ImGui_ImplWin32_Init failed");
     window.SetMessageHook(&ImGuiHook);
@@ -67,12 +70,19 @@ void UiLayer::Shutdown() {
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
     ready_ = false;
+    defaultWorkspacePending_ = false;
 }
 
 void UiLayer::BeginFrame() {
     renderer_->BeginUiFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
+    if (defaultWorkspacePending_) {
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        const ImGuiID dock = workspace::MainDockSpaceId(vp->ID);
+        if (workspace::BuildDefaultWorkspace(dock, vp->WorkPos, vp->WorkSize).root != 0)
+            defaultWorkspacePending_ = false;
+    }
     const ImGuiID dock = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
     if (ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dock)) {
         const ImVec2 origin = ImGui::GetMainViewport()->Pos;
@@ -100,7 +110,7 @@ render::UiFramePtr UiLayer::EndFrame() {
 bool UiLayer::pointerOverUi() const { return ImGui::GetIO().WantCaptureMouse; }
 bool UiLayer::keyboardToUi() const { return ImGui::GetIO().WantCaptureKeyboard; }
 
-std::vector<InputEvent> UiLayer::Events() const {
+std::vector<InputEvent> UiLayer::Events() {
     const ImGuiIO& io = ImGui::GetIO();
     std::vector<InputEvent> out;
     InputEvent base;
@@ -114,35 +124,44 @@ std::vector<InputEvent> UiLayer::Events() const {
     base.leftHeld = io.MouseDown[0];
     base.rightHeld = io.MouseDown[1];
     base.middleHeld = io.MouseDown[2];
-    if (!ImGui::IsMousePosValid(&io.MousePos)) return out;
-
-    static constexpr PointerButton kButtons[3] = {PointerButton::Left, PointerButton::Right, PointerButton::Middle};
-    for (int b = 0; b < 3; ++b)
-        if (io.MouseClicked[b]) {
+    if (ImGui::IsMousePosValid(&io.MousePos)) {
+        mousePositionWasValid_ = true;
+        static constexpr PointerButton kButtons[3] = {PointerButton::Left, PointerButton::Right, PointerButton::Middle};
+        for (int b = 0; b < 3; ++b)
+            if (io.MouseClicked[b]) {
+                InputEvent e = base;
+                e.kind = InputKind::PointerDown;
+                e.button = kButtons[b];
+                out.push_back(e);
+            }
+        if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0) {
             InputEvent e = base;
-            e.kind = InputKind::PointerDown;
-            e.button = kButtons[b];
+            e.kind = InputKind::PointerMove;
             out.push_back(e);
         }
-    if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0) {
-        InputEvent e = base;
-        e.kind = InputKind::PointerMove;
-        out.push_back(e);
-    }
-    if (io.MouseWheel != 0) {
-        InputEvent e = base;
-        e.kind = InputKind::Wheel;
-        e.wheel = io.MouseWheel;
-        out.push_back(e);
-    }
-    for (int b = 0; b < 3; ++b)
-        if (io.MouseReleased[b]) {
+        if (io.MouseWheel != 0) {
             InputEvent e = base;
-            e.kind = InputKind::PointerUp;
-            e.button = kButtons[b];
+            e.kind = InputKind::Wheel;
+            e.wheel = io.MouseWheel;
             out.push_back(e);
         }
-    for (ImGuiKey key : {ImGuiKey_F, ImGuiKey_Delete, ImGuiKey_Escape, ImGuiKey_G})
+        for (int b = 0; b < 3; ++b)
+            if (io.MouseReleased[b]) {
+                InputEvent e = base;
+                e.kind = InputKind::PointerUp;
+                e.button = kButtons[b];
+                out.push_back(e);
+            }
+    } else {
+        if (mousePositionWasValid_) {
+            InputEvent e = base;
+            e.kind = InputKind::PointerCancel;
+            out.push_back(e);
+        }
+        mousePositionWasValid_ = false;
+    }
+    for (ImGuiKey key : {ImGuiKey_D, ImGuiKey_F, ImGuiKey_Delete, ImGuiKey_Escape, ImGuiKey_G, ImGuiKey_S,
+                         ImGuiKey_Z, ImGuiKey_Y})
         if (ImGui::IsKeyPressed(key, false)) {
             InputEvent e = base;
             e.kind = InputKind::KeyDown;

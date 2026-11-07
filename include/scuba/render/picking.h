@@ -15,7 +15,7 @@ namespace scuba::render {
 struct PickTarget {
     uint32_t id = 0;                      // caller's id (scene instance)
     const asset::ModelData* model = nullptr;
-    Transform transform;
+    Float4x4 world;                        // row-vector local-to-world matrix; singular matrices are skipped
 };
 
 struct PickHit {

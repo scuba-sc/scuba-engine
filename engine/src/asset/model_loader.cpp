@@ -132,6 +132,18 @@ ModelHandle ModelLoader::Request(std::string_view path, JobPriority priority) {
     return h;
 }
 
+ModelHandle ModelLoader::Retry(ModelHandle failedHandle, JobPriority priority) {
+    std::string path;
+    {
+        std::lock_guard<std::mutex> hold(shared_->mutex);
+        const auto it = shared_->slots.find(failedHandle);
+        if (it == shared_->slots.end()) return 0;
+        if (it->second.info.state != LoadState::Failed) return failedHandle;
+        path = it->second.info.path;
+    }
+    return Request(path, priority);
+}
+
 void ModelLoader::Cancel(ModelHandle handle) {
     std::lock_guard<std::mutex> hold(shared_->mutex);
     auto it = shared_->slots.find(handle);

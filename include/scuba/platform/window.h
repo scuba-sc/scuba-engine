@@ -29,6 +29,13 @@ public:
     Status Create(const WindowDesc& desc);
     // Drains the message queue without blocking. False once the window has been closed.
     bool Pump();
+    // True once after the user requested a window close. The caller may defer closing while it
+    // asks about unsaved work.
+    bool TakeCloseRequest() noexcept {
+        const bool requested = closeRequested_;
+        closeRequested_ = false;
+        return requested;
+    }
     void SetMessageHook(MessageHook hook) noexcept { hook_ = hook; }
     void SetTitle(const std::string& title);
 
@@ -50,7 +57,7 @@ private:
     void* hwnd_ = nullptr;
     MessageHook hook_ = nullptr;
     uint32_t width_ = 0, height_ = 0;
-    bool minimized_ = false, resized_ = false, closed_ = false;
+    bool minimized_ = false, resized_ = false, closeRequested_ = false, closed_ = false;
 };
 
 }  // namespace scuba::platform

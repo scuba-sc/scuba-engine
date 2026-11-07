@@ -63,13 +63,14 @@ uint32_t Crc32(const void* data, size_t size, uint32_t crc) {
 
 namespace {
 
-class MemoryFs final : public FileSystem {
+class MemoryFs final : public FileSystem, public PagedFileSystem {
 public:
     explicit MemoryFs(std::vector<std::pair<std::string, Bytes>> files) {
         for (auto& [path, bytes] : files) {
             const std::string norm = NormalizePath(path);
             if (!norm.empty()) files_[norm] = std::make_shared<const Bytes>(std::move(bytes));
         }
+        sortedPaths_ = detail::SortedPathViews(files_);
     }
     const char* Kind() const override { return "memory"; }
     bool Exists(std::string_view path) const override { return files_.count(std::string(path)) != 0; }
@@ -85,9 +86,14 @@ public:
         for (const auto& [path, bytes] : files_)
             if (path.compare(0, prefix.size(), prefix) == 0) out.push_back({path, bytes->size()});
     }
+    FileListPage ListPage(std::string_view prefix, std::string_view after, size_t limit) const override {
+        return detail::BuildFileListPage(files_, sortedPaths_, prefix, after, limit,
+                                         [](const std::shared_ptr<const Bytes>& bytes) { return bytes->size(); });
+    }
 
 private:
     std::map<std::string, std::shared_ptr<const Bytes>> files_;
+    std::vector<std::string_view> sortedPaths_;
 };
 
 }  // namespace
