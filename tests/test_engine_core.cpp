@@ -1201,6 +1201,7 @@ void TestSceneAssetReplacement() {
         auto escapedLabelCandidate = nearFileLimit;
         escapedLabelCandidate.name.assign(scene::kMaxSceneNameBytes, '\\');
         CHECK(scene::Validate(escapedLabelCandidate).ok());
+        CHECK(!scene::ValidateForInstallation(escapedLabelCandidate).ok());
         std::string escapedLabelJson;
         CHECK(!scene::Serialize(escapedLabelCandidate, escapedLabelJson).ok());
         scene::DocumentHistory oversizedHistory;

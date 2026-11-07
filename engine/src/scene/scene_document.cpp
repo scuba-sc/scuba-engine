@@ -852,6 +852,11 @@ Status Serialize(const Document& document, std::string& json) {
     return Status::Ok();
 }
 
+Status ValidateForInstallation(const Document& document) {
+    std::string encoded;
+    return Serialize(document, encoded);
+}
+
 Status Deserialize(std::string_view json, Document& document) {
     if (json.size() > kMaxSceneFileBytes) return Fail("scene file exceeds the size limit");
     std::string parseError;

@@ -8,6 +8,8 @@ namespace {
 
 int failures = 0;
 constexpr int kReleaseKey = 1;
+constexpr int kUndoKey = 2;
+constexpr int kRedoKey = 3;
 
 #define CHECK(condition) do { if (!(condition)) { \
     std::cerr << __FILE__ << ':' << __LINE__ << ": CHECK failed: " #condition "\n"; ++failures; \
@@ -18,18 +20,30 @@ public:
     const char* Name() const override { return "capture"; }
     scuba::ui::Reply OnInput(const scuba::ui::InputEvent& event) override {
         events.push_back(event.kind);
-        if (event.kind == scuba::ui::InputKind::PointerDown)
+        if (event.kind == scuba::ui::InputKind::PointerDown) {
+            dragging = true;
             return scuba::ui::Reply::Capture();
-        if (event.kind == scuba::ui::InputKind::PointerCancel)
+        }
+        if (event.kind == scuba::ui::InputKind::PointerCancel) {
+            dragging = false;
             return scuba::ui::Reply::Handled();
+        }
         if (event.kind == scuba::ui::InputKind::PointerMove && releaseOnMove)
             return scuba::ui::Reply::Release();
-        if (event.kind == scuba::ui::InputKind::KeyDown && event.key == kReleaseKey)
+        if (event.kind == scuba::ui::InputKind::KeyDown && dragging && blockShortcutsWhileDragging &&
+            event.ctrl && (event.key == kUndoKey || event.key == kRedoKey))
+            return scuba::ui::Reply::Handled();
+        if (event.kind == scuba::ui::InputKind::KeyDown && event.key == kReleaseKey) {
+            dragging = false;
             return scuba::ui::Reply::Release();
+        }
+        if (event.kind == scuba::ui::InputKind::PointerUp) dragging = false;
         return scuba::ui::Reply::Unhandled();
     }
 
     bool releaseOnMove = false;
+    bool blockShortcutsWhileDragging = false;
+    bool dragging = false;
     std::vector<scuba::ui::InputKind> events;
 };
 
@@ -129,6 +143,26 @@ int main() {
     CHECK(router.captured() == nullptr);
     CHECK(router.Dispatch(Event(InputKind::PointerUp)) == nullptr);  // Escape consumes the eventual button-up
     CHECK(fallback.events.empty());
+
+    // An active drag tool gets first refusal on history shortcuts so they cannot mutate its
+    // captured document transaction before the tool records or releases the gesture.
+    capture.blockShortcutsWhileDragging = true;
+    CHECK(router.Dispatch(Event(InputKind::PointerDown)) == &capture);
+    InputEvent undoDuringDrag = Event(InputKind::KeyDown);
+    undoDuringDrag.key = kUndoKey;
+    undoDuringDrag.ctrl = true;
+    CHECK(router.Dispatch(undoDuringDrag) == &capture);
+    CHECK(router.captured() == &capture && fallback.events.empty());
+    InputEvent redoDuringDrag = Event(InputKind::KeyDown);
+    redoDuringDrag.key = kRedoKey;
+    redoDuringDrag.ctrl = true;
+    CHECK(router.Dispatch(redoDuringDrag) == &capture);
+    CHECK(router.captured() == &capture && fallback.events.empty());
+    releaseKey.key = kReleaseKey;
+    CHECK(router.Dispatch(releaseKey) == &capture);
+    CHECK(router.captured() == nullptr);
+    CHECK(router.Dispatch(Event(InputKind::PointerUp)) == nullptr);
+    capture.blockShortcutsWhileDragging = false;
 
     CHECK(router.Dispatch(Event(InputKind::PointerDown)) == &capture);
     CHECK(router.Dispatch(Event(InputKind::PointerUp)) == &capture);

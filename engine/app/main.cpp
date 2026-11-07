@@ -887,8 +887,7 @@ struct Editor {
         // Keep every accepted in-memory document serializable. Otherwise a locally edited label
         // can pass structural validation yet expand past the scene-file limit when JSON-escaped,
         // leaving both Save and the history snapshots unable to represent the current state.
-        std::string persistenceCheck;
-        if (auto status = scene::Serialize(candidate, persistenceCheck); !status) return status;
+        if (auto status = scene::ValidateForInstallation(candidate); !status) return status;
         std::unordered_map<std::string, render::Float4x4> worlds;
         if (auto status = ResolveDocument(candidate, worlds); !status) return status;
         if (recordUndo)

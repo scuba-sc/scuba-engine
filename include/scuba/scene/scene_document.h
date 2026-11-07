@@ -101,6 +101,9 @@ Status Validate(const Document& document);
 // node IDs, hierarchy, transforms, and asset references, is preserved; output is unchanged on error.
 Status MakeSceneCopy(const Document& source, std::string_view newSceneId, Document& copy);
 Status Serialize(const Document& document, std::string& json);
+// Confirms that the document can be installed as live editor state and later serialized within
+// the scene-file size limit, including expansion caused by JSON string escaping.
+Status ValidateForInstallation(const Document& document);
 Status Deserialize(std::string_view json, Document& document);
 inline constexpr size_t kMaxOutlinerSearchQueryBytes = 256;
 struct OutlinerSearchResult {
