@@ -48,7 +48,6 @@ For current development, use the [coordinated Core development profile](docs/eng
 ```sh
 export SCUBA_DEV_SDK_ARCHIVE_DIR=/path/to/verified-development-assets
 export SCUBA_DEV_SDK_HOST_SHA256=<verified-host-archive-sha256>
-export SCUBA_DEV_CORE_COMMIT=<selected-full-core-commit>
 cmake --preset coordinated-core-development
 cmake --build --preset coordinated-core-development
 ctest --preset coordinated-core-development
