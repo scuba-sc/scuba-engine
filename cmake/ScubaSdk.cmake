@@ -14,6 +14,8 @@ set(SCUBA_SDK_ARCHIVE_DIR "" CACHE PATH "Local directory with the ${SCUBA_SDK_RE
 set(SCUBA_SDK_HOST_SOURCE_SHA256 "a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c"
     CACHE STRING "SHA-256 of sco-sdk-host-source-sc-<version>.zip (from the release SHA256SUMS)")
 
+include("${CMAKE_CURRENT_LIST_DIR}/ScubaDevInputs.cmake")
+
 set(_scuba_sdk_name "sco-sdk-host-source-sc-${SCUBA_SDK_VERSION}")
 set(_scuba_sdk_zip_name "${_scuba_sdk_name}.zip")
 set(_scuba_sdk_url

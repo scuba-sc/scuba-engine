@@ -23,6 +23,26 @@
         "SCUBA_SDK_ARCHIVE_DIR": "$env{SCUBA_DEV_SDK_ARCHIVE_DIR}",
         "SCUBA_SDK_HOST_SOURCE_SHA256": "d41724ce46e34fa05a3ebfebc89ec3c16e6a2996061a183281dd17bcaa7fe0a8"
       }
+    },
+    {
+      "name": "coordinated-core-development",
+      "displayName": "Coordinated unpublished Core development SDK",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-coordinated-core-development",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SCUBA_BUILD_ENGINE": "ON",
+        "SCUBA_BUILD_TESTS": "ON",
+        "SCUBA_WERROR": "ON",
+        "SCUBA_SDK_VERSION": "2.4.1-dev.1",
+        "SCUBA_SDK_RELEASE_TAG": "",
+        "SCUBA_SDK_ARCHIVE_DIR": "$env{SCUBA_DEV_SDK_ARCHIVE_DIR}",
+        "SCUBA_SDK_HOST_SOURCE_SHA256": "$env{SCUBA_DEV_SDK_HOST_SHA256}",
+        "SCUBA_CORE_LIFECYCLE_CANDIDATE": "ON",
+        "SCUBA_ALLOW_UNCHECKED_DEV_REHEARSAL": "OFF",
+        "SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT": "$env{SCUBA_DEV_CORE_COMMIT}",
+        "SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256": "$env{SCUBA_DEV_SDK_HOST_SHA256}"
+      }
     }
   ],
   "buildPresets": [
@@ -30,14 +50,33 @@
       "name": "core-main-bf56-rehearsal",
       "configurePreset": "core-main-bf56-rehearsal",
       "jobs": 4
+    },
+    {
+      "name": "coordinated-core-development",
+      "configurePreset": "coordinated-core-development",
+      "jobs": 4
     }
   ],
   "testPresets": [
     {
       "name": "core-main-bf56-rehearsal",
       "configurePreset": "core-main-bf56-rehearsal",
-      "output": { "outputOnFailure": true },
-      "execution": { "jobs": 1 }
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 1
+      }
+    },
+    {
+      "name": "coordinated-core-development",
+      "configurePreset": "coordinated-core-development",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 1
+      }
     }
   ]
 }

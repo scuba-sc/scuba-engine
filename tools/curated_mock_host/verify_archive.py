@@ -1,6 +1,7 @@
 """Verify host-source archive bytes and provenance before CMake extracts/builds them."""
 import hashlib
 import json
+import re
 from pathlib import Path
 import sys
 import zipfile
@@ -10,7 +11,10 @@ if len(expected_hash) != 64 or len(expected_commit) != 40:
     sys.exit("Expected a full SHA256 and full source commit")
 if hashlib.sha256(Path(archive).read_bytes()).hexdigest() != expected_hash:
     sys.exit("Host-source archive SHA256 mismatch")
-top = "sco-sdk-host-source-sc-2.4.0/"
+match = re.fullmatch(r"sco-sdk-host-source-sc-([A-Za-z0-9][A-Za-z0-9._+-]*)\.zip", Path(archive).name)
+if not match:
+    sys.exit("Unexpected host-source archive filename")
+top = "sco-sdk-host-source-sc-" + match.group(1) + "/"
 with zipfile.ZipFile(archive) as kit:
     names = kit.namelist()
     if len(names) != len(set(names)):
@@ -19,9 +23,10 @@ with zipfile.ZipFile(archive) as kit:
         if not name.startswith(top) or ".." in Path(name).parts or "\\" in name:
             sys.exit("Unsafe host-source archive path")
     compatibility = json.loads(kit.read(top + "COMPATIBILITY.json"))
-    if compatibility["profile"] != "host-source-sc" or set(
+    if (compatibility["profile"] != "host-source-sc" or
+            compatibility.get("core_sdk_version") != match.group(1) or set(
         compatibility["source_commits"].values()
-    ) != {expected_commit}:
+    ) != {expected_commit}):
         sys.exit("Host-source archive provenance mismatch")
     checksums = {}
     for line in kit.read(top + "SHA256SUMS").decode().splitlines():
