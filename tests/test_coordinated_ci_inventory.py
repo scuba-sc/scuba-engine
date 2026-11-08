@@ -27,6 +27,11 @@ class InventoryGuard(unittest.TestCase):
             self.assertNotEqual(run(sorted(REQUIRED - {'kernel_lifecycle_stop-retained'})), 0)
             self.assertNotEqual(run(sorted(REQUIRED), 'windows'), 0)
             self.assertNotEqual(run(sorted(REQUIRED) + ['kernel_lifecycle_clean']), 0)
+            path.write_text(json.dumps({'tests': [{'name': n, 'properties':
+                [{'name': 'DISABLED', 'value': True}] if n == 'kernel_lifecycle_clean' else []}
+                for n in REQUIRED]}))
+            self.assertNotEqual(subprocess.run([sys.executable, str(SCRIPT), str(path), 'linux'],
+                                               capture_output=True).returncode, 0)
 
 
 if __name__ == '__main__':

@@ -8,6 +8,7 @@ REQUIRED = {
     'kernel_lifecycle_clean', 'kernel_lifecycle_refusal',
     'kernel_lifecycle_startup-retained', 'kernel_lifecycle_stop-retained',
     'hostd_peer_shutdown_order', 'sco_host_void_stop_fail_stops',
+    'netsim_unclean_shutdown_is_terminal', 'netsim_two_peer_delivery',
     'product_profile_lifecycle', 'selected_profile_lifecycle',
     'designer_generated_plugins', 'designer_codegen_unit', 'studio_mcp_unit',
     'engine_integration',
@@ -29,6 +30,11 @@ def check(path, platform):
     missing = sorted(required - set(names))
     if missing:
         raise SystemExit('Missing required CTests: ' + ', '.join(missing))
+    for test in tests:
+        if test['name'] in required:
+            for prop in test.get('properties', []):
+                if prop.get('name') == 'DISABLED' and str(prop.get('value')).upper() in {'TRUE', 'ON', '1', 'YES'}:
+                    raise SystemExit('Required CTest is disabled: ' + test['name'])
     print(f'Verified {len(names)} registered CTests, including all {len(required)} required {platform} tests')
 
 
