@@ -24,6 +24,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
+      - name: Preserve exact checkout bytes
+        shell: bash
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.ENGINE_COMMIT }}
@@ -72,6 +75,9 @@ jobs:
       SCUBA_DEV_SDK_ARCHIVE_DIR: ${{ github.workspace }}/sdk-artifacts
       SCUBA_DEV_SDK_HOST_SHA256: 145d9cbde7b9db769a1e1495f4e02604be3438d96a670bfe88f57fd5d8cdebf4
     steps:
+      - name: Preserve exact checkout bytes
+        shell: bash
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.ENGINE_COMMIT }}
@@ -94,6 +100,22 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.4'
+      - name: Check profile and inventory guard negative controls
+        shell: bash
+        run: |
+          python -m unittest discover -s tests -p 'test_coordinated_ci_cache.py' -v
+          python -m unittest discover -s tests -p 'test_coordinated_ci_inventory.py' -v
+      - name: Install and verify Linux Lua 5.4
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lua5.4
+          lua5.4 -e 'assert(_VERSION == "Lua 5.4")'
+      - name: Record Windows Lua coverage limit
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo 'Windows designer-generated plugin native checks run; generated Lua validation is not provided by this lane.' >> "$GITHUB_STEP_SUMMARY"
       - name: Configure, build and test on Linux
         if: runner.os == 'Linux'
         shell: bash
@@ -102,8 +124,11 @@ jobs:
           test ! -e build-coordinated-ci
           cmake --preset coordinated-core-development -B build-coordinated-ci
           python tools/check_coordinated_ci_cache.py build-coordinated-ci linux
+          grep -E "^SCUBA_LUA_EXECUTABLE:FILEPATH=.*/lua5[.]4$" build-coordinated-ci/CMakeCache.txt
+          ctest --test-dir build-coordinated-ci --show-only=json-v1 > ctest-inventory.json
+          python tools/check_coordinated_ci_inventory.py ctest-inventory.json linux
           cmake --build build-coordinated-ci --parallel 4
-          ctest --test-dir build-coordinated-ci -C Release --parallel 1 --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine-ctest.xml"
+          ctest --test-dir build-coordinated-ci -C Release --parallel 1 --no-tests=error --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine-ctest.xml"
       - name: Configure, build and test with MSVC x64
         if: runner.os == 'Windows'
         shell: cmd
@@ -115,9 +140,13 @@ jobs:
           if errorlevel 1 exit /b 1
           python tools/check_coordinated_ci_cache.py build-coordinated-ci windows
           if errorlevel 1 exit /b 1
+          ctest --test-dir build-coordinated-ci --show-only=json-v1 > ctest-inventory.json
+          if errorlevel 1 exit /b 1
+          python tools/check_coordinated_ci_inventory.py ctest-inventory.json windows
+          if errorlevel 1 exit /b 1
           cmake --build build-coordinated-ci --parallel 4
           if errorlevel 1 exit /b 1
-          ctest --test-dir build-coordinated-ci -C Release --parallel 1 --output-on-failure --output-junit "%GITHUB_WORKSPACE%\engine-ctest.xml"
+          ctest --test-dir build-coordinated-ci -C Release --parallel 1 --no-tests=error --output-on-failure --output-junit "%GITHUB_WORKSPACE%\engine-ctest.xml"
           if errorlevel 1 exit /b 1
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
