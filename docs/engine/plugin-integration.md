@@ -2,7 +2,9 @@
 
 This inventory separates source modules, shipped defaults, SDK contracts, and live provider
 availability. Its source audit is dated 2026-10-29: scuba-engine `56f5085`, sc-offline `96686b9`,
-sc-mp `6308ed3`, and sco-core `0c977d3`. The engine now consumes the published SDK 2.4.0 release:
+sc-mp `6308ed3`, and sco-core `0c977d3`. Current development uses the
+[coordinated Core profile](coordinated-core-development.md). The historical release profile uses
+the published SDK 2.4.0 release:
 the plugin package `sco-sdk-2.4.0.zip` has SHA-256
 `0df4995624e9b094d24e9c5534b1ea7357f517c83a0a8c8ed6ad7d4d475afcbc`, and the host-source package
 has SHA-256 `a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c`, from core source

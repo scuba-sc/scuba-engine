@@ -1,0 +1,221 @@
+name: Coordinated development candidate
+
+# This is a candidate gate, separate from the stable and bf56 historical lanes.
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coordinated-development-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CORE_COMMIT: d06f9124d6d7d380295ada4bc2af8968b98a051c
+  HOST_SHA256: d8118e8898de8daac0cff6f4c9b645cd722a32a5b5924c21c7dae2538074323a
+  PLUGIN_SHA256: f00bf666791cfca541fa20a1be3767c916f1a5dc79c4a5867a2f0a95b7b1a4a4
+  ENGINE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  package:
+    name: Package exact Core development SDK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Preserve exact checkout bytes
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.ENGINE_COMMIT }}
+          persist-credentials: false
+      - name: Verify engine checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$ENGINE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+      # The exact Core commit must first be reachable in this repository. There
+      # is deliberately no fallback to a branch, a release, or a different kit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: scuba-sc/sco-core
+          ref: d06f9124d6d7d380295ada4bc2af8968b98a051c
+          path: coordinated-core
+          persist-credentials: false
+      - name: Package and audit host-source SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C coordinated-core rev-parse HEAD)" = "$CORE_COMMIT"
+          test -z "$(git -C coordinated-core status --porcelain --untracked-files=all)"
+          command -v clang
+          mkdir sdk-artifacts
+          python3 tools/package_dev_sdk.py coordinated-core sdk-artifacts --development
+          python3 tools/verify_dev_sdk.py sdk-artifacts/sco-sdk-host-source-sc-2.4.1-dev.1.zip "$HOST_SHA256" "$CORE_COMMIT"
+          python3 coordinated-core/tools/ip_audit.py zip --development --profile host-source-sc sdk-artifacts/sco-sdk-host-source-sc-2.4.1-dev.1.zip
+      - name: Package and audit unpublished public plugin SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/package_dev_sdk.py coordinated-core sdk-artifacts legacy --development
+          archive=sdk-artifacts/sco-sdk-2.4.1-dev.1.zip
+          python3 tools/verify_dev_plugin_sdk.py "$archive" "$PLUGIN_SHA256" "$CORE_COMMIT"
+          python3 coordinated-core/tools/ip_audit.py zip --development --profile legacy "$archive"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coordinated-development-plugin-sdk
+          path: sdk-artifacts/sco-sdk-2.4.1-dev.1.zip
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coordinated-host-source-sdk
+          path: sdk-artifacts/sco-sdk-host-source-sc-2.4.1-dev.1.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  engine:
+    name: Engine candidate (${{ matrix.os }})
+    needs: package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    env:
+      SCUBA_DEV_SDK_ARCHIVE_DIR: ${{ github.workspace }}/sdk-artifacts
+      SCUBA_DEV_SDK_HOST_SHA256: d8118e8898de8daac0cff6f4c9b645cd722a32a5b5924c21c7dae2538074323a
+    steps:
+      - name: Preserve exact checkout bytes
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.ENGINE_COMMIT }}
+          persist-credentials: false
+      - name: Verify engine checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$ENGINE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - uses: actions/download-artifact@v4
+        with:
+          name: coordinated-host-source-sdk
+          path: sdk-artifacts
+      - name: Verify received SDK
+        shell: bash
+        run: python tools/verify_dev_sdk.py sdk-artifacts/sco-sdk-host-source-sc-2.4.1-dev.1.zip "$HOST_SHA256" "$CORE_COMMIT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - name: Check profile and inventory guard negative controls
+        shell: bash
+        run: |
+          python -m unittest discover -s tests -p 'test_coordinated_ci_cache.py' -v
+          python -m unittest discover -s tests -p 'test_coordinated_ci_inventory.py' -v
+          python -m unittest discover -s tests -p 'test_build_ci_lua.py' -v
+          node --test tests/generated-lua-policy.test.mjs
+      - name: Install and verify Linux Lua 5.4
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lua5.4
+          lua5.4 -e 'assert(_VERSION == "Lua 5.4")'
+      - name: Configure, build and test on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e build-coordinated-ci
+          cmake --preset coordinated-core-development -B build-coordinated-ci -DSCUBA_REQUIRE_GENERATED_LUA=ON
+          python tools/check_coordinated_ci_cache.py build-coordinated-ci linux
+          grep -E "^SCUBA_LUA_EXECUTABLE:FILEPATH=.*/lua5[.]4$" build-coordinated-ci/CMakeCache.txt
+          ctest --test-dir build-coordinated-ci --show-only=json-v1 > ctest-inventory.json
+          python tools/check_coordinated_ci_inventory.py ctest-inventory.json linux
+          cmake --build build-coordinated-ci --parallel 4
+          ctest --test-dir build-coordinated-ci -C Release --parallel 1 --no-tests=error --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine-ctest.xml"
+      - name: Configure, build and test with MSVC x64
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          if exist build-coordinated-ci exit /b 1
+          python tools/build_ci_lua.py "%RUNNER_TEMP%\coordinated-lua54"
+          if errorlevel 1 exit /b 1
+          cmake --preset coordinated-core-development -B build-coordinated-ci -DSCUBA_REQUIRE_GENERATED_LUA=ON "-DSCUBA_LUA_EXECUTABLE:FILEPATH=%RUNNER_TEMP%\coordinated-lua54\lua54.exe"
+          if errorlevel 1 exit /b 1
+          python tools/check_coordinated_ci_cache.py build-coordinated-ci windows
+          if errorlevel 1 exit /b 1
+          ctest --test-dir build-coordinated-ci --show-only=json-v1 > ctest-inventory.json
+          if errorlevel 1 exit /b 1
+          python tools/check_coordinated_ci_inventory.py ctest-inventory.json windows
+          if errorlevel 1 exit /b 1
+          cmake --build build-coordinated-ci --parallel 4
+          if errorlevel 1 exit /b 1
+          ctest --test-dir build-coordinated-ci -C Release --parallel 1 --no-tests=error --output-on-failure --output-junit "%GITHUB_WORKSPACE%\engine-ctest.xml"
+          if errorlevel 1 exit /b 1
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: coordinated-engine-ctest-${{ matrix.os }}
+          path: engine-ctest.xml
+          if-no-files-found: warn
+          retention-days: 30
+
+  development-plugin:
+    name: Unpublished public plugin consumer (${{ matrix.os }})
+    needs: package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - name: Preserve exact checkout bytes
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.ENGINE_COMMIT }}
+          persist-credentials: false
+      - name: Verify engine checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$ENGINE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - uses: actions/download-artifact@v4
+        with:
+          name: coordinated-development-plugin-sdk
+          path: sdk-artifacts
+      - name: Archive verification negative controls
+        shell: bash
+        run: python -m unittest discover -s tests -p 'test_dev_plugin_sdk.py' -v
+      - name: Isolated public archive consumer on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python tools/run_dev_plugin_consumer.py sdk-artifacts/sco-sdk-2.4.1-dev.1.zip "$PLUGIN_SHA256" "$CORE_COMMIT" --evidence development-plugin-evidence
+      - name: Isolated public archive consumer with MSVC x64
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          python tools/run_dev_plugin_consumer.py sdk-artifacts/sco-sdk-2.4.1-dev.1.zip "%PLUGIN_SHA256%" "%CORE_COMMIT%" --evidence development-plugin-evidence
+          if errorlevel 1 exit /b 1
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: development-plugin-evidence-${{ matrix.os }}
+          path: development-plugin-evidence
+          if-no-files-found: warn
+          retention-days: 30

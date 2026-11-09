@@ -1,11 +1,14 @@
 set(SCUBA_RESERVED_CORE_COMMIT "" CACHE STRING "Exact candidate core source commit")
+# Verify the same named archive that ScubaSdk.cmake will consume. Preserve the
+# stable default while allowing explicitly selected development SDK versions.
+set(SCUBA_SDK_VERSION "2.4.0" CACHE STRING "sco-core SDK version consumed by scuba-engine")
 if(NOT SCUBA_RESERVED_CORE_COMMIT MATCHES "^[0-9a-f]+$" OR
    NOT SCUBA_SDK_ARCHIVE_DIR OR NOT SCUBA_SDK_HOST_SOURCE_SHA256)
   message(FATAL_ERROR "Curated host needs exact core commit, local host-source kit directory and SHA256")
 endif()
 execute_process(COMMAND "${Python3_EXECUTABLE}"
   "${PROJECT_SOURCE_DIR}/tools/curated_mock_host/verify_archive.py"
-  "${SCUBA_SDK_ARCHIVE_DIR}/sco-sdk-host-source-sc-2.4.0.zip"
+  "${SCUBA_SDK_ARCHIVE_DIR}/sco-sdk-host-source-sc-${SCUBA_SDK_VERSION}.zip"
   "${SCUBA_SDK_HOST_SOURCE_SHA256}" "${SCUBA_RESERVED_CORE_COMMIT}"
   COMMAND_ERROR_IS_FATAL ANY)
 include("${PROJECT_SOURCE_DIR}/cmake/ScubaSdk.cmake")

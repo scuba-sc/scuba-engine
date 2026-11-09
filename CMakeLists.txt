@@ -35,6 +35,8 @@ set(SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256 "a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d23
 set(SCUBA_PLUGIN_SDK_ARCHIVE_PATH "" CACHE FILEPATH
   "Optional local sco-sdk-2.4.0.zip for the plugin-SDK-only CTest (otherwise it downloads the pinned release asset)")
 
+include(cmake/ScubaDevInputs.cmake)
+
 find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 

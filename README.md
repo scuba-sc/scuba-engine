@@ -39,29 +39,23 @@ textures yet), CPU picking.
 - Supported native host runtime builds: Linux x64 with GCC/Clang and Windows x64 with MSVC
 - Node.js 22.12+ (24 is what CI uses) for the studio
 - Python 3 for native plugin export; Bun and Lua 5.4 for the generated-plugin CTest
-- Network access on first configure (the sco-core SDK kit is downloaded), or a local copy of the release assets
+- For current development: the verified local coordinated Core host-source archive and its source/hash coordinates; third-party dependencies also need network access or local archives
 
 ## Build scuba-hostd
 
-```sh
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
-
-Build and CTest before running studio tests: Asset Lab's loader tests consume synthetic files generated at `build/tests/assets-fixtures`. If using another build directory, generate its fixtures and copy them to that location before `npm test`.
-
-Configure downloads the published sco-core [`sdk-v2.4.0`](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0) host-source kit, checks SHA-256 `a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c` and source commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`, then builds it under `build/_sdk/`. A mismatched archive stops configure. A fresh root build enables checked startup/shutdown handling for this pinned SDK. Existing build trees retain cached `SCUBA_SDK_*` values and lifecycle options; use a fresh tree when moving from RC2. To build offline from a local copy of the release assets:
+For current development, use the [coordinated Core development profile](docs/engine/coordinated-core-development.md). It requires the unpublished `2.4.1-dev.1` host-source kit built from the selected clean Core commit, its independently recorded SHA-256, and checked lifecycle handling. It does not download a release as a fallback:
 
 ```sh
-cmake -S . -B build -DSCUBA_SDK_ARCHIVE_DIR=/path/to/sdk-v2.4.0-assets
+export SCUBA_DEV_SDK_ARCHIVE_DIR=/path/to/verified-development-assets
+export SCUBA_DEV_SDK_HOST_SHA256=<verified-host-archive-sha256>
+cmake --preset coordinated-core-development
+cmake --build --preset coordinated-core-development
+ctest --preset coordinated-core-development
 ```
 
-On Windows add `-A x64` to the configure and `--config Release` / `-C Release` to build and ctest.
-The separate [core-main SDK rehearsal](docs/engine/core-main-sdk-rehearsal.md) uses an unpublished
-development profile with its own source and archive hash; it is not release evidence.
-For a plugin-only build from the published SDK archive, see
-[Build the plugins with the published plugin SDK only](docs/engine/plugin-integration.md#build-the-plugins-with-the-published-plugin-sdk-only).
+Rebuild all C++ consumers together in a fresh build tree when changing Core: `Platform` and `HostReport` are C++ layouts, even though the plugin C ABI remains frozen. Build and CTest before running studio tests: Asset Lab's loader tests consume synthetic files generated at `build/tests/assets-fixtures`. If using another build directory, generate its fixtures and copy them to that location before `npm test`.
+
+For the historical published release profile, plain `cmake -S . -B build` retains the published sco-core [`sdk-v2.4.0`](https://github.com/scuba-sc/sco-core/releases/tag/sdk-v2.4.0) host-source kit, SHA-256 `a0aaaba07e3d4eb0d8c264912cd6f2ab23f0d237a99fa07816005790a76efc4c` and source commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`. This is not the current development input. Its existing release workflows and the earlier [bf56 rehearsal](docs/engine/core-main-sdk-rehearsal.md) retain their original coordinates and evidence. For a plugin-only release build, see [the published plugin SDK instructions](docs/engine/plugin-integration.md#build-the-plugins-with-the-published-plugin-sdk-only).
 
 ## Build the studio
 

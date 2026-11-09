@@ -6,6 +6,7 @@ Git's executable bit on Windows. Use the clean checkout's index for tracked file
 all other access checks and all package contents remain the core packager's own.
 """
 
+import argparse
 import os
 import runpy
 import subprocess
@@ -14,11 +15,16 @@ from pathlib import Path
 
 
 def main() -> None:
-    if len(sys.argv) not in (3, 4) or (len(sys.argv) == 4 and sys.argv[3] not in ("host-source-sc", "legacy")):
-        raise SystemExit("usage: package_dev_sdk.py CORE_CHECKOUT OUTPUT_DIR [host-source-sc|legacy]")
-    profile = sys.argv[3] if len(sys.argv) == 4 else "host-source-sc"
-    root = Path(sys.argv[1]).resolve()
-    output = str(Path(sys.argv[2]).resolve())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("core_checkout", type=Path)
+    parser.add_argument("output_dir", type=Path)
+    parser.add_argument("profile", nargs="?", choices=("host-source-sc", "legacy"),
+                        default="host-source-sc")
+    parser.add_argument("--development", action="store_true",
+                        help="request the Core packager's unpublished development version")
+    args = parser.parse_args()
+    root = args.core_checkout.resolve()
+    output = str(args.output_dir.resolve())
     listing = subprocess.check_output(["git", "-C", str(root), "ls-files", "--stage", "-z"])
     executable = {}
     for entry in listing.split(b"\0"):
@@ -41,7 +47,9 @@ def main() -> None:
 
     os.access = index_access
     package = root / "sdk" / "package.py"
-    sys.argv = [str(package), "--profile", profile, "--out", output]
+    sys.argv = [str(package), "--profile", args.profile, "--out", output]
+    if args.development:
+        sys.argv.append("--development")
     runpy.run_path(str(package), run_name="__main__")
 
 

@@ -5,8 +5,10 @@ There is no game image, signature scan, proprietary fixture, engine call, or
 network session behind these tables. Nothing here has been run in Star Citizen.
 Use `--no-mock-game` to omit the synthetic provider.
 
-The pinned host-source kit is the published SDK 2.4.0 release
-(`sdk-v2.4.0`, source commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`). The inventory below describes registered synthetic tables,
+Current development uses the [coordinated Core profile](engine/coordinated-core-development.md).
+The historical release profile uses the published SDK 2.4.0 release
+(`sdk-v2.4.0`, source commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`).
+The inventory below describes registered synthetic tables,
 not real game adapters. Publication can fail or be switched off individually;
 query `mock_game.services.list` for the actual publication state. Actor-stat
 tables are compiled and registered only when the kit supplies their headers.
@@ -18,17 +20,20 @@ The wire/IPC headers `sc_net.h`, `sc_ipc.h`, `sc_titanlink.h`, and
 
 ## Build and exercise
 
+With the verified development archive and environment variables described in the
+[development profile](engine/coordinated-core-development.md):
+
 ```sh
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build --output-on-failure
-./build/scuba-hostd --plugins ./plugins
+cmake --preset coordinated-core-development
+cmake --build --preset coordinated-core-development
+ctest --preset coordinated-core-development --output-on-failure
+./build-coordinated-core-development/scuba-hostd --plugins ./plugins
 ```
 
-The foundation's CMake downloads the released host-source archive with TLS and
-checks its pinned SHA-256. For local builds, the optional
-`SCUBA_SDK_ARCHIVE_DIR` directory supplies the same archive; hashing is still
-mandatory. Kit sources stay in the ignored build tree.
+The development profile requires a local archive and verifies its SHA-256 and
+source metadata; it has no download fallback. The historical release profile
+can download its pinned archive or use `SCUBA_SDK_ARCHIVE_DIR`. Kit sources stay
+in the ignored build tree.
 
 `mock_game_plugins` loads the compiled native `mock_game_probe.dll` through
 the real kit loader and exercises the original mock service tables. Separate

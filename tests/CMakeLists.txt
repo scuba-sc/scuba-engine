@@ -398,13 +398,21 @@ scuba_warnings(test_designer_export)
 add_test(NAME designer_export COMMAND test_designer_export)
 set_tests_properties(designer_export PROPERTIES TIMEOUT 60)
 
+option(SCUBA_REQUIRE_GENERATED_LUA "Require generated-plugin Lua 5.4 execution" OFF)
 find_program(SCUBA_BUN_EXECUTABLE bun)
 find_program(SCUBA_LUA_EXECUTABLE NAMES lua5.4 lua54 lua-5.4 HINTS "/opt/homebrew/opt/lua@5.4/bin")
+set(designer_lua_args)
+if(SCUBA_REQUIRE_GENERATED_LUA)
+  if(NOT SCUBA_BUN_EXECUTABLE OR NOT SCUBA_LUA_EXECUTABLE)
+    message(FATAL_ERROR "Generated Lua coverage requires Bun and Lua 5.4")
+  endif()
+  list(APPEND designer_lua_args --require-lua)
+endif()
 if(SCUBA_BUN_EXECUTABLE)
   add_test(NAME designer_generated_plugins
     COMMAND "${SCUBA_BUN_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/designer-plugins.mjs"
       "${SCUBA_SDK_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/designer-plugins"
-      "${Python3_EXECUTABLE}" "${SCUBA_LUA_EXECUTABLE}")
+      "${Python3_EXECUTABLE}" "${SCUBA_LUA_EXECUTABLE}" ${designer_lua_args})
   set_tests_properties(designer_generated_plugins PROPERTIES TIMEOUT 240)
   add_test(NAME designer_codegen_unit COMMAND "${SCUBA_BUN_EXECUTABLE}" test
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../tools/designer-codegen")

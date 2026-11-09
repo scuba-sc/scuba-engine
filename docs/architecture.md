@@ -1,7 +1,9 @@
 # scuba-engine architecture
 
 scuba-engine is a studio for building and testing sco-core plugins and UI without the game. It
-consumes the published sco-core SDK release `sdk-v2.4.0`, source commit
+uses the [coordinated Core development profile](engine/coordinated-core-development.md) for current
+development. The historical release profile consumes the published sco-core SDK release
+`sdk-v2.4.0`, source commit
 `6106fa3639cbcc28f78a1ded8de2707de019f4d3`, with the
 `sco-sdk-host-source-sc-2.4.0.zip` kit pinned by SHA-256 in `cmake/ScubaSdk.cmake`. It never
 vendors SDK sources. Nothing in this repository has run inside Star Citizen; it ships no game
