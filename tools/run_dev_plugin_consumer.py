@@ -7,6 +7,7 @@ import posixpath
 import re
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import tempfile
 import zipfile
@@ -37,6 +38,61 @@ def resolved_evidence_path(value, directory):
     return posixpath.normpath(path)
 
 
+def invocation_paths(invocation):
+    """Bounded include/search option guard, not a complete compiler grammar."""
+    if isinstance(invocation, str):
+        # Preserve Windows backslashes while accepting quoted paths on both hosts.
+        # Shell-escaped whitespace is intentionally unsupported; use quotes.
+        if re.search(r'\\\s', invocation):
+            raise ValueError('unsupported escaped whitespace in compile command')
+        lexer = shlex.shlex(invocation, posix=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        lexer.escape = ''
+        tokens = list(lexer)
+        compiler = normalized(tokens[0]).rsplit('/', 1)[-1] if tokens else ''
+        if '\\' in invocation and compiler not in ('cl', 'cl.exe', 'clang-cl', 'clang-cl.exe'):
+            raise ValueError('unsupported POSIX command escaping; use an arguments array')
+    else:
+        tokens = invocation
+    options = ('-include-pch', '-idirafter',
+               '-iframework', '-isystem', '-iquote', '-include', '-imacros',
+               '-isysroot', '--sysroot', '-I', '-F', '-L', '-B')
+    windows_options = ('/external:I', '/FI', '/I')
+    paths = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.startswith(('-iprefix', '-iwithprefix')):
+            raise ValueError('unsupported composed compiler prefix option')
+        if token.startswith('@'):
+            raise ValueError('unsupported compiler response-file indirection')
+        selected = None
+        for option in options:
+            if token.startswith(option):
+                selected = option
+                break
+        if selected is None:
+            for option in windows_options:
+                if token.casefold().startswith(option.casefold()):
+                    selected = option
+                    break
+        if selected is not None:
+            value = token[len(selected):]
+            if value.startswith('='):
+                value = value[1:]
+            if not value:
+                index += 1
+                if index >= len(tokens):
+                    raise ValueError('missing compiler path option value')
+                value = tokens[index]
+            if value.startswith('@'):
+                raise ValueError('unsupported compiler response-file indirection')
+            paths.append(value)
+        index += 1
+    return paths
+
+
 def validate_evidence(commands_text, dependencies, source, sdk, build):
     commands = json.loads(commands_text)
     if not isinstance(commands, list) or not commands:
@@ -65,6 +121,8 @@ def validate_evidence(commands_text, dependencies, source, sdk, build):
         for field in [entry['directory'], entry['file'], entry['output'], *fields]:
             reject_source(field)
         directory = resolved_evidence_path(entry['directory'], build)
+        for path in invocation_paths(invocation):
+            reject_source(resolved_evidence_path(path, directory))
         for field in ('file', 'output'):
             reject_source(resolved_evidence_path(entry[field], directory))
         expected_outputs.add(resolved_evidence_path(entry['output'], directory))

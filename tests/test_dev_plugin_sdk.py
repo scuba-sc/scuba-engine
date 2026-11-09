@@ -225,6 +225,60 @@ class ConsumerEvidence(unittest.TestCase):
                         self.check()
                     self.commands[0] = old
 
+    def test_relative_compiler_path_options(self):
+        options = ('-I', '-isystem', '-iquote', '-include', '-imacros', '-idirafter',
+                   '-isysroot', '--sysroot', '/I', '/FI', '/external:I')
+        for option in options:
+            for joined in (True, False):
+                for windows in (True, False):
+                    path = r'..\..\Original\Engine\private space' if windows else '../../Original/Engine/private space'
+                    compiler = 'cl' if windows else 'cc'
+                    arguments = [compiler, option + path] if joined else [compiler, option, path]
+                    for invocation in (arguments, ' '.join('"' + arg + '"' for arg in arguments)):
+                        with self.subTest(option=option, joined=joined, invocation=invocation):
+                            self.commands[0].pop('arguments', None)
+                            key = 'arguments' if isinstance(invocation, list) else 'command'
+                            self.commands[0][key] = invocation
+                            with self.assertRaisesRegex(ValueError, 'original source'):
+                                self.check()
+
+    def test_safe_relative_compiler_paths(self):
+        for invocation in (['cc', '-I../sdk/include', '-include', '../consumer/local.h'],
+                           r'cl /I"..\sdk\include space" /FI "..\consumer\local.h"',
+                           'cc -isystem "../sdk/include space" -iquote../consumer',
+                           ['cl', '/external:I../sdk/include', '/FI../consumer/local.h']):
+            with self.subTest(invocation=invocation):
+                self.commands[0].pop('arguments', None)
+                key = 'arguments' if isinstance(invocation, list) else 'command'
+                self.commands[0][key] = invocation
+                self.check()
+
+    def test_composed_prefix_options_rejected(self):
+        for invocation in (['cc', '-iprefix', '../../Original/', '-iwithprefix', 'Engine/private'],
+                           'cc -iprefix../../Original/ -iwithprefixbefore Engine/private',
+                           ['cc', '-iwithprefixbefore', '../sdk']):
+            with self.subTest(invocation=invocation):
+                self.commands[0].pop('arguments', None)
+                key = 'arguments' if isinstance(invocation, list) else 'command'
+                self.commands[0][key] = invocation
+                with self.assertRaisesRegex(ValueError, 'unsupported composed'):
+                    self.check()
+
+    def test_posix_command_escaping_rejected(self):
+        self.commands[0]['command'] = r'cc -I../../Origina\l/Engine/private'
+        with self.assertRaisesRegex(ValueError, 'unsupported POSIX command escaping'):
+            self.check()
+
+    def test_response_files_rejected(self):
+        for invocation in (['cc', '@flags.rsp'], 'cl @"flags with spaces.rsp"',
+                           ['cc', '-I', '@flags.rsp']):
+            with self.subTest(invocation=invocation):
+                self.commands[0].pop('arguments', None)
+                key = 'arguments' if isinstance(invocation, list) else 'command'
+                self.commands[0][key] = invocation
+                with self.assertRaisesRegex(ValueError, 'response-file'):
+                    self.check()
+
     def test_invalid_compile_commands(self):
         for commands in ([], {}, [None], [{'command': 'cl'}]):
             self.commands = commands
