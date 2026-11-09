@@ -16,9 +16,16 @@ if(NOT EXISTS "${_scuba_plugin_sdk_root}/VERSION")
 endif()
 file(READ "${_scuba_plugin_sdk_root}/VERSION" _scuba_plugin_sdk_version)
 string(STRIP "${_scuba_plugin_sdk_version}" _scuba_plugin_sdk_version)
-if(NOT _scuba_plugin_sdk_version STREQUAL "2.4.0")
+set(_expected_plugin_sdk_version "2.4.0")
+# This option selects a version only; it does not verify archive provenance.
+# The qualified run_dev_plugin_consumer.py path verifies the pinned archive first.
+# Stable defaults stay pinned.
+if(SCUBA_DEVELOPMENT_PLUGIN_SDK)
+  set(_expected_plugin_sdk_version "2.4.1-dev.1")
+endif()
+if(NOT _scuba_plugin_sdk_version STREQUAL _expected_plugin_sdk_version)
   message(FATAL_ERROR
-    "SCUBA_PLUGIN_SDK_ROOT must be sco-sdk-2.4.0; found '${_scuba_plugin_sdk_version}'")
+    "SCUBA_PLUGIN_SDK_ROOT must be sco-sdk-${_expected_plugin_sdk_version}; found '${_scuba_plugin_sdk_version}'")
 endif()
 
 set(SCUBA_PLUGIN_SDK_CMAKE_FILE "${_scuba_plugin_sdk_root}/cmake/sco-plugin.cmake")

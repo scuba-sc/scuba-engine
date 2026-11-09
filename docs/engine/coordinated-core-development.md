@@ -35,3 +35,49 @@ The distinct `Coordinated development candidate` workflow packages and verifies 
 This is a host-source engine lane. It does not consume the separately packaged development plugin SDK or run the standalone plugin-archive consumer. That existing optional consumer is hard-coded to the published 2.4.0 archive and must not be pointed at a development archive as if it covered this candidate. Linux installs Lua 5.4 for the generated-plugin Lua checks. Windows builds its test-only Lua 5.4.8 CLI with MSVC from `https://www.lua.org/ftp/lua-5.4.8.tar.gz`, checking the upstream SHA-256 `4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae` before reading source members. This does not replace Core's embedded Lua or change the frozen plugin C ABI.
 
 Both CI platforms enable `SCUBA_REQUIRE_GENERATED_LUA`, verify the interpreter version by executing it, and require the generated-plugin CTest's `--require-lua` argument. Missing interpreters and failed Lua checks fail the lane rather than reporting native-only success. Local/historical profiles keep their optional Lua behavior unless this option is enabled. Windows coverage is established only after the exact-head Windows job executes the generated Lua checker and embedded-builder harness successfully; a prepared workflow or a Linux run is not Windows runtime evidence. Native game startup remains disabled and no game execution is claimed.
+
+### Separate unpublished public plugin archive proof
+
+The coordinated workflow also packages the **legacy/plugin** profile from the same
+clean Core commit, separately from the host-source kit. It pins
+`sco-sdk-2.4.1-dev.1.zip` to SHA-256
+`f00bf666791cfca541fa20a1be3767c916f1a5dc79c4a5867a2f0a95b7b1a4a4`.
+This is an unpublished development artifact, not the published stable 2.4.0 kit.
+The host-source pin and existing stable plugin consumer test remain unchanged.
+
+The `development-plugin` Ubuntu/Windows jobs verify the archive hash, exact
+Core/game source commit, legacy profile, SDK/ABI versions, safe paths, complete
+per-file checksum inventory and required public inputs before extraction or code
+execution. This verifier qualifies the fixed, trusted archive digest, not arbitrary
+untrusted SDK packages. Negative controls exercise mismatched coordinates, corrupt/missing
+inventory, private headers, traversal, duplicate entries and symlinks.
+
+`tools/run_dev_plugin_consumer.py` copies only the Engine plugin sources and two
+plugin CMake helpers to fresh temporary storage. It does not copy Engine host
+headers, a Core checkout, or a host-source SDK. It proves that the default stable
+plugin mode rejects the development version, then explicitly selects development
+mode and configures/builds the isolated consumer with Ninja (GCC on Linux, MSVC
+x64 on Windows). All four plugins run through the packaged `sco-plugin-check` in
+full and short-table modes. The CMake option `SCUBA_DEVELOPMENT_PLUGIN_SDK` only
+selects the expected version; direct use does not establish archive provenance.
+Use the qualified runner for verification before configure. It rejects empty,
+stale or incomplete Ninja dependency records, requires actual public SDK header
+dependencies, and checks parsed compile commands and dependencies for original
+checkout paths with Windows slash/case normalization. Compile commands, Ninja header dependencies, checker
+logs and a source/hash receipt are uploaded as `development-plugin-evidence-*`.
+This is public archive compilation and synthetic-host checking only. It does not
+run the game, enable native backends or relax ASOP refusals or frozen ABI rules.
+
+To reproduce using an already verified archive and an available C/C++ toolchain:
+
+```sh
+python -m unittest discover -s tests -p 'test_dev_plugin_sdk.py' -v
+python tools/run_dev_plugin_consumer.py /path/to/sco-sdk-2.4.1-dev.1.zip \
+  f00bf666791cfca541fa20a1be3767c916f1a5dc79c4a5867a2f0a95b7b1a4a4 \
+  d06f9124d6d7d380295ada4bc2af8968b98a051c --evidence development-plugin-evidence
+```
+
+The roadmap connection is Core `docs/roadmap.md` at that source commit,
+“Milestone 1: SDK 2.4.0, the contributor platform” / “Developer kit”: archive-only
+consumer validation. This development proof advances downstream adoption
+coverage, not published release readiness or in-game capability evidence.

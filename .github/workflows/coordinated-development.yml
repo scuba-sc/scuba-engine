@@ -16,6 +16,7 @@ concurrency:
 env:
   CORE_COMMIT: d06f9124d6d7d380295ada4bc2af8968b98a051c
   HOST_SHA256: d8118e8898de8daac0cff6f4c9b645cd722a32a5b5924c21c7dae2538074323a
+  PLUGIN_SHA256: f00bf666791cfca541fa20a1be3767c916f1a5dc79c4a5867a2f0a95b7b1a4a4
   ENGINE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
@@ -55,6 +56,20 @@ jobs:
           python3 tools/package_dev_sdk.py coordinated-core sdk-artifacts --development
           python3 tools/verify_dev_sdk.py sdk-artifacts/sco-sdk-host-source-sc-2.4.1-dev.1.zip "$HOST_SHA256" "$CORE_COMMIT"
           python3 coordinated-core/tools/ip_audit.py zip --development --profile host-source-sc sdk-artifacts/sco-sdk-host-source-sc-2.4.1-dev.1.zip
+      - name: Package and audit unpublished public plugin SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/package_dev_sdk.py coordinated-core sdk-artifacts legacy --development
+          archive=sdk-artifacts/sco-sdk-2.4.1-dev.1.zip
+          python3 tools/verify_dev_plugin_sdk.py "$archive" "$PLUGIN_SHA256" "$CORE_COMMIT"
+          python3 coordinated-core/tools/ip_audit.py zip --development --profile legacy "$archive"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coordinated-development-plugin-sdk
+          path: sdk-artifacts/sco-sdk-2.4.1-dev.1.zip
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: coordinated-host-source-sdk
@@ -153,5 +168,54 @@ jobs:
         with:
           name: coordinated-engine-ctest-${{ matrix.os }}
           path: engine-ctest.xml
+          if-no-files-found: warn
+          retention-days: 30
+
+  development-plugin:
+    name: Unpublished public plugin consumer (${{ matrix.os }})
+    needs: package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - name: Preserve exact checkout bytes
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.ENGINE_COMMIT }}
+          persist-credentials: false
+      - name: Verify engine checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$ENGINE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - uses: actions/download-artifact@v4
+        with:
+          name: coordinated-development-plugin-sdk
+          path: sdk-artifacts
+      - name: Archive verification negative controls
+        shell: bash
+        run: python -m unittest discover -s tests -p 'test_dev_plugin_sdk.py' -v
+      - name: Isolated public archive consumer on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python tools/run_dev_plugin_consumer.py sdk-artifacts/sco-sdk-2.4.1-dev.1.zip "$PLUGIN_SHA256" "$CORE_COMMIT" --evidence development-plugin-evidence
+      - name: Isolated public archive consumer with MSVC x64
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          python tools/run_dev_plugin_consumer.py sdk-artifacts/sco-sdk-2.4.1-dev.1.zip "%PLUGIN_SHA256%" "%CORE_COMMIT%" --evidence development-plugin-evidence
+          if errorlevel 1 exit /b 1
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: development-plugin-evidence-${{ matrix.os }}
+          path: development-plugin-evidence
           if-no-files-found: warn
           retention-days: 30

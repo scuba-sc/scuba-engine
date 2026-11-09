@@ -1,0 +1,172 @@
+"""Negative controls use synthetic ZIPs, never evidence of a real SDK build."""
+import hashlib
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+import zipfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+from verify_dev_plugin_sdk import PREFIX, VERSION, verify
+
+COMMIT = 'a' * 40
+
+
+class DevelopmentPluginArchive(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / (PREFIX[:-1] + '.zip')
+        self.entries = {
+            'VERSION': (VERSION + '\n').encode(),
+            'COMPATIBILITY.json': json.dumps({
+                'profile': 'legacy', 'core_sdk_version': VERSION, 'plugin_abi_version': '1.1',
+                'source_commits': {'core': COMMIT, 'game-sc': COMMIT}}).encode(),
+            'include/sco_api.h': b'public fixture', 'cmake/sco-plugin.cmake': b'fixture',
+            'tools/sco-plugin-check.c': b'fixture',
+        }
+
+    def write(self, corrupt=False, omit=False, extra=None):
+        sums = ''.join(hashlib.sha256(data).hexdigest() + '  ' + name + '\n'
+                       for name, data in self.entries.items())
+        with zipfile.ZipFile(self.path, 'w') as kit:
+            for name, data in self.entries.items():
+                kit.writestr(PREFIX + name, data + (b'x' if corrupt else b''))
+            kit.writestr(PREFIX + 'SHA256SUMS', sums.split('\n', 1)[1] if omit else sums)
+            if extra:
+                kit.writestr(extra, b'extra')
+        return hashlib.sha256(self.path.read_bytes()).hexdigest()
+
+    def test_valid(self):
+        self.assertEqual(verify(self.path, self.write(), COMMIT), 5)
+
+    def test_wrong_hash(self):
+        self.write()
+        with self.assertRaisesRegex(ValueError, 'SHA-256'):
+            verify(self.path, '0' * 64, COMMIT)
+
+    def test_wrong_source(self):
+        with self.assertRaisesRegex(ValueError, 'source/version/profile'):
+            verify(self.path, self.write(), 'b' * 40)
+
+    def test_wrong_profile_and_version_and_abi(self):
+        original = json.loads(self.entries['COMPATIBILITY.json'])
+        for field, value in [('profile', 'host-source-sc'), ('core_sdk_version', '2.4.0'),
+                             ('plugin_abi_version', '2.0')]:
+            with self.subTest(field=field):
+                self.entries['COMPATIBILITY.json'] = json.dumps(dict(original, **{field: value})).encode()
+                with self.assertRaisesRegex(ValueError, 'source/version/profile'):
+                    verify(self.path, self.write(), COMMIT)
+
+    def test_wrong_version_file(self):
+        self.entries['VERSION'] = b'2.4.0\n'
+        with self.assertRaisesRegex(ValueError, 'source/version/profile'):
+            verify(self.path, self.write(), COMMIT)
+
+    def test_inventory_incomplete(self):
+        with self.assertRaisesRegex(ValueError, 'incomplete'):
+            verify(self.path, self.write(omit=True), COMMIT)
+
+    def test_corrupt_entry(self):
+        self.entries['include/sco_api.h'] = b'original'
+        digest = self.write()
+        # Rewrite without fixing the entry's checksum, while re-binding outer hash.
+        with zipfile.ZipFile(self.path) as kit:
+            entries = {i.filename: kit.read(i) for i in kit.infolist()}
+        entries[PREFIX + 'include/sco_api.h'] = b'changed'
+        with zipfile.ZipFile(self.path, 'w') as kit:
+            for name, data in entries.items():
+                kit.writestr(name, data)
+        with self.assertRaisesRegex(ValueError, 'entry checksum'):
+            verify(self.path, hashlib.sha256(self.path.read_bytes()).hexdigest(), COMMIT)
+
+    def test_unsafe_entries(self):
+        for extra in ('../escape', PREFIX + '../escape', PREFIX + '/absolute', PREFIX + 'a\\b',
+                      PREFIX + 'C:stream', PREFIX + './alias'):
+            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, 'unsafe'):
+                verify(self.path, self.write(extra=extra), COMMIT)
+
+    def test_private_headers(self):
+        self.entries['include/sco/internal/host.h'] = b'private'
+        with self.assertRaisesRegex(ValueError, 'private host'):
+            verify(self.path, self.write(), COMMIT)
+
+    def test_missing_required(self):
+        del self.entries['include/sco_api.h']
+        with self.assertRaisesRegex(ValueError, 'missing public'):
+            verify(self.path, self.write(), COMMIT)
+
+    def test_extra_uninventoried(self):
+        with self.assertRaisesRegex(ValueError, 'incomplete'):
+            verify(self.path, self.write(extra=PREFIX + 'extra'), COMMIT)
+
+    def test_duplicate(self):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', UserWarning)
+            digest = self.write(extra=PREFIX + 'VERSION')
+        with self.assertRaisesRegex(ValueError, 'duplicate'):
+            verify(self.path, digest, COMMIT)
+
+    def test_symlink(self):
+        self.write()
+        with zipfile.ZipFile(self.path, 'a') as kit:
+            info = zipfile.ZipInfo(PREFIX + 'link')
+            info.external_attr = 0o120777 << 16
+            kit.writestr(info, 'target')
+        with self.assertRaisesRegex(ValueError, 'unsafe'):
+            verify(self.path, hashlib.sha256(self.path.read_bytes()).hexdigest(), COMMIT)
+
+
+
+class ConsumerEvidence(unittest.TestCase):
+    def setUp(self):
+        from run_dev_plugin_consumer import validate_evidence
+        self.validate = validate_evidence
+        self.commands = [{'directory': 'C:/temp/build', 'file': 'C:/temp/consumer/plugin.c',
+                          'output': 'C:/temp/build/plugin.obj',
+                          'command': 'cl /IC:/temp/sdk/include /c C:/temp/consumer/plugin.c'}]
+        self.deps = ('plugin.obj: #deps 1, deps mtime 123 (VALID)\n'
+                     '    C:/temp/sdk/include/sco_api.h\n')
+
+    def check(self, deps=None):
+        self.validate(json.dumps(self.commands), self.deps if deps is None else deps,
+                      r'C:\Original\Engine', 'C:/temp/sdk', 'C:/temp/build')
+
+    def test_valid_windows_spellings(self):
+        self.check(self.deps.replace('C:/temp/sdk', r'c:\TEMP\SDK'))
+
+    def test_missing_dependencies(self):
+        for deps in ('', 'ninja: no work to do.\n',
+                     'plugin.obj: #deps 0, deps mtime 123 (VALID)\n',
+                     'plugin.obj: #deps 1, deps mtime 123 (VALID)\n',
+                     self.deps.replace('VALID', 'STALE'),
+                     self.deps.replace('plugin.obj', 'other.obj'),
+                     self.deps.replace('sco_api.h', 'unrelated.h')):
+            with self.subTest(deps=deps), self.assertRaises(ValueError):
+                self.check(deps)
+
+    def test_source_dependencies_slash_case(self):
+        for path in ('c:/ORIGINAL/engine/private.h', r'C:\original\ENGINE\private.h'):
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, 'original source'):
+                self.check(self.deps.replace('C:/temp/sdk/include/sco_api.h', path))
+
+    def test_source_compile_fields_slash_case(self):
+        for field in ('command', 'directory', 'file', 'output', 'arguments'):
+            for path in ('c:/ORIGINAL/engine/private.h', r'C:\original\ENGINE\private.h'):
+                with self.subTest(field=field, path=path):
+                    old = self.commands[0].copy()
+                    self.commands[0][field] = [path] if field == 'arguments' else path
+                    with self.assertRaisesRegex(ValueError, 'original source'):
+                        self.check()
+                    self.commands[0] = old
+
+    def test_invalid_compile_commands(self):
+        for commands in ([], {}, [None], [{'command': 'cl'}]):
+            self.commands = commands
+            with self.subTest(commands=commands), self.assertRaises(ValueError):
+                self.check()
+
+if __name__ == '__main__':
+    unittest.main()
