@@ -42,9 +42,8 @@ def invocation_paths(invocation):
     """Bounded include/search option guard, not a complete compiler grammar."""
     if isinstance(invocation, str):
         # Preserve Windows backslashes while accepting quoted paths on both hosts.
-        # Shell-escaped whitespace is intentionally unsupported; use quotes.
-        if re.search(r'\\\s', invocation):
-            raise ValueError('unsupported escaped whitespace in compile command')
+        # MSVC output-directory switches can end in a literal backslash before
+        # whitespace. Classify the compiler before rejecting POSIX escaping.
         lexer = shlex.shlex(invocation, posix=True)
         lexer.whitespace_split = True
         lexer.commenters = ''

@@ -269,6 +269,22 @@ class ConsumerEvidence(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unsupported POSIX command escaping'):
             self.check()
 
+    def test_recorded_msvc_trailing_output_separator(self):
+        # Exact compiler and /Fd tokens from successful Windows artifact 13658789690.
+        compiler = r'C:\PROGRA~1\MICROS~2\2022\ENTERP~1\VC\Tools\MSVC\1444~1.352\bin\Hostx64\x64\cl.exe'
+        self.commands[0]['command'] = (compiler +
+            r' -I..\sdk\include /FdCMakeFiles\sco-plugin-check.dir\ /FS -c ..\consumer\plugin.c')
+        self.check()
+        self.commands[0]['command'] = self.commands[0]['command'].replace(
+            r'-I..\sdk\include', r'-I..\..\Original\Engine\private')
+        with self.assertRaisesRegex(ValueError, 'original source'):
+            self.check()
+
+    def test_posix_escaped_whitespace_rejected(self):
+        self.commands[0]['command'] = r'cc -I../sdk/include\ space'
+        with self.assertRaisesRegex(ValueError, 'unsupported POSIX command escaping'):
+            self.check()
+
     def test_response_files_rejected(self):
         for invocation in (['cc', '@flags.rsp'], 'cl @"flags with spaces.rsp"',
                            ['cc', '-I', '@flags.rsp']):
