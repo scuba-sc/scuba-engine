@@ -30,26 +30,44 @@ class LuaBootstrap(unittest.TestCase):
                 lua.unpack(fixture(), Path(tmp))
             self.assertEqual(list(Path(tmp).iterdir()), [])
 
-    def test_build_and_runtime_check(self):
+    def check_build_and_runtime(self, root):
         data = fixture()
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / 'lua with spaces'
-            with patch.object(lua, 'SHA256', hashlib.sha256(data).hexdigest()), \
-                 patch.object(lua, 'urlopen') as download, \
-                 patch.object(lua.subprocess, 'run') as run:
-                download.return_value.__enter__.return_value.read.return_value = data
+        # Windows temporary paths can use an 8.3 alias (RUNNER~1), while the
+        # bootstrap deliberately resolves it before invoking the compiler.
+        expected = root.resolve()
+        with patch.object(lua, 'SHA256', hashlib.sha256(data).hexdigest()), \
+             patch.object(lua, 'urlopen') as download, \
+             patch.object(lua.subprocess, 'run') as run:
+            download.return_value.__enter__.return_value.read.return_value = data
+            lua.build(root)
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertEqual(len(commands), 2)
+            self.assertEqual(commands[0][0], 'cl')
+            self.assertIn(str(expected / 'lua.c'), commands[0])
+            self.assertNotIn(str(expected / 'luac.c'), commands[0])
+            self.assertEqual(commands[1], [str(expected / 'lua54.exe'), '-e',
+                                           'assert(_VERSION == "Lua 5.4")'])
+            self.assertEqual(run.call_args_list[0].kwargs['cwd'], expected)
+            self.assertTrue(all(call.kwargs['check'] for call in run.call_args_list))
+            self.assertFalse((expected.parent / 'escape.c').exists())
+            with self.assertRaises(FileExistsError):
                 lua.build(root)
-                commands = [call.args[0] for call in run.call_args_list]
-                self.assertEqual(len(commands), 2)
-                self.assertEqual(commands[0][0], 'cl')
-                self.assertIn(str(root / 'lua.c'), commands[0])
-                self.assertNotIn(str(root / 'luac.c'), commands[0])
-                self.assertEqual(commands[1], [str(root / 'lua54.exe'), '-e',
-                                               'assert(_VERSION == "Lua 5.4")'])
-                self.assertTrue(all(call.kwargs['check'] for call in run.call_args_list))
-                self.assertFalse((root.parent / 'escape.c').exists())
-                with self.assertRaises(FileExistsError):
-                    lua.build(root)
+
+    def test_build_and_runtime_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.check_build_and_runtime(Path(tmp) / 'lua with spaces')
+
+    @unittest.skipIf(sys.platform == 'win32', 'symlink creation can require Windows privileges')
+    def test_build_through_directory_alias(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            canonical = parent / 'canonical directory'
+            canonical.mkdir()
+            alias = parent / 'alias'
+            alias.symlink_to(canonical, target_is_directory=True)
+            root = alias / 'lua with spaces'
+            self.assertNotEqual(root, root.resolve())
+            self.check_build_and_runtime(root)
 
     def test_compile_failure_prevents_execution(self):
         data = fixture()
