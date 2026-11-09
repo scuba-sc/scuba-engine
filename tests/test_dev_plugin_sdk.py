@@ -168,6 +168,38 @@ class ConsumerEvidence(unittest.TestCase):
     def test_valid_windows_spellings(self):
         self.check(self.deps.replace('C:/temp/sdk', r'c:\TEMP\SDK'))
 
+    def test_relative_public_header(self):
+        for path in ('../sdk/include/sco_api.h', r'..\SDK\include\sco_api.h',
+                     '../sdk/other/../include/sco_api.h'):
+            with self.subTest(path=path):
+                self.check(self.deps.replace('C:/temp/sdk/include/sco_api.h', path))
+
+    def test_relative_original_source_rejected(self):
+        for path in ('../../Original/Engine/private.h', r'..\..\ORIGINAL\engine\private.h'):
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, 'original source'):
+                self.check(self.deps.replace('C:/temp/sdk/include/sco_api.h', path))
+
+    def test_absolute_output_paths(self):
+        for path in ('C:/temp/build/plugin.obj', r'c:\TEMP\build\plugin.obj'):
+            with self.subTest(path=path):
+                self.check(self.deps.replace('plugin.obj:', path + ':'))
+
+    def test_relative_original_output_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'original source'):
+            self.check(self.deps.replace('plugin.obj:', '../../Original/Engine/plugin.obj:'))
+
+    def test_unc_paths(self):
+        from run_dev_plugin_consumer import resolved_evidence_path
+        self.assertEqual(resolved_evidence_path(r'\\Server\Share\dir\..\file.h', 'C:/temp/build'),
+                         '//server/share/file.h')
+        commands = json.dumps([{
+            'directory': '//server/share/build', 'file': '../consumer/plugin.c',
+            'output': '//server/share/build/plugin.obj', 'arguments': ['cl', '../consumer/plugin.c']}])
+        deps = ('//server/share/build/plugin.obj: #deps 1, deps mtime 123 (VALID)\n'
+                '    //server/share/sdk/include/sco_api.h\n')
+        self.validate(commands, deps, '//server/original/engine',
+                      '//server/share/sdk', '//server/share/build')
+
     def test_missing_dependencies(self):
         for deps in ('', 'ninja: no work to do.\n',
                      'plugin.obj: #deps 0, deps mtime 123 (VALID)\n',

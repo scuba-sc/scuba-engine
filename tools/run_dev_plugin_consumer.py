@@ -27,11 +27,21 @@ def normalized(value):
     return str(value).replace('\\', '/').casefold()
 
 
+def resolved_evidence_path(value, directory):
+    """Resolve Ninja paths lexically, including foreign Windows drive/UNC paths."""
+    path = normalized(value)
+    if re.match(r'^[a-z]:[^/]', path) or re.fullmatch(r'[a-z]:', path):
+        raise ValueError('ambiguous drive-relative dependency path')
+    if not (path.startswith('/') or re.match(r'^[a-z]:/', path)):
+        path = normalized(directory).rstrip('/') + '/' + path
+    return posixpath.normpath(path)
+
+
 def validate_evidence(commands_text, dependencies, source, sdk, build):
     commands = json.loads(commands_text)
     if not isinstance(commands, list) or not commands:
         raise ValueError('missing compile commands')
-    source_path = normalized(source).rstrip('/')
+    source_path = posixpath.normpath(normalized(source)).rstrip('/')
 
     def reject_source(value):
         if source_path in normalized(value):
@@ -54,10 +64,10 @@ def validate_evidence(commands_text, dependencies, source, sdk, build):
             raise ValueError('missing compile invocation')
         for field in [entry['directory'], entry['file'], entry['output'], *fields]:
             reject_source(field)
-        output = normalized(entry['output'])
-        if not (output.startswith('/') or re.match(r'^[a-z]:/', output)):
-            output = normalized(entry['directory']) + '/' + output
-        expected_outputs.add(posixpath.normpath(output))
+        directory = resolved_evidence_path(entry['directory'], build)
+        for field in ('file', 'output'):
+            reject_source(resolved_evidence_path(entry[field], directory))
+        expected_outputs.add(resolved_evidence_path(entry['output'], directory))
 
     records = {}
     current = None
@@ -67,13 +77,16 @@ def validate_evidence(commands_text, dependencies, source, sdk, build):
         reject_source(line)
         match = re.fullmatch(r'(.+): #deps ([0-9]+), deps mtime [0-9]+ \(VALID\)', line)
         if match:
-            output = posixpath.normpath(normalized(build) + '/' + normalized(match[1]))
+            output = resolved_evidence_path(match[1], build)
+            reject_source(output)
             if output in records:
                 raise ValueError('duplicate dependency record')
             current = (int(match[2]), [])
             records[output] = current
         elif line.startswith('    ') and current is not None:
-            current[1].append(normalized(line.strip()))
+            path = resolved_evidence_path(line.strip(), build)
+            reject_source(path)
+            current[1].append(path)
         else:
             raise ValueError('invalid or stale dependency evidence')
     if not records or not expected_outputs.issubset(records):
@@ -81,7 +94,7 @@ def validate_evidence(commands_text, dependencies, source, sdk, build):
     for count, paths in records.values():
         if not count or count != len(paths):
             raise ValueError('missing actual compiler dependencies')
-    public_header = normalized(sdk).rstrip('/') + '/include/sco_api.h'
+    public_header = resolved_evidence_path('include/sco_api.h', sdk)
     if not any(public_header in paths for _, paths in records.values()):
         raise ValueError('dependency evidence omits public SDK header')
 
