@@ -4,10 +4,11 @@ import hashlib
 from io import BytesIO
 from pathlib import Path
 import sys
+import ssl
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import build_ci_lua as lua
@@ -24,6 +25,71 @@ def fixture():
 
 
 class LuaBootstrap(unittest.TestCase):
+    def test_transient_download_recovery(self):
+        failures = [lua.HTTPError(lua.URL, 503, 'Unavailable', {}, None),
+                    lua.URLError(TimeoutError('WinError 10060')),
+                    TimeoutError('read timed out'), ConnectionResetError('reset'),
+                    lua.IncompleteRead(b'partial', 10)]
+        for failure in failures:
+            with self.subTest(failure=failure):
+                response = MagicMock()
+                response.__enter__.return_value.read.return_value = b'verified later'
+                with patch.object(lua, 'urlopen', side_effect=[failure, response]) as download, \
+                     patch.object(lua.time, 'sleep') as sleep:
+                    self.assertEqual(lua.download_source(), b'verified later')
+                    self.assertEqual(download.call_args_list, [call(lua.URL, timeout=60)] * 2)
+                    sleep.assert_called_once_with(2)
+
+    def test_download_retries_are_bounded(self):
+        failure = lua.URLError(TimeoutError('connect timed out'))
+        with patch.object(lua, 'urlopen', side_effect=failure) as download, \
+             patch.object(lua.time, 'sleep') as sleep:
+            with self.assertRaises(lua.URLError) as caught:
+                lua.download_source()
+            self.assertIs(caught.exception, failure)
+            self.assertEqual(download.call_args_list, [call(lua.URL, timeout=60)] * 3)
+            self.assertEqual(sleep.call_args_list, [call(2), call(4)])
+
+    def test_permanent_download_errors_are_not_retried(self):
+        failures = [lua.HTTPError(lua.URL, 404, 'Not Found', {}, None),
+                    lua.HTTPError(lua.URL, 403, 'Forbidden', {}, None),
+                    lua.URLError(ssl.SSLCertVerificationError('bad certificate')),
+                    lua.URLError('unknown failure'), ValueError('bad URL')]
+        for failure in failures:
+            with self.subTest(failure=failure):
+                with patch.object(lua, 'urlopen', side_effect=failure) as download, \
+                     patch.object(lua.time, 'sleep') as sleep:
+                    with self.assertRaises(type(failure)) as caught:
+                        lua.download_source()
+                    self.assertIs(caught.exception, failure)
+                    download.assert_called_once_with(lua.URL, timeout=60)
+                    sleep.assert_not_called()
+
+    def test_read_failure_restarts_download(self):
+        first, second = MagicMock(), MagicMock()
+        first.__enter__.return_value.read.side_effect = TimeoutError('read timed out')
+        second.__enter__.return_value.read.return_value = b'complete'
+        with patch.object(lua, 'urlopen', side_effect=[first, second]) as download, \
+             patch.object(lua.time, 'sleep'):
+            self.assertEqual(lua.download_source(), b'complete')
+            self.assertEqual(download.call_count, 2)
+            first.__exit__.assert_called_once()
+            second.__exit__.assert_called_once()
+
+    def test_bad_download_digest_is_not_retried_or_compiled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'build'
+            with patch.object(lua, 'urlopen') as download, \
+                 patch.object(lua.time, 'sleep') as sleep, \
+                 patch.object(lua.subprocess, 'run') as run:
+                download.return_value.__enter__.return_value.read.return_value = b'bad source'
+                with self.assertRaisesRegex(ValueError, 'SHA-256 mismatch'):
+                    lua.build(root)
+                download.assert_called_once_with(lua.URL, timeout=60)
+                sleep.assert_not_called()
+                run.assert_not_called()
+                self.assertEqual(list(root.iterdir()), [])
+
     def test_bad_digest_does_not_write_sources(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(ValueError, 'SHA-256 mismatch'):

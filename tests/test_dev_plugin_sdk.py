@@ -37,9 +37,9 @@ class DevelopmentPluginArchive(unittest.TestCase):
             if extra:
                 # Windows ZipInfo normalizes backslashes before writing. Create
                 # equal-length safe bytes, then mutate both ZIP filename records.
-                placeholder = extra.replace('\\', '~')
+                placeholder = extra.replace('\\', '~').replace('\0', '~')
                 kit.writestr(placeholder, b'extra')
-        if extra and '\\' in extra:
+        if extra and any(char in extra for char in ('\\', '\0')):
             original = placeholder.encode('utf-8')
             intended = extra.encode('utf-8')
             data = self.path.read_bytes()
@@ -49,7 +49,7 @@ class DevelopmentPluginArchive(unittest.TestCase):
             self.assertEqual(data.count(intended), 2)
             self.path.write_bytes(data)
             with zipfile.ZipFile(self.path) as kit:
-                self.assertIn(extra, kit.namelist())
+                self.assertIn(extra, [info.orig_filename for info in kit.infolist()])
         return hashlib.sha256(self.path.read_bytes()).hexdigest()
 
     def test_valid(self):
@@ -97,9 +97,26 @@ class DevelopmentPluginArchive(unittest.TestCase):
 
     def test_unsafe_entries(self):
         for extra in ('../escape', PREFIX + '../escape', PREFIX + '/absolute', PREFIX + 'a\\b',
-                      PREFIX + 'C:stream', PREFIX + './alias'):
+                      PREFIX + 'C:stream', PREFIX + './alias', PREFIX + 'nul\0suffix'):
             with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, 'unsafe'):
                 verify(self.path, self.write(extra=extra), COMMIT)
+
+    def test_windows_reader_normalization(self):
+        from unittest.mock import patch
+        original = zipfile.ZipInfo.__init__
+
+        def windows_read(info, filename='NoName', date_time=(1980, 1, 1, 0, 0, 0)):
+            original(info, filename, date_time)
+            info.filename = info.filename.replace('\\', '/')
+
+        extra = PREFIX + 'a\\b'
+        digest = self.write(extra=extra)
+        with patch.object(zipfile.ZipInfo, '__init__', windows_read):
+            with zipfile.ZipFile(self.path) as kit:
+                self.assertIn(extra, [info.orig_filename for info in kit.infolist()])
+                self.assertNotIn(extra, kit.namelist())
+            with self.assertRaisesRegex(ValueError, 'unsafe archive entry normalization'):
+                verify(self.path, digest, COMMIT)
 
     def test_private_headers(self):
         self.entries['include/sco/internal/host.h'] = b'private'

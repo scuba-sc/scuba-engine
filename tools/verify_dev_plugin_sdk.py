@@ -22,8 +22,12 @@ def verify(archive, expected_hash, expected_commit):
         if len(names) != len(set(names)):
             raise ValueError('duplicate archive entry')
         for info in kit.infolist():
-            name = info.filename
-            if (not name.startswith(PREFIX) or '\\' in name or ':' in name or
+            name = info.orig_filename
+            # ZipInfo normalizes Windows separators and truncates NUL names.
+            # Reject that transformation before trusting its lookup filename.
+            if name != info.filename:
+                raise ValueError('unsafe archive entry normalization')
+            if (not name.startswith(PREFIX) or '\\' in name or '\0' in name or ':' in name or
                     any(part in ('', '.', '..') for part in name.split('/')) or
                     stat.S_ISLNK(info.external_attr >> 16)):
                 raise ValueError('unsafe archive entry')
