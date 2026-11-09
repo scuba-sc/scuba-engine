@@ -18,9 +18,11 @@ support.
 
 ## Principles
 
-1. **sco-core is the boundary.** The engine is a host of the published SDK 2.4.0 release
-   (`sdk-v2.4.0`, source commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`, pinned by SHA-256
-   in `cmake/ScubaSdk.cmake`). Plugins reach the engine only through
+1. **sco-core is the boundary.** Current development hosts the
+   [coordinated Core development profile](coordinated-core-development.md). The historical
+   release profile hosts SDK 2.4.0 (`sdk-v2.4.0`, source commit
+   `6106fa3639cbcc28f78a1ded8de2707de019f4d3`, pinned by SHA-256 in
+   `cmake/ScubaSdk.cmake`). Plugins reach the engine only through
    SDK services and contracts. Plugin UI arrives as `sco.widgets` panels; no plugin sees an ImGui
    type, a D3D12 object or an engine pointer.
 2. **One owner per thread.** The main thread owns the window, the sco-core game thread, the UI

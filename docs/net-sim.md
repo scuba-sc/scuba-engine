@@ -14,20 +14,22 @@ package. Hosted runtime CI therefore covers Linux and Windows only.
 
 ## Run
 
+Use the [coordinated Core development profile](engine/coordinated-core-development.md)
+with its verified local archive and environment variables, then run:
+
 ```sh
-cmake -S . -B build
-cmake --build build
+cmake --preset coordinated-core-development
+cmake --build --preset coordinated-core-development
 cd studio
 npm ci
 npm run build
 cd ..
-./build/scuba-hostd --studio studio/dist
+./build-coordinated-core-development/scuba-hostd --studio studio/dist
 ```
 
-The foundation downloads the published `sdk-v2.4.0` host-source kit (source
-commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`) and verifies its pinned
-SHA-256. For offline work, set `SCUBA_SDK_ARCHIVE_DIR` at configure
-time to a directory containing the release archive; the same hash check applies.
+The historical default release profile downloads the published `sdk-v2.4.0`
+host-source kit (source commit `6106fa3639cbcc28f78a1ded8de2707de019f4d3`)
+and verifies its pinned SHA-256. It is separate from current development.
 
 Open the studio and select **NetSandbox**. Select a peer count and choose
 **Start sandbox**. The default synthetic chat plugin publishes a widget panel

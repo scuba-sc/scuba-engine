@@ -17,7 +17,7 @@ class DevelopmentPreset(unittest.TestCase):
         self.assertEqual(values['SCUBA_SDK_ARCHIVE_DIR'], '$env{SCUBA_DEV_SDK_ARCHIVE_DIR}')
         self.assertEqual(values['SCUBA_SDK_HOST_SOURCE_SHA256'], '$env{SCUBA_DEV_SDK_HOST_SHA256}')
         self.assertEqual(values['SCUBA_CORE_LIFECYCLE_ARCHIVE_SHA256'], values['SCUBA_SDK_HOST_SOURCE_SHA256'])
-        self.assertEqual(values['SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT'], '38185eb8b00fab4b7d6c1652536839bb97d1141d')
+        self.assertEqual(values['SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT'], 'd06f9124d6d7d380295ada4bc2af8968b98a051c')
         self.assertEqual(values['SCUBA_CORE_LIFECYCLE_CANDIDATE'], 'ON')
         self.assertEqual(values['SCUBA_ALLOW_UNCHECKED_DEV_REHEARSAL'], 'OFF')
 

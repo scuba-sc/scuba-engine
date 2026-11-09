@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  CORE_COMMIT: 38185eb8b00fab4b7d6c1652536839bb97d1141d
-  HOST_SHA256: 145d9cbde7b9db769a1e1495f4e02604be3438d96a670bfe88f57fd5d8cdebf4
+  CORE_COMMIT: d06f9124d6d7d380295ada4bc2af8968b98a051c
+  HOST_SHA256: d8118e8898de8daac0cff6f4c9b645cd722a32a5b5924c21c7dae2538074323a
   ENGINE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: scuba-sc/sco-core
-          ref: 38185eb8b00fab4b7d6c1652536839bb97d1141d
+          ref: d06f9124d6d7d380295ada4bc2af8968b98a051c
           path: coordinated-core
           persist-credentials: false
       - name: Package and audit host-source SDK
@@ -73,7 +73,7 @@ jobs:
         os: [ubuntu-24.04, windows-2022]
     env:
       SCUBA_DEV_SDK_ARCHIVE_DIR: ${{ github.workspace }}/sdk-artifacts
-      SCUBA_DEV_SDK_HOST_SHA256: 145d9cbde7b9db769a1e1495f4e02604be3438d96a670bfe88f57fd5d8cdebf4
+      SCUBA_DEV_SDK_HOST_SHA256: d8118e8898de8daac0cff6f4c9b645cd722a32a5b5924c21c7dae2538074323a
     steps:
       - name: Preserve exact checkout bytes
         shell: bash
