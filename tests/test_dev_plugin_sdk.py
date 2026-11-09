@@ -35,7 +35,21 @@ class DevelopmentPluginArchive(unittest.TestCase):
                 kit.writestr(PREFIX + name, data + (b'x' if corrupt else b''))
             kit.writestr(PREFIX + 'SHA256SUMS', sums.split('\n', 1)[1] if omit else sums)
             if extra:
-                kit.writestr(extra, b'extra')
+                # Windows ZipInfo normalizes backslashes before writing. Create
+                # equal-length safe bytes, then mutate both ZIP filename records.
+                placeholder = extra.replace('\\', '~')
+                kit.writestr(placeholder, b'extra')
+        if extra and '\\' in extra:
+            original = placeholder.encode('utf-8')
+            intended = extra.encode('utf-8')
+            data = self.path.read_bytes()
+            self.assertEqual(len(original), len(intended))
+            self.assertEqual(data.count(original), 2)  # local + central directory
+            data = data.replace(original, intended)
+            self.assertEqual(data.count(intended), 2)
+            self.path.write_bytes(data)
+            with zipfile.ZipFile(self.path) as kit:
+                self.assertIn(extra, kit.namelist())
         return hashlib.sha256(self.path.read_bytes()).hexdigest()
 
     def test_valid(self):
