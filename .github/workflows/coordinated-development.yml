@@ -105,6 +105,8 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_coordinated_ci_cache.py' -v
           python -m unittest discover -s tests -p 'test_coordinated_ci_inventory.py' -v
+          python -m unittest discover -s tests -p 'test_build_ci_lua.py' -v
+          node --test tests/generated-lua-policy.test.mjs
       - name: Install and verify Linux Lua 5.4
         if: runner.os == 'Linux'
         shell: bash
@@ -112,17 +114,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends lua5.4
           lua5.4 -e 'assert(_VERSION == "Lua 5.4")'
-      - name: Record Windows Lua coverage limit
-        if: runner.os == 'Windows'
-        shell: bash
-        run: echo 'Windows designer-generated plugin native checks run; generated Lua validation is not provided by this lane.' >> "$GITHUB_STEP_SUMMARY"
       - name: Configure, build and test on Linux
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           test ! -e build-coordinated-ci
-          cmake --preset coordinated-core-development -B build-coordinated-ci
+          cmake --preset coordinated-core-development -B build-coordinated-ci -DSCUBA_REQUIRE_GENERATED_LUA=ON
           python tools/check_coordinated_ci_cache.py build-coordinated-ci linux
           grep -E "^SCUBA_LUA_EXECUTABLE:FILEPATH=.*/lua5[.]4$" build-coordinated-ci/CMakeCache.txt
           ctest --test-dir build-coordinated-ci --show-only=json-v1 > ctest-inventory.json
@@ -136,7 +134,9 @@ jobs:
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           if errorlevel 1 exit /b 1
           if exist build-coordinated-ci exit /b 1
-          cmake --preset coordinated-core-development -B build-coordinated-ci
+          python tools/build_ci_lua.py "%RUNNER_TEMP%\coordinated-lua54"
+          if errorlevel 1 exit /b 1
+          cmake --preset coordinated-core-development -B build-coordinated-ci -DSCUBA_REQUIRE_GENERATED_LUA=ON "-DSCUBA_LUA_EXECUTABLE:FILEPATH=%RUNNER_TEMP%\coordinated-lua54\lua54.exe"
           if errorlevel 1 exit /b 1
           python tools/check_coordinated_ci_cache.py build-coordinated-ci windows
           if errorlevel 1 exit /b 1

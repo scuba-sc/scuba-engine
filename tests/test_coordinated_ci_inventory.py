@@ -18,7 +18,7 @@ class InventoryGuard(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'inventory.json'
             def run(names, platform='linux'):
-                path.write_text(json.dumps({'tests': [{'name': n} for n in names]}))
+                path.write_text(json.dumps({'tests': [{'name': n, 'command': ['bun', 'test.mjs', '--require-lua']} for n in names]}))
                 return subprocess.run([sys.executable, str(SCRIPT), str(path), platform],
                                       capture_output=True, text=True).returncode
             self.assertEqual(run(sorted(REQUIRED)), 0)
@@ -27,7 +27,12 @@ class InventoryGuard(unittest.TestCase):
             self.assertNotEqual(run(sorted(REQUIRED - {'kernel_lifecycle_stop-retained'})), 0)
             self.assertNotEqual(run(sorted(REQUIRED), 'windows'), 0)
             self.assertNotEqual(run(sorted(REQUIRED) + ['kernel_lifecycle_clean']), 0)
-            path.write_text(json.dumps({'tests': [{'name': n, 'properties':
+            for command in ([], ['bun', 'test.mjs'], '--require-lua'):
+                path.write_text(json.dumps({'tests': [{'name': n, 'command': command}
+                    for n in REQUIRED]}))
+                self.assertNotEqual(subprocess.run([sys.executable, str(SCRIPT), str(path), 'linux'],
+                                                   capture_output=True).returncode, 0)
+            path.write_text(json.dumps({'tests': [{'name': n, 'command': ['bun', 'test.mjs', '--require-lua'], 'properties':
                 [{'name': 'DISABLED', 'value': True}] if n == 'kernel_lifecycle_clean' else []}
                 for n in REQUIRED]}))
             self.assertNotEqual(subprocess.run([sys.executable, str(SCRIPT), str(path), 'linux'],

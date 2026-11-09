@@ -1,13 +1,17 @@
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { verifyGeneratedLua } from './generated-lua-policy.mjs';
 import { flatten, sampleDesigns } from '../tools/designer-codegen/src/model';
 import * as cpp from '../tools/designer-codegen/src/codegen/cpp';
 import * as c from '../tools/designer-codegen/src/codegen/c';
 import * as lua from '../tools/designer-codegen/src/codegen/lua';
 
 const [sdkRoot, outputRoot, python = 'python3', luaExecutable = 'lua5.4'] = process.argv.slice(2);
-if (!sdkRoot || !outputRoot) throw new Error('Usage: bun tests/designer-plugins.mjs SDK_SOURCE OUTPUT_ROOT [PYTHON] [LUA54]');
+if (!sdkRoot || !outputRoot) throw new Error('Usage: bun tests/designer-plugins.mjs SDK_SOURCE OUTPUT_ROOT [PYTHON] [LUA54] [--require-lua]');
+const requireLua = process.argv.slice(6).includes('--require-lua');
+// Verify the interpreter before doing native checks, and again on every CTest run.
+await verifyGeneratedLua(luaExecutable, requireLua, run);
 await mkdir(outputRoot, { recursive: true });
 const runRoot = await mkdtemp(join(outputRoot, 'generated-'));
 async function run(command, args) {

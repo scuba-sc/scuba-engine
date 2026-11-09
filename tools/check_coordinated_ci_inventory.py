@@ -31,6 +31,10 @@ def check(path, platform):
     if missing:
         raise SystemExit('Missing required CTests: ' + ', '.join(missing))
     for test in tests:
+        if test['name'] == 'designer_generated_plugins':
+            command = test.get('command', [])
+            if not isinstance(command, list) or '--require-lua' not in command:
+                raise SystemExit('generated-plugin CTest must require Lua execution')
         if test['name'] in required:
             for prop in test.get('properties', []):
                 if prop.get('name') == 'DISABLED' and str(prop.get('value')).upper() in {'TRUE', 'ON', '1', 'YES'}:

@@ -29,6 +29,7 @@ class CoordinatedCacheGuard(unittest.TestCase):
                 'SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT': commit,
                 'SCUBA_CORE_LIFECYCLE_CANDIDATE': 'ON', 'SCUBA_ALLOW_UNCHECKED_DEV_REHEARSAL': 'OFF',
                 'SCUBA_SDK_CHECKED_LIFECYCLE': '1', 'SCUBA_SDK_ARCHIVE_DIR': str(sdk),
+                'SCUBA_REQUIRE_GENERATED_LUA': 'ON', 'SCUBA_LUA_EXECUTABLE': sys.executable,
             }
             env = os.environ | {'HOST_SHA256': sha, 'CORE_COMMIT': commit,
                                 'SCUBA_DEV_SDK_ARCHIVE_DIR': str(sdk)}
@@ -46,7 +47,11 @@ class CoordinatedCacheGuard(unittest.TestCase):
                             {'SCUBA_SDK_HOST_SOURCE_SHA256': '0' * 64},
                             {'SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT': '0' * 40},
                             {'SCUBA_SDK_ARCHIVE_DIR': str(root)},
-                            {'SCUBA_SDK_CHECKED_LIFECYCLE': ''}):
+                            {'SCUBA_SDK_CHECKED_LIFECYCLE': ''},
+                            {'SCUBA_REQUIRE_GENERATED_LUA': 'OFF'},
+                            {'SCUBA_LUA_EXECUTABLE': ''},
+                            {'SCUBA_LUA_EXECUTABLE': 'SCUBA_LUA_EXECUTABLE-NOTFOUND'},
+                            {'SCUBA_LUA_EXECUTABLE': str(root / 'missing.exe')}):
                 with self.subTest(changes=changes):
                     self.assertNotEqual(run(changes), 0)
             self.assertNotEqual(run(compiler='Clang'), 0)

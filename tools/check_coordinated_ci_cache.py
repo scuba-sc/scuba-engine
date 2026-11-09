@@ -22,12 +22,16 @@ def check(build, platform):
         'SCUBA_CORE_LIFECYCLE_SOURCE_COMMIT': os.environ['CORE_COMMIT'],
         'SCUBA_CORE_LIFECYCLE_CANDIDATE': 'ON', 'SCUBA_ALLOW_UNCHECKED_DEV_REHEARSAL': 'OFF',
         'SCUBA_SDK_CHECKED_LIFECYCLE': '1',
+        'SCUBA_REQUIRE_GENERATED_LUA': 'ON',
     }
     for key, value in expected.items():
         if cache.get(key) != value:
             raise SystemExit(f'{key}: expected {value!r}, got {cache.get(key)!r}')
     if Path(cache.get('SCUBA_SDK_ARCHIVE_DIR', '')).resolve() != Path(os.environ['SCUBA_DEV_SDK_ARCHIVE_DIR']).resolve():
         raise SystemExit('configured archive directory differs from verified artifact directory')
+    lua = cache.get('SCUBA_LUA_EXECUTABLE', '')
+    if not lua or lua.endswith('-NOTFOUND') or not Path(lua).is_file():
+        raise SystemExit('generated Lua coverage requires an existing interpreter')
     compiler_files = list((build / 'CMakeFiles').glob('*/CMakeCXXCompiler.cmake'))
     if len(compiler_files) != 1:
         raise SystemExit('expected exactly one CMake C++ compiler identity file')
