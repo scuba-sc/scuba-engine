@@ -34,6 +34,8 @@ The distinct `Coordinated development candidate` workflow packages and verifies 
 
 This is a host-source engine lane. It does not consume the separately packaged development plugin SDK or run the standalone plugin-archive consumer. That existing optional consumer is hard-coded to the published 2.4.0 archive and must not be pointed at a development archive as if it covered this candidate. Linux installs Lua 5.4 for the generated-plugin Lua checks. Windows builds its test-only Lua 5.4.8 CLI with MSVC from `https://www.lua.org/ftp/lua-5.4.8.tar.gz`, checking the upstream SHA-256 `4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae` before reading source members. This does not replace Core's embedded Lua or change the frozen plugin C ABI.
 
+The Windows download retries transient transport failures, including an unexpected TLS EOF, up to three attempts. Certificate verification and source digest failures remain fatal; a sustained upstream outage can still fail the job.
+
 Both CI platforms enable `SCUBA_REQUIRE_GENERATED_LUA`, verify the interpreter version by executing it, and require the generated-plugin CTest's `--require-lua` argument. Missing interpreters and failed Lua checks fail the lane rather than reporting native-only success. Local/historical profiles keep their optional Lua behavior unless this option is enabled. Windows coverage is established only after the exact-head Windows job executes the generated Lua checker and embedded-builder harness successfully; a prepared workflow or a Linux run is not Windows runtime evidence. Native game startup remains disabled and no game execution is claimed.
 
 ### Separate unpublished public plugin archive proof
