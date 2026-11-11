@@ -4,6 +4,7 @@ import hashlib
 from http.client import IncompleteRead
 from io import BytesIO
 from pathlib import Path
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -23,13 +24,15 @@ def download_source():
         try:
             with urlopen(URL, timeout=60) as response:
                 return response.read()
-        except (HTTPError, URLError, TimeoutError, ConnectionError, IncompleteRead) as error:
+        except (HTTPError, URLError, TimeoutError, ConnectionError, IncompleteRead,
+                ssl.SSLEOFError) as error:
             if isinstance(error, HTTPError):
                 transient = error.code in (408, 429, 500, 502, 503, 504)
                 error.close()
             else:
                 reason = error.reason if isinstance(error, URLError) else error
-                transient = isinstance(reason, (TimeoutError, ConnectionError, IncompleteRead))
+                transient = isinstance(reason, (TimeoutError, ConnectionError, IncompleteRead,
+                                                ssl.SSLEOFError))
             if not transient or attempt == 2:
                 raise
             delay = 2 ** (attempt + 1)

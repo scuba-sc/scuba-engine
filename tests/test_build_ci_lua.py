@@ -29,6 +29,8 @@ class LuaBootstrap(unittest.TestCase):
         http_body = BytesIO(b'service unavailable')
         failures = [lua.HTTPError(lua.URL, 503, 'Unavailable', {}, http_body),
                     lua.URLError(TimeoutError('WinError 10060')),
+                    lua.URLError(ssl.SSLEOFError('unexpected EOF')),
+                    ssl.SSLEOFError('unexpected EOF'),
                     TimeoutError('read timed out'), ConnectionResetError('reset'),
                     lua.IncompleteRead(b'partial', 10)]
         for failure in failures:
@@ -44,20 +46,25 @@ class LuaBootstrap(unittest.TestCase):
                     self.assertTrue(http_body.closed)
 
     def test_download_retries_are_bounded(self):
-        failure = lua.URLError(TimeoutError('connect timed out'))
-        with patch.object(lua, 'urlopen', side_effect=failure) as download, \
-             patch.object(lua.time, 'sleep') as sleep:
-            with self.assertRaises(lua.URLError) as caught:
-                lua.download_source()
-            self.assertIs(caught.exception, failure)
-            self.assertEqual(download.call_args_list, [call(lua.URL, timeout=60)] * 3)
-            self.assertEqual(sleep.call_args_list, [call(2), call(4)])
+        failures = [lua.URLError(TimeoutError('connect timed out')),
+                    lua.URLError(ssl.SSLEOFError('unexpected EOF')),
+                    ssl.SSLEOFError('unexpected EOF')]
+        for failure in failures:
+            with self.subTest(failure=failure):
+                with patch.object(lua, 'urlopen', side_effect=failure) as download, \
+                     patch.object(lua.time, 'sleep') as sleep:
+                    with self.assertRaises(type(failure)) as caught:
+                        lua.download_source()
+                    self.assertIs(caught.exception, failure)
+                    self.assertEqual(download.call_args_list, [call(lua.URL, timeout=60)] * 3)
+                    self.assertEqual(sleep.call_args_list, [call(2), call(4)])
 
     def test_permanent_download_errors_are_not_retried(self):
         http_bodies = {404: BytesIO(b'not found'), 403: BytesIO(b'forbidden')}
         failures = [lua.HTTPError(lua.URL, 404, 'Not Found', {}, http_bodies[404]),
                     lua.HTTPError(lua.URL, 403, 'Forbidden', {}, http_bodies[403]),
                     lua.URLError(ssl.SSLCertVerificationError('bad certificate')),
+                    ssl.SSLCertVerificationError('bad certificate'),
                     lua.URLError('unknown failure'), ValueError('bad URL')]
         for failure in failures:
             with self.subTest(failure=failure):
@@ -72,15 +79,17 @@ class LuaBootstrap(unittest.TestCase):
                     self.assertTrue(http_bodies[failure.code].closed)
 
     def test_read_failure_restarts_download(self):
-        first, second = MagicMock(), MagicMock()
-        first.__enter__.return_value.read.side_effect = TimeoutError('read timed out')
-        second.__enter__.return_value.read.return_value = b'complete'
-        with patch.object(lua, 'urlopen', side_effect=[first, second]) as download, \
-             patch.object(lua.time, 'sleep'):
-            self.assertEqual(lua.download_source(), b'complete')
-            self.assertEqual(download.call_count, 2)
-            first.__exit__.assert_called_once()
-            second.__exit__.assert_called_once()
+        for error in (TimeoutError('read timed out'), ssl.SSLEOFError('unexpected EOF')):
+            with self.subTest(error=error):
+                first, second = MagicMock(), MagicMock()
+                first.__enter__.return_value.read.side_effect = error
+                second.__enter__.return_value.read.return_value = b'complete'
+                with patch.object(lua, 'urlopen', side_effect=[first, second]) as download, \
+                     patch.object(lua.time, 'sleep'):
+                    self.assertEqual(lua.download_source(), b'complete')
+                    self.assertEqual(download.call_count, 2)
+                    first.__exit__.assert_called_once()
+                    second.__exit__.assert_called_once()
 
     def test_bad_download_digest_is_not_retried_or_compiled(self):
         with tempfile.TemporaryDirectory() as tmp:
