@@ -136,7 +136,20 @@ class HarnessTests(unittest.TestCase):
         result, receipt = self.run_harness('--test-binary', str(binary))
         self.assertEqual(result.returncode, 2)
         self.assertEqual(len(receipt['runs']), 2)
-        self.assertEqual(receipt['inputs']['candidate']['test_binary']['path'], str(binary))
+        self.assertEqual(receipt['inputs']['candidate']['test_binary']['path'], str(binary.resolve()))
+        self.assertEqual(receipt['inputs']['baseline']['test_binary']['sha256'],
+                         receipt['inputs']['candidate']['test_binary']['sha256'])
+
+    def test_explicit_binary_through_directory_alias(self):
+        alias = self.root / 'alias'
+        alias.symlink_to(self.base, target_is_directory=True)
+        binary = alias / 'tests/test_net_sim'
+        self.assertNotEqual(binary, binary.resolve())
+        result, receipt = self.run_harness('--test-binary', str(binary))
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(len(receipt['runs']), 2)
+        for name in ('baseline', 'candidate'):
+            self.assertEqual(receipt['inputs'][name]['test_binary']['path'], str(binary.resolve()))
         self.assertEqual(receipt['inputs']['baseline']['test_binary']['sha256'],
                          receipt['inputs']['candidate']['test_binary']['sha256'])
 
