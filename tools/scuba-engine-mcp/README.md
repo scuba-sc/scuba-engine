@@ -8,6 +8,8 @@ Start an existing `scuba-hostd` on loopback with the plugins you trust, then run
 node tools/scuba-engine-mcp/server.mjs --host ws://127.0.0.1:7878/ws
 ```
 
+The entrypoint also works when its file or a parent directory is reached through a symlink.
+
 Initialize, send `notifications/initialized`, then use `tools/list` and
 `tools/call`. The tools are `host_status`, `invoke_command`, `get_widget_panel`,
 `send_widget_event`, `mock_move_camera`, `mock_set_service`, `mock_get_state`,
@@ -30,6 +32,7 @@ does not own or terminate hostd. Stdout contains only MCP responses.
 
 ```sh
 bun test tools/scuba-engine-mcp
+node --test tests/studio_mcp_entrypoint.test.mjs
 node tools/scuba-engine-mcp/integration.mjs /path/to/scuba-hostd /path/to/plugin-root
 ```
 

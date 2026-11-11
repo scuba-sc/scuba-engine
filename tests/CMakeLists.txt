@@ -451,6 +451,9 @@ add_test(NAME netsim_unclean_shutdown_is_terminal
 set_tests_properties(netsim_unclean_shutdown_is_terminal PROPERTIES TIMEOUT 30)
 
 find_program(SCUBA_NODE_EXECUTABLE node REQUIRED)
+add_test(NAME studio_mcp_entrypoint COMMAND "${SCUBA_NODE_EXECUTABLE}" --test
+  "${CMAKE_CURRENT_SOURCE_DIR}/studio_mcp_entrypoint.test.mjs")
+set_tests_properties(studio_mcp_entrypoint PROPERTIES TIMEOUT 60)
 add_test(NAME studio_mcp_integration COMMAND "${SCUBA_NODE_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../tools/scuba-engine-mcp/integration.mjs"
   "$<TARGET_FILE:scuba-hostd>" "${CMAKE_BINARY_DIR}/plugins/runtime")
