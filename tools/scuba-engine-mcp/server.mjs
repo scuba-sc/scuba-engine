@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const PROTOCOL = '2025-11-25';
 const MAX_FRAME = 64 * 1024;
@@ -256,7 +257,17 @@ export async function stdio(bridge, input = process.stdin, output = process.stdo
   } finally { bridge.close(); }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isEntrypoint() {
+  if (!process.argv[1]) return false;
+  if (import.meta.url === pathToFileURL(process.argv[1]).href) return true;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+if (isEntrypoint()) {
   try {
     if (process.argv.length !== 4 || process.argv[2] !== '--host')
       throw new RpcError(-32602, 'usage: node server.mjs --host ws://127.0.0.1:<port>/ws');
