@@ -26,7 +26,8 @@ def fixture():
 
 class LuaBootstrap(unittest.TestCase):
     def test_transient_download_recovery(self):
-        failures = [lua.HTTPError(lua.URL, 503, 'Unavailable', {}, None),
+        http_body = BytesIO(b'service unavailable')
+        failures = [lua.HTTPError(lua.URL, 503, 'Unavailable', {}, http_body),
                     lua.URLError(TimeoutError('WinError 10060')),
                     TimeoutError('read timed out'), ConnectionResetError('reset'),
                     lua.IncompleteRead(b'partial', 10)]
@@ -39,6 +40,8 @@ class LuaBootstrap(unittest.TestCase):
                     self.assertEqual(lua.download_source(), b'verified later')
                     self.assertEqual(download.call_args_list, [call(lua.URL, timeout=60)] * 2)
                     sleep.assert_called_once_with(2)
+                if isinstance(failure, lua.HTTPError):
+                    self.assertTrue(http_body.closed)
 
     def test_download_retries_are_bounded(self):
         failure = lua.URLError(TimeoutError('connect timed out'))
@@ -51,8 +54,9 @@ class LuaBootstrap(unittest.TestCase):
             self.assertEqual(sleep.call_args_list, [call(2), call(4)])
 
     def test_permanent_download_errors_are_not_retried(self):
-        failures = [lua.HTTPError(lua.URL, 404, 'Not Found', {}, None),
-                    lua.HTTPError(lua.URL, 403, 'Forbidden', {}, None),
+        http_bodies = {404: BytesIO(b'not found'), 403: BytesIO(b'forbidden')}
+        failures = [lua.HTTPError(lua.URL, 404, 'Not Found', {}, http_bodies[404]),
+                    lua.HTTPError(lua.URL, 403, 'Forbidden', {}, http_bodies[403]),
                     lua.URLError(ssl.SSLCertVerificationError('bad certificate')),
                     lua.URLError('unknown failure'), ValueError('bad URL')]
         for failure in failures:
@@ -64,6 +68,8 @@ class LuaBootstrap(unittest.TestCase):
                     self.assertIs(caught.exception, failure)
                     download.assert_called_once_with(lua.URL, timeout=60)
                     sleep.assert_not_called()
+                if isinstance(failure, lua.HTTPError):
+                    self.assertTrue(http_bodies[failure.code].closed)
 
     def test_read_failure_restarts_download(self):
         first, second = MagicMock(), MagicMock()
